@@ -15,10 +15,10 @@ const user = {
 };
 
 const quickActions = [
-  { title: 'Find Pharmacies', icon: 'map-marker', color: '#eafaf1', route: 'pharmacies' },
-  { title: 'Order Medicine', icon: 'shopping-cart', color: '#f9f6f2', route: 'orders' },
-  { title: 'Track Delivery', icon: 'truck', color: '#f0f4f8', route: 'orders' },
-  { title: 'Chat', icon: 'comments', color: '#f5f6fa', route: 'chat' },
+  { title: 'Find Pharmacies', icon: 'map-marker', color: '#eafaf1', route: '/(tabs)/pharmacies' },
+  { title: 'Order Medicine', icon: 'shopping-cart', color: '#f9f6f2', route: '/(tabs)/orders' },
+  { title: 'Track Delivery', icon: 'truck', color: '#f0f4f8', route: '/(tabs)/orders' },
+  { title: 'Chat', icon: 'comments', color: '#f5f6fa', route: '/(tabs)/chat' },
 ];
 
 const featuredPharmacies = [
@@ -177,22 +177,36 @@ export default function HomeScreen(props: any) {
         {/* Quick Actions Carousel */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickActionsCarousel}>
           {quickActions.map((action, idx) => (
-            <TouchableOpacity
+            <Animated.View
               key={action.title}
-              style={[styles.quickActionCard, activeAction === idx && styles.quickActionActive, { backgroundColor: action.color }]}
-              onPress={() => {
-                if (props.navigation && props.navigation.navigate) {
-                  props.navigation.navigate(action.route);
+              style={[
+                styles.quickActionCard,
+                activeAction === idx && styles.quickActionActive,
+                { backgroundColor: action.color },
+                {
+                  transform: [{ scale: activeAction === idx ? 1.05 : 1 }],
+                  shadowColor: activeAction === idx ? '#8B5CF6' : '#000',
+                  shadowOffset: { width: 0, height: activeAction === idx ? 8 : 6 },
+                  shadowOpacity: activeAction === idx ? 0.25 : 0.13,
+                  shadowRadius: activeAction === idx ? 20 : 16,
+                  elevation: activeAction === idx ? 12 : 8,
                 }
-                setActiveAction(idx);
-              }}
-              activeOpacity={0.85}
+              ]}
             >
-              <View style={[styles.quickActionIconBg, activeAction === idx && { backgroundColor: '#8B5CF6' }] }>
-                <FontAwesome name={action.icon as FontAwesomeIconName} size={28} color={activeAction === idx ? '#fff' : '#8B5CF6'} />
-              </View>
-              <Text style={styles.quickActionText}>{action.title}</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => {
+                  router.push(action.route as "/(tabs)/pharmacies" | "/(tabs)/orders" | "/(tabs)/chat" | "/(tabs)/profile" | "/(tabs)");
+                  setActiveAction(idx);
+                }}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.quickActionIconBg, activeAction === idx && { backgroundColor: '#8B5CF6' }] }>
+                  <FontAwesome name={action.icon as FontAwesomeIconName} size={28} color={activeAction === idx ? '#fff' : '#8B5CF6'} />
+                </View>
+                <Text style={styles.quickActionText}>{action.title}</Text>
+              </TouchableOpacity>
+            </Animated.View>
           ))}
         </ScrollView>
         {/* Map Preview (segmented control) */}
@@ -499,16 +513,8 @@ const styles = StyleSheet.create({
     marginRight: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.13,
-    shadowRadius: 16,
-    elevation: 8,
-    borderWidth: 2,
-    borderColor: 'transparent',
   },
   quickActionActive: {
-    borderColor: '#8B5CF6',
     backgroundColor: '#fff',
   },
   quickActionIconBg: {
@@ -621,7 +627,7 @@ const styles = StyleSheet.create({
   },
   pharmacyCard: {
     width: 170,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.85)',
     marginRight: 18,
     padding: 16,
     borderRadius: 18,
@@ -738,9 +744,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     shadowColor: '#e53935',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.18,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 6,
   },
   emergencyIcon: {
     marginRight: 18,
@@ -755,5 +761,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     opacity: 0.9,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginHorizontal: 10,
+    marginBottom: 18,
+    backgroundColor: 'transparent',
   },
 });
