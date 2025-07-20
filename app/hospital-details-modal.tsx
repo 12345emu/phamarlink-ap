@@ -1,57 +1,97 @@
 import React, { useRef, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated } from 'react-native';
-import { Text, View } from '@/components/Themed';
+import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated, View, Text } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import MapView, { Marker } from 'react-native-maps';
 
 const { width } = Dimensions.get('window');
 
-const ACCENT = '#8B5CF6';
+const ACCENT = '#3498db';
 const GLASS_BG = 'rgba(255,255,255,0.85)';
-const DARK = '#18181B';
-const SHADOW = '#8B5CF6';
+const DARK = '#333333';
+const SHADOW = '#3498db';
 
 export default function HospitalDetailsScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
 
   const hospital = {
-    name: params.hospitalName as string || 'Hospital',
+    name: params.hospitalName as string || 'Holy Family Hospital',
     image: params.hospitalImage as string || 'https://images.unsplash.com/photo-1504439468489-c8920d796a29?auto=format&fit=crop&w=400&q=80',
     rating: parseFloat(params.hospitalRating as string) || 4.5,
-    distance: params.hospitalDistance as string || '0.5 km',
-    address: params.hospitalAddress as string || '123 Main St, Montreal',
+    distance: params.hospitalDistance as string || '2,1 km',
+    address: params.hospitalAddress as string || '123 Main St, Accra',
     isOpen: params.hospitalOpen === 'true',
+    phone: '+233-555-0123',
+    email: 'info@holyfamilyhospital.com',
   };
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.12, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
+  const services = [
+    {
+      id: 1,
+      name: "Emergency Care",
+      icon: "ambulance",
+      description: "24/7 emergency medical services",
+    },
+    {
+      id: 2,
+      name: "General Medicine",
+      icon: "stethoscope",
+      description: "Primary care and consultations",
+    },
+    {
+      id: 3,
+      name: "Surgery",
+      icon: "scissors",
+      description: "Surgical procedures and operations",
+    },
+    {
+      id: 4,
+      name: "Pediatrics",
+      icon: "child",
+      description: "Specialized care for children",
+    },
+    {
+      id: 5,
+      name: "Cardiology",
+      icon: "heartbeat",
+      description: "Heart and cardiovascular care",
+    },
+    {
+      id: 6,
+      name: "Radiology",
+      icon: "image",
+      description: "X-ray and imaging services",
+    },
+  ];
 
-  const renderStars = (rating: number) => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <FontAwesome
-          key={i}
-          name={i <= rating ? 'star' : 'star-o'}
-          size={16}
-          color={i <= rating ? '#FFD700' : '#ccc'}
-        />
-      );
-    }
-    return stars;
-  };
+  const doctors = [
+    {
+      id: 1,
+      name: "Dr. Kwame Asante",
+      specialty: "General Medicine",
+      avatar: "https://randomuser.me/api/portraits/men/32.jpg",
+      available: true,
+    },
+    {
+      id: 2,
+      name: "Dr. Sarah Mensah",
+      specialty: "Pediatrics",
+      avatar: "https://randomuser.me/api/portraits/women/44.jpg",
+      available: true,
+    },
+    {
+      id: 3,
+      name: "Dr. Michael Osei",
+      specialty: "Cardiology",
+      avatar: "https://randomuser.me/api/portraits/men/67.jpg",
+      available: false,
+    },
+  ];
 
   const handleCall = () => {
-    Alert.alert('Call Hospital', `Would call ${hospital.name}`);
+    Alert.alert('Call Hospital', `Would call ${hospital.name} at ${hospital.phone}`);
   };
 
   const handleDirections = () => {
@@ -62,82 +102,150 @@ export default function HospitalDetailsScreen() {
     Alert.alert('Emergency', 'Call 911 for medical emergencies');
   };
 
+  const handleChatWithDoctor = (doctor: any) => {
+    if (doctor.available) {
+      router.push('/(tabs)/chat');
+    } else {
+      Alert.alert('Doctor Unavailable', `${doctor.name} is currently not available for chat.`);
+    }
+  };
+
+  const handleBookAppointment = () => {
+    Alert.alert('Book Appointment', 'Would open appointment booking system');
+  };
+
+  const handleEmail = () => {
+    Alert.alert('Email Hospital', `Would send email to ${hospital.email}`);
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header Image */}
+        {/* Header with Logo and Name */}
         <View style={styles.headerContainer}>
-          <Image source={{ uri: hospital.image }} style={styles.headerImage} />
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <FontAwesome name="arrow-left" size={20} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.headerOverlay}>
-            <View style={styles.headerContent}>
-              <Text style={styles.hospitalName}>{hospital.name}</Text>
-              <View style={styles.ratingContainer}>
-                {renderStars(hospital.rating)}
-                <Text style={styles.ratingText}>({hospital.rating})</Text>
-              </View>
-            </View>
+          <View style={styles.logoContainer}>
+            <FontAwesome name="hospital-o" size={40} color="#fff" />
+          </View>
+          <Text style={styles.hospitalName}>{hospital.name}</Text>
+          <View style={styles.locationInfo}>
+            <FontAwesome name="map-marker" size={14} color="#e74c3c" />
+            <Text style={styles.locationText}>Hospital • {hospital.distance}</Text>
           </View>
         </View>
 
-        {/* Info Card */}
-        <View style={styles.infoCardGlass}>
-          <View style={styles.infoRow}>
-            <Animated.View style={[styles.openBadge, { transform: [{ scale: pulseAnim }] }]}> 
-              <LinearGradient colors={[ACCENT, '#6D28D9']} style={styles.openBadgeGradient}>
-                <FontAwesome name="circle" size={12} color={hospital.isOpen ? '#fff' : '#f44336'} style={{ marginRight: 6 }} />
-                <Text style={[styles.openBadgeText, { color: '#fff' }]}>{hospital.isOpen ? 'Open Now' : 'Closed'}</Text>
-              </LinearGradient>
-            </Animated.View>
-            <Text style={styles.distanceText}>{hospital.distance}</Text>
+        {/* Map Section */}
+        <View style={styles.mapSection}>
+          <MapView
+            style={styles.map}
+            initialRegion={{
+              latitude: 5.5600,
+              longitude: -0.2057,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }}
+            scrollEnabled={false}
+            zoomEnabled={false}
+            rotateEnabled={false}
+            pitchEnabled={false}
+            mapType="standard"
+            userInterfaceStyle="light"
+          >
+            <Marker
+              coordinate={{
+                latitude: 5.5600,
+                longitude: -0.2057,
+              }}
+              title={hospital.name}
+              description="Hospital"
+              pinColor="#e74c3c"
+            />
+          </MapView>
+          <View style={styles.mapOverlay}>
+            <TouchableOpacity 
+              style={styles.directionsButton}
+              onPress={handleDirections}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.directionsButtonText}>Get Directions</Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.addressText}>{hospital.address}</Text>
         </View>
 
         {/* Quick Actions */}
-        <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.actionButton} onPress={handleCall}>
-            <FontAwesome name="phone" size={20} color="#8B5CF6" />
-            <Text style={styles.actionText}>Call</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.actionButton} onPress={handleDirections}>
-            <FontAwesome name="map-marker" size={20} color="#2196F3" />
-            <Text style={styles.actionText}>Directions</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.actionButton} onPress={handleEmergency}>
-            <FontAwesome name="ambulance" size={20} color="#f44336" />
-            <Text style={styles.actionText}>Emergency</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Operating Hours */}
-        <View style={styles.sectionGlass}>
-          <Text style={styles.sectionHeader}>Operating Hours</Text>
-          <View style={styles.hoursContainer}>
-            <View style={styles.hourRow}><Text style={styles.hourDay}>Monday - Friday</Text><Text style={styles.hourTime}>24 Hours</Text></View>
-            <View style={styles.hourRow}><Text style={styles.hourDay}>Saturday</Text><Text style={styles.hourTime}>24 Hours</Text></View>
-            <View style={styles.hourRow}><Text style={styles.hourDay}>Sunday</Text><Text style={styles.hourTime}>24 Hours</Text></View>
+        <View style={styles.quickActionsSection}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.quickActionsGrid}>
+            <TouchableOpacity style={styles.quickActionCard} onPress={handleCall}>
+              <View style={styles.quickActionIcon}>
+                <FontAwesome name="phone" size={24} color={ACCENT} />
+              </View>
+              <Text style={styles.quickActionText}>Call Hospital</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickActionCard} onPress={handleEmail}>
+              <View style={styles.quickActionIcon}>
+                <FontAwesome name="envelope" size={24} color={ACCENT} />
+              </View>
+              <Text style={styles.quickActionText}>Send Email</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickActionCard} onPress={handleBookAppointment}>
+              <View style={styles.quickActionIcon}>
+                <FontAwesome name="calendar" size={24} color={ACCENT} />
+              </View>
+              <Text style={styles.quickActionText}>Book Appointment</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickActionCard} onPress={handleEmergency}>
+              <View style={styles.quickActionIcon}>
+                <FontAwesome name="ambulance" size={24} color="#e74c3c" />
+              </View>
+              <Text style={styles.quickActionText}>Emergency</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Services */}
-        <View style={styles.sectionGlass}>
-          <Text style={styles.sectionHeader}>Services</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-            <View style={styles.servicesRow}>
-              <View style={styles.serviceCard}><FontAwesome name="heartbeat" size={22} color={ACCENT} /><Text style={styles.serviceCardText}>Emergency Care</Text></View>
-              <View style={styles.serviceCard}><FontAwesome name="stethoscope" size={22} color={ACCENT} /><Text style={styles.serviceCardText}>General Medicine</Text></View>
-              <View style={styles.serviceCard}><FontAwesome name="wheelchair" size={22} color={ACCENT} /><Text style={styles.serviceCardText}>Accessibility</Text></View>
-              <View style={styles.serviceCard}><FontAwesome name="credit-card" size={22} color={ACCENT} /><Text style={styles.serviceCardText}>Insurance Accepted</Text></View>
-            </View>
-          </ScrollView>
+        {/* Services Section */}
+        <View style={styles.servicesSection}>
+          <Text style={styles.sectionTitle}>Our Services</Text>
+          <View style={styles.servicesList}>
+            {services.map((service) => (
+              <View key={service.id} style={styles.serviceItem}>
+                <View style={styles.serviceIcon}>
+                  <FontAwesome name={service.icon as any} size={20} color={ACCENT} />
+                </View>
+                <View style={styles.serviceInfo}>
+                  <Text style={styles.serviceName}>{service.name}</Text>
+                  <Text style={styles.serviceDescription}>{service.description}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* Chat with Doctors Section */}
+        <View style={styles.doctorsSection}>
+          <Text style={styles.sectionTitle}>Chat with Doctors</Text>
+          <View style={styles.doctorsList}>
+            {doctors.map((doctor) => (
+              <TouchableOpacity 
+                key={doctor.id} 
+                style={styles.doctorItem}
+                onPress={() => handleChatWithDoctor(doctor)}
+                activeOpacity={0.7}
+              >
+                <Image source={{ uri: doctor.avatar }} style={styles.doctorAvatar} />
+                <View style={styles.doctorInfo}>
+                  <Text style={styles.doctorName}>{doctor.name}</Text>
+                  <Text style={styles.doctorSpecialty}>{doctor.specialty}</Text>
+                </View>
+                <View style={styles.doctorStatus}>
+                  <View style={[styles.statusDot, { backgroundColor: doctor.available ? '#43e97b' : '#e74c3c' }]} />
+                  <Text style={styles.statusText}>{doctor.available ? 'Available' : 'Busy'}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {/* Emergency Contact Button */}
@@ -153,297 +261,236 @@ export default function HospitalDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#fff',
   },
   headerContainer: {
-    width: '100%',
-    height: 220,
-    position: 'relative',
-  },
-  headerImage: {
-    width: '100%',
-    height: '100%',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-  },
-  headerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  backButton: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 54 : 34,
-    left: 18,
-    zIndex: 10,
-  },
-  backButtonGlass: {
-    backgroundColor: GLASS_BG,
-    borderRadius: 20,
-    padding: 8,
-    shadowColor: SHADOW,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 40,
+    paddingBottom: 30,
+    backgroundColor: '#fff',
+  },
+  logoContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
   },
   hospitalName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#fff',
+    color: '#333333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  locationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginLeft: 4,
+  },
+  mapSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    height: 200,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+  },
+  map: {
     flex: 1,
   },
-  ratingContainer: {
-    flexDirection: 'row',
+  mapOverlay: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
+  },
+  directionsButton: {
+    backgroundColor: ACCENT,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
     alignItems: 'center',
   },
-  ratingText: {
+  directionsButtonText: {
     color: '#fff',
-    marginLeft: 8,
     fontSize: 16,
+    fontWeight: '600',
   },
-  infoCardGlass: {
+  quickActionsSection: {
     marginHorizontal: 20,
-    marginTop: 24,
-    marginBottom: 18,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    borderRadius: 20,
-    padding: 18,
-    shadowColor: SHADOW,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 6,
-    position: 'relative',
-    zIndex: 10,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    backgroundColor: 'transparent',
-  },
-  openBadge: {
-    borderRadius: 20,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  openBadgeGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: '#fff',
-  },
-  openBadgeText: {
-    fontWeight: 'bold',
-    fontSize: 15,
-    marginLeft: 6,
-    letterSpacing: 0.2,
-  },
-  distanceText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '600',
-  },
-  addressText: {
-    fontSize: 14,
-    color: '#888',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginHorizontal: 10,
-    marginBottom: 18,
-    backgroundColor: 'transparent',
-    position: 'relative',
-    zIndex: 10,
-  },
-  actionButton: {
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    minWidth: 80,
-  },
-  actionText: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-  },
-  section: {
-    marginHorizontal: 16,
     marginBottom: 24,
   },
-  sectionHeader: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: DARK,
-    marginBottom: 10,
-    backgroundColor: 'transparent',
+    color: '#333333',
+    marginBottom: 16,
   },
-  hoursContainer: {
-    marginTop: 4,
-    backgroundColor: 'transparent',
-  },
-  hourRow: {
+  quickActionsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    paddingVertical: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    backgroundColor: 'transparent',
   },
-  hourDay: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-  },
-  hourTime: {
-    fontSize: 14,
-    color: '#666',
-  },
-  servicesContainer: {
-    backgroundColor: '#f8f9fa',
+  quickActionCard: {
+    width: '48%',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
+    marginBottom: 12,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  quickActionIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f8f9fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  quickActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    textAlign: 'center',
+  },
+  servicesSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  servicesList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   serviceItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
   },
-  serviceText: {
+  serviceIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  serviceInfo: {
+    flex: 1,
+  },
+  serviceName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 2,
+  },
+  serviceDescription: {
     fontSize: 14,
-    color: '#333',
-    marginLeft: 12,
+    color: '#7f8c8d',
+  },
+  doctorsSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  doctorsList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  doctorItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  doctorAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+  },
+  doctorInfo: {
+    flex: 1,
+  },
+  doctorName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 2,
+  },
+  doctorSpecialty: {
+    fontSize: 14,
+    color: '#7f8c8d',
+  },
+  doctorStatus: {
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginBottom: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#7f8c8d',
   },
   emergencyButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f44336',
-    margin: 16,
-    padding: 16,
+    backgroundColor: '#e53935',
+    marginHorizontal: 20,
+    marginBottom: 24,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     borderRadius: 12,
-    shadowColor: '#f44336',
+    shadowColor: '#e53935',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 6,
   },
   emergencyButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  headerContentGlass: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 20,
-    backgroundColor: GLASS_BG,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    shadowColor: SHADOW,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  sectionGlass: {
-    marginHorizontal: 20,
-    marginBottom: 18,
-    backgroundColor: GLASS_BG,
-    borderRadius: 20,
-    padding: 18,
-    shadowColor: SHADOW,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 6,
-    position: 'relative',
-    zIndex: 10,
-  },
-  stickyBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    padding: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    shadowColor: SHADOW,
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.10,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  stickyBtn: {
-    flex: 1,
-    marginHorizontal: 8,
-  },
-  stickyBtnGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 24,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    backgroundColor: '#e53935',
-    shadowColor: '#e53935',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.13,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  stickyBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 15,
-    marginLeft: 10,
-  },
-  serviceCard: {
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    borderRadius: 16,
-    padding: 14,
-    alignItems: 'center',
-    marginRight: 14,
-    width: 120,
-    shadowColor: SHADOW,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  serviceCardText: {
-    fontSize: 14,
-    color: '#333',
-    marginTop: 8,
-    backgroundColor: 'transparent',
-  },
-  servicesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
+    fontWeight: '600',
+    marginLeft: 12,
   },
 }); 

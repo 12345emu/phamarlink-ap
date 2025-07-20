@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs } from 'expo-router';
-import { Pressable, View, StyleSheet, Animated, Platform } from 'react-native';
+import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -62,29 +62,92 @@ export default function TabLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: 'Home',
+            title: '',
             tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="home" focused={focused} />,
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
             headerRight: () => (
-              <Link href="/modal" asChild>
-                <Pressable>
-                  {({ pressed }) => (
-                    <FontAwesome
-                      name="info-circle"
-                      size={25}
-                      color={Colors[colorScheme ?? 'light'].text}
-                      style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                    />
-                  )}
-                </Pressable>
-              </Link>
+              <TouchableOpacity style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: 18, 
+                backgroundColor: '#ecf0f1', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                marginRight: 15
+              }}>
+                <FontAwesome name="bell" size={18} color="#2c3e50" />
+              </TouchableOpacity>
             ),
           }}
         />
         <Tabs.Screen
           name="pharmacies"
           options={{
-            title: 'Pharmacies',
+            title: '',
             tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="map-marker" focused={focused} />,
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <TouchableOpacity style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: 18, 
+                backgroundColor: '#ecf0f1', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                marginRight: 15
+              }}>
+                <Image 
+                  source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
+                  style={{ 
+                    width: 32, 
+                    height: 32, 
+                    borderRadius: 16 
+                  }} 
+                />
+              </TouchableOpacity>
+            ),
           }}
         />
         <Tabs.Screen
