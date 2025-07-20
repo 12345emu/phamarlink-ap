@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs } from 'expo-router';
 import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
+import CartHeaderButton from '@/components/CartHeaderButton';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -87,17 +88,26 @@ export default function TabLayout() {
               </View>
             ),
             headerRight: () => (
-              <TouchableOpacity style={{ 
-                width: 36, 
-                height: 36, 
-                borderRadius: 18, 
-                backgroundColor: '#ecf0f1', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                marginRight: 15
-              }}>
-                <FontAwesome name="bell" size={18} color="#2c3e50" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <CartHeaderButton />
+                <TouchableOpacity style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center'
+                }}>
+                  <Image 
+                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
+                    style={{ 
+                      width: 32, 
+                      height: 32, 
+                      borderRadius: 16 
+                    }} 
+                  />
+                </TouchableOpacity>
+              </View>
             ),
           }}
         />
@@ -129,46 +139,182 @@ export default function TabLayout() {
               </View>
             ),
             headerRight: () => (
-              <TouchableOpacity style={{ 
-                width: 36, 
-                height: 36, 
-                borderRadius: 18, 
-                backgroundColor: '#ecf0f1', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                marginRight: 15
-              }}>
-                <Image 
-                  source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
-                  style={{ 
-                    width: 32, 
-                    height: 32, 
-                    borderRadius: 16 
-                  }} 
-                />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <CartHeaderButton />
+                <TouchableOpacity style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center'
+                }}>
+                  <Image 
+                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
+                    style={{ 
+                      width: 32, 
+                      height: 32, 
+                      borderRadius: 16 
+                    }} 
+                  />
+                </TouchableOpacity>
+              </View>
             ),
           }}
         />
         <Tabs.Screen
           name="orders"
           options={{
-            title: 'Orders',
-            tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="shopping-cart" focused={focused} />,
+            title: '',
+            tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="list" focused={focused} />,
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <CartHeaderButton />
+                <TouchableOpacity style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center'
+                }}>
+                  <Image 
+                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
+                    style={{ 
+                      width: 32, 
+                      height: 32, 
+                      borderRadius: 16 
+                    }} 
+                  />
+                </TouchableOpacity>
+              </View>
+            ),
           }}
         />
+
         <Tabs.Screen
           name="chat"
           options={{
-            title: 'Chat',
+            title: '',
             tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="comments" focused={focused} />,
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <CartHeaderButton />
+                <TouchableOpacity style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center'
+                }}>
+                  <Image 
+                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
+                    style={{ 
+                      width: 32, 
+                      height: 32, 
+                      borderRadius: 16 
+                    }} 
+                  />
+                </TouchableOpacity>
+              </View>
+            ),
           }}
         />
+
         <Tabs.Screen
           name="profile"
           options={{
-            title: 'Profile',
+            title: '',
             tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="user" focused={focused} />,
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <CartHeaderButton />
+                <TouchableOpacity style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center'
+                }}>
+                  <Image 
+                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
+                    style={{ 
+                      width: 32, 
+                      height: 32, 
+                      borderRadius: 16 
+                    }} 
+                  />
+                </TouchableOpacity>
+              </View>
+            ),
           }}
         />
 

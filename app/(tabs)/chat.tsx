@@ -1,7 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
-import { Text, View } from '@/components/Themed';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, View, Text, StatusBar } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+
+const ACCENT = '#3498db';
+const SUCCESS = '#43e97b';
+const BACKGROUND = '#f8f9fa';
 
 interface Message {
   id: number;
@@ -29,13 +34,14 @@ export default function ChatScreen() {
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
+  const router = useRouter();
 
   const contacts: ChatContact[] = [
     {
       id: 1,
       name: "Dr. Sarah Johnson",
       role: "doctor",
-      pharmacy: "CVS Pharmacy",
+      pharmacy: "Holy Family Hospital",
       avatar: "user-md",
       lastMessage: "Your prescription is ready for pickup",
       lastMessageTime: "2:30 PM",
@@ -46,7 +52,7 @@ export default function ChatScreen() {
       id: 2,
       name: "Mike Chen",
       role: "pharmacist",
-      pharmacy: "Walgreens",
+      pharmacy: "CityMed Pharmacy",
       avatar: "user",
       lastMessage: "I can help you with dosage questions",
       lastMessageTime: "1:45 PM",
@@ -57,7 +63,7 @@ export default function ChatScreen() {
       id: 3,
       name: "Dr. Emily Rodriguez",
       role: "doctor",
-      pharmacy: "Local Pharmacy",
+      pharmacy: "East Legon Clinic",
       avatar: "user-md",
       lastMessage: "Let's schedule a consultation",
       lastMessageTime: "Yesterday",
@@ -68,7 +74,7 @@ export default function ChatScreen() {
       id: 4,
       name: "James Wilson",
       role: "pharmacist",
-      pharmacy: "Rite Aid",
+      pharmacy: "WellCare Pharmacy",
       avatar: "user",
       lastMessage: "Your order has been processed",
       lastMessageTime: "2 days ago",
@@ -156,19 +162,42 @@ export default function ChatScreen() {
     setActiveTab('chat');
   };
 
+  const handleEmergencyCall = () => {
+    Alert.alert(
+      'Emergency Call',
+      'Would you like to make an emergency call?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Call', onPress: () => Alert.alert('Calling emergency services...') }
+      ]
+    );
+  };
+
   const renderContactsTab = () => (
-    <ScrollView style={styles.contactsList}>
+    <ScrollView style={styles.contactsList} showsVerticalScrollIndicator={false}>
+      <View style={styles.searchSection}>
+        <View style={styles.searchContainer}>
+          <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search contacts..."
+            placeholderTextColor="#95a5a6"
+          />
+        </View>
+      </View>
+      
       {contacts.map(contact => (
         <TouchableOpacity
           key={contact.id}
           style={styles.contactCard}
           onPress={() => startChat(contact)}
+          activeOpacity={0.7}
         >
           <View style={styles.contactAvatar}>
             <FontAwesome 
               name={contact.avatar as any} 
               size={24} 
-              color="#4CAF50" 
+              color={contact.role === 'doctor' ? '#e74c3c' : ACCENT} 
             />
             {contact.isOnline && (
               <View style={styles.onlineIndicator} />
@@ -179,7 +208,9 @@ export default function ChatScreen() {
               <Text style={styles.contactName}>{contact.name}</Text>
               <Text style={styles.lastMessageTime}>{contact.lastMessageTime}</Text>
             </View>
-            <Text style={styles.contactRole}>{contact.role} • {contact.pharmacy}</Text>
+            <Text style={styles.contactRole}>
+              {contact.role === 'doctor' ? '👨‍⚕️' : '💊'} {contact.role} • {contact.pharmacy}
+            </Text>
             <Text style={styles.lastMessage} numberOfLines={1}>
               {contact.lastMessage}
             </Text>
@@ -198,14 +229,14 @@ export default function ChatScreen() {
     <View style={styles.chatContainer}>
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={() => setActiveTab('contacts')} style={styles.backButton}>
-          <FontAwesome name="arrow-left" size={20} color="white" />
+          <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
         </TouchableOpacity>
         <View style={styles.chatContactInfo}>
           <View style={styles.chatAvatar}>
             <FontAwesome 
               name={selectedContact?.avatar as any} 
               size={20} 
-              color="#4CAF50" 
+              color={selectedContact?.role === 'doctor' ? '#e74c3c' : ACCENT} 
             />
             {selectedContact?.isOnline && (
               <View style={styles.chatOnlineIndicator} />
@@ -214,12 +245,12 @@ export default function ChatScreen() {
           <View>
             <Text style={styles.chatContactName}>{selectedContact?.name}</Text>
             <Text style={styles.chatContactStatus}>
-              {selectedContact?.isOnline ? 'Online' : 'Offline'}
+              {selectedContact?.isOnline ? '🟢 Online' : '⚪ Offline'}
             </Text>
           </View>
         </View>
         <TouchableOpacity style={styles.moreButton}>
-          <FontAwesome name="ellipsis-v" size={20} color="white" />
+          <FontAwesome name="ellipsis-v" size={20} color="#2c3e50" />
         </TouchableOpacity>
       </View>
 
@@ -227,6 +258,7 @@ export default function ChatScreen() {
         ref={scrollViewRef}
         style={styles.messagesContainer}
         onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+        showsVerticalScrollIndicator={false}
       >
         {messages.map(message => (
           <View
@@ -265,6 +297,7 @@ export default function ChatScreen() {
           <TextInput
             style={styles.messageInput}
             placeholder="Type a message..."
+            placeholderTextColor="#95a5a6"
             value={messageText}
             onChangeText={setMessageText}
             multiline
@@ -274,6 +307,7 @@ export default function ChatScreen() {
             style={[styles.sendButton, !messageText.trim() && styles.sendButtonDisabled]}
             onPress={sendMessage}
             disabled={!messageText.trim()}
+            activeOpacity={0.8}
           >
             <FontAwesome name="send" size={16} color="white" />
           </TouchableOpacity>
@@ -284,10 +318,13 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
+      
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Chat</Text>
-        <TouchableOpacity style={styles.emergencyButton}>
-          <FontAwesome name="phone" size={20} color="white" />
+        <TouchableOpacity style={styles.emergencyButton} onPress={handleEmergencyCall}>
+          <FontAwesome name="phone" size={20} color="#e74c3c" />
         </TouchableOpacity>
       </View>
 
@@ -300,49 +337,85 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: BACKGROUND,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#4CAF50',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  emergencyButton: {
-    padding: 10,
-  },
-  contactsList: {
-    flex: 1,
-  },
-  contactCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 15,
-    marginHorizontal: 20,
-    marginTop: 10,
-    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  contactAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#f0f0f0',
+  title: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  emergencyButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(231, 76, 60, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 15,
+  },
+  contactsList: {
+    flex: 1,
+  },
+  searchSection: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecf0f1',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#34495e',
+  },
+  contactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  contactAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
     position: 'relative',
+    borderWidth: 2,
+    borderColor: 'rgba(52, 152, 219, 0.1)',
   },
   onlineIndicator: {
     position: 'absolute',
@@ -351,7 +424,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#4CAF50',
+    backgroundColor: SUCCESS,
     borderWidth: 2,
     borderColor: 'white',
   },
@@ -366,34 +439,43 @@ const styles = StyleSheet.create({
   },
   contactName: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 2,
   },
   lastMessageTime: {
     fontSize: 12,
-    color: '#666',
+    color: '#95a5a6',
+    fontWeight: '500',
   },
   contactRole: {
-    fontSize: 12,
-    color: '#4CAF50',
-    marginBottom: 5,
+    fontSize: 13,
+    color: ACCENT,
+    marginBottom: 6,
+    fontWeight: '500',
   },
   lastMessage: {
     fontSize: 14,
-    color: '#666',
+    color: '#7f8c8d',
+    lineHeight: 20,
   },
   unreadBadge: {
-    backgroundColor: '#FF5722',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    backgroundColor: '#e74c3c',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#e74c3c',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   unreadCount: {
     color: 'white',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   chatContainer: {
     flex: 1,
@@ -401,8 +483,16 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 15,
-    backgroundColor: '#4CAF50',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   backButton: {
     marginRight: 15,
@@ -413,14 +503,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   chatAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'white',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 12,
     position: 'relative',
+    borderWidth: 2,
+    borderColor: 'rgba(52, 152, 219, 0.1)',
   },
   chatOnlineIndicator: {
     position: 'absolute',
@@ -429,26 +521,28 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#4CAF50',
+    backgroundColor: SUCCESS,
     borderWidth: 2,
-    borderColor: '#4CAF50',
+    borderColor: SUCCESS,
   },
   chatContactName: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 2,
   },
   chatContactStatus: {
-    fontSize: 12,
-    color: 'white',
-    opacity: 0.8,
+    fontSize: 13,
+    color: '#7f8c8d',
+    fontWeight: '500',
   },
   moreButton: {
     marginLeft: 15,
   },
   messagesContainer: {
     flex: 1,
-    padding: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   messageContainer: {
     marginBottom: 10,
@@ -461,26 +555,42 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: '80%',
-    padding: 12,
-    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
   },
   userBubble: {
-    backgroundColor: '#4CAF50',
-    borderBottomRightRadius: 4,
+    backgroundColor: ACCENT,
+    borderBottomRightRadius: 6,
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   otherBubble: {
-    backgroundColor: '#f0f0f0',
-    borderBottomLeftRadius: 4,
+    backgroundColor: '#fff',
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
   },
   messageText: {
-    fontSize: 16,
-    marginBottom: 5,
+    fontSize: 15,
+    marginBottom: 6,
+    lineHeight: 20,
   },
   userMessageText: {
     color: 'white',
+    fontWeight: '500',
   },
   otherMessageText: {
-    color: '#333',
+    color: '#2c3e50',
+    fontWeight: '500',
   },
   messageTime: {
     fontSize: 11,
@@ -493,35 +603,50 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   inputContainer: {
-    backgroundColor: 'white',
+    backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: 'rgba(0, 0, 0, 0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   messageInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    marginRight: 10,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginRight: 12,
     maxHeight: 100,
-    fontSize: 16,
+    fontSize: 15,
+    color: '#2c3e50',
+    backgroundColor: '#f8f9fa',
   },
   sendButton: {
-    backgroundColor: '#4CAF50',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    backgroundColor: ACCENT,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   sendButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#bdc3c7',
+    shadowOpacity: 0,
+    elevation: 0,
   },
 }); 

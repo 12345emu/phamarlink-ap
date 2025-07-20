@@ -1,31 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Dimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Dimensions, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import { useCart } from '../context/CartContext';
 import { useOrders } from '../context/OrdersContext';
+import { StatusBar } from 'expo-status-bar';
 
 const { width } = Dimensions.get('window');
-const ACCENT = '#8B5CF6';
-const GLASS_BG = 'rgba(255,255,255,0.7)';
-
-const mockOrder = [
-  {
-    id: 1,
-    name: 'Paracetamol 500mg',
-    image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80',
-    price: 5.99,
-    quantity: 2,
-  },
-  {
-    id: 2,
-    name: 'Ibuprofen 400mg',
-    image: 'https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80',
-    price: 7.99,
-    quantity: 1,
-  },
-];
+const ACCENT = '#3498db';
+const SUCCESS = '#43e97b';
+const DANGER = '#e74c3c';
 
 const paymentMethods = [
   { id: 'card1', type: 'Visa', last4: '1234', icon: 'cc-visa' },
@@ -39,285 +24,451 @@ export default function CheckoutScreen() {
   const params = useLocalSearchParams();
   const { cart, clearCart } = useCart();
   const { addOrder } = useOrders();
-  const [address, setAddress] = useState('123 Main St, Apt 4B');
+  const [address, setAddress] = useState('123 Main St, Apt 4B, Accra, Ghana');
   const [selectedPayment, setSelectedPayment] = useState(paymentMethods[0].id);
   const [placingOrder, setPlacingOrder] = useState(false);
 
   const total = cart.reduce((sum, item) => sum + item.medicine.price * item.quantity, 0);
+  const deliveryFee = 5.00;
+  const tax = total * 0.05; // 5% tax
+  const grandTotal = total + deliveryFee + tax;
 
   const handlePlaceOrder = () => {
+    if (cart.length === 0) {
+      Alert.alert('Empty Cart', 'Please add items to your cart before placing an order.');
+      return;
+    }
+    
     setPlacingOrder(true);
-    addOrder({
-      items: cart,
-      address,
-      paymentMethod: selectedPayment,
-      total,
-    });
-    clearCart();
+    
+    // Simulate order processing
     setTimeout(() => {
+      addOrder({
+        items: cart,
+        address,
+        paymentMethod: selectedPayment,
+        total: grandTotal,
+      });
+      clearCart();
       setPlacingOrder(false);
-      router.replace('/(tabs)/orders');
-    }, 1800);
+      Alert.alert(
+        'Order Placed Successfully!',
+        'Your order has been placed and is being processed.',
+        [
+          {
+            text: 'View Orders',
+            onPress: () => router.replace('/(tabs)/orders'),
+          },
+                     {
+             text: 'Continue Shopping',
+             onPress: () => router.push('/(tabs)/index' as any),
+           }
+        ]
+      );
+    }, 2000);
+  };
+
+  const handleBackPress = () => {
+    if (cart.length > 0) {
+      Alert.alert(
+        'Leave Checkout?',
+        'Your cart items will be saved. Are you sure you want to leave?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Leave', onPress: () => router.back() }
+        ]
+      );
+    } else {
+      router.back();
+    }
   };
 
   return (
-    <>
-      <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#F8FAFC' }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <View style={styles.container}>
+      <StatusBar style="dark" />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           {/* Header */}
-          <View style={styles.headerRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-              <View style={styles.backBtnGlass}>
-                <FontAwesome name="arrow-left" size={22} color={ACCENT} />
-              </View>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={handleBackPress} activeOpacity={0.7}>
+              <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Checkout</Text>
-            <View style={{ width: 44 }} />
+            <View style={styles.headerRight}>
+              <FontAwesome name="shopping-cart" size={20} color={ACCENT} />
+            </View>
           </View>
 
           {/* Order Summary */}
-          <View style={styles.sectionGlass}>
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>Order Summary</Text>
-            {cart.map((item, idx) => (
-              <View key={item.medicine.id || idx} style={styles.orderItemRow}>
-                <Image source={{ uri: item.medicine.image }} style={styles.orderItemImage} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.orderItemName}>{item.medicine.name}</Text>
-                  <Text style={styles.orderItemQty}>x{item.quantity}</Text>
-                </View>
-                <Text style={styles.orderItemPrice}>${(item.medicine.price * item.quantity).toFixed(2)}</Text>
+            {cart.length === 0 ? (
+              <View style={styles.emptyCart}>
+                <FontAwesome name="shopping-cart" size={40} color="#95a5a6" />
+                <Text style={styles.emptyCartText}>Your cart is empty</Text>
+                                 <TouchableOpacity 
+                   style={styles.shopNowButton}
+                   onPress={() => router.push('/(tabs)/index' as any)}
+                   activeOpacity={0.7}
+                 >
+                  <Text style={styles.shopNowButtonText}>Shop Now</Text>
+                </TouchableOpacity>
               </View>
-            ))}
+            ) : (
+              cart.map((item, idx) => (
+                <View key={item.medicine.id || idx} style={styles.orderItem}>
+                  <Image source={{ uri: item.medicine.image }} style={styles.orderItemImage} />
+                  <View style={styles.orderItemInfo}>
+                    <Text style={styles.orderItemName}>{item.medicine.name}</Text>
+                    <Text style={styles.orderItemQuantity}>Quantity: {item.quantity}</Text>
+                  </View>
+                  <View style={styles.orderItemPrice}>
+                    <Text style={styles.priceText}>GHS {(item.medicine.price * item.quantity).toFixed(2)}</Text>
+                  </View>
+                </View>
+              ))
+            )}
           </View>
 
           {/* Delivery Address */}
-          <View style={styles.sectionGlass}>
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>Delivery Address</Text>
-            <View style={styles.inputRow}>
-              <FontAwesome name="map-marker" size={20} color={ACCENT} style={{ marginRight: 8 }} />
+            <View style={styles.addressInput}>
+              <FontAwesome name="map-marker" size={16} color={ACCENT} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 value={address}
                 onChangeText={setAddress}
                 placeholder="Enter delivery address"
-                placeholderTextColor="#aaa"
+                placeholderTextColor="#95a5a6"
+                multiline
               />
             </View>
           </View>
 
           {/* Payment Method */}
-          <View style={styles.sectionGlass}>
+          <View style={styles.section}>
             <Text style={styles.sectionTitle}>Payment Method</Text>
             {paymentMethods.map(method => (
               <TouchableOpacity
                 key={method.id}
-                style={[styles.paymentRow, selectedPayment === method.id && styles.paymentRowActive]}
+                style={[
+                  styles.paymentMethod,
+                  selectedPayment === method.id && styles.paymentMethodSelected
+                ]}
                 onPress={() => setSelectedPayment(method.id)}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
               >
-                <FontAwesome name={method.icon as any} size={28} color={ACCENT} style={{ marginRight: 14 }} />
-                <Text style={styles.paymentType}>{method.type} **** {method.last4}</Text>
-                {selectedPayment === method.id && <FontAwesome name="check-circle" size={20} color={ACCENT} style={{ marginLeft: 'auto' }} />}
+                <View style={styles.paymentMethodLeft}>
+                  <FontAwesome name={method.icon as any} size={20} color={ACCENT} />
+                  <Text style={styles.paymentMethodText}>
+                    {method.type} {method.last4 && `**** ${method.last4}`}
+                  </Text>
+                </View>
+                {selectedPayment === method.id && (
+                  <FontAwesome name="check-circle" size={20} color={SUCCESS} />
+                )}
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.addCardBtn} activeOpacity={0.8}>
-              <FontAwesome name="plus-circle" size={20} color={ACCENT} style={{ marginRight: 8 }} />
-              <Text style={styles.addCardText}>Add New Card</Text>
+            <TouchableOpacity style={styles.addPaymentButton} activeOpacity={0.7}>
+              <FontAwesome name="plus-circle" size={16} color={ACCENT} />
+              <Text style={styles.addPaymentText}>Add New Payment Method</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Total */}
-          <View style={styles.sectionGlass}>
-            <View style={styles.totalRow}>
+          {/* Order Summary */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Order Summary</Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Subtotal</Text>
+              <Text style={styles.summaryValue}>GHS {total.toFixed(2)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Delivery Fee</Text>
+              <Text style={styles.summaryValue}>GHS {deliveryFee.toFixed(2)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Tax (5%)</Text>
+              <Text style={styles.summaryValue}>GHS {tax.toFixed(2)}</Text>
+            </View>
+            <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalAmount}>${total.toFixed(2)}</Text>
+              <Text style={styles.totalAmount}>GHS {grandTotal.toFixed(2)}</Text>
             </View>
           </View>
         </ScrollView>
-        {/* Sticky Place Order Button */}
-        <View style={styles.stickyBar}>
+
+        {/* Place Order Button */}
+        <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={styles.placeOrderBtn}
-            activeOpacity={0.85}
+            style={[
+              styles.placeOrderButton,
+              cart.length === 0 && styles.placeOrderButtonDisabled
+            ]}
             onPress={handlePlaceOrder}
-            disabled={placingOrder}
+            disabled={placingOrder || cart.length === 0}
+            activeOpacity={0.8}
           >
             <LinearGradient
-              colors={[ACCENT, '#A855F7']}
-              style={styles.placeOrderBtnGradient}
+              colors={cart.length === 0 ? ['#95a5a6', '#7f8c8d'] : [ACCENT, '#2980b9']}
+              style={styles.placeOrderGradient}
             >
-              <FontAwesome name="check" size={20} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.placeOrderBtnText}>{placingOrder ? 'Placing Order...' : 'Place Order'}</Text>
+              <FontAwesome 
+                name={placingOrder ? "spinner" : "check"} 
+                size={18} 
+                color="#fff" 
+                style={placingOrder && styles.spinningIcon}
+              />
+              <Text style={styles.placeOrderText}>
+                {placingOrder ? 'Processing...' : 'Place Order'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  headerRow: {
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 48,
     paddingHorizontal: 20,
-    marginBottom: 10,
+    paddingTop: 60,
+    paddingBottom: 20,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backBtnGlass: {
-    backgroundColor: GLASS_BG,
-    borderRadius: 22,
-    padding: 8,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 4,
-  },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#222',
-    letterSpacing: 0.5,
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
   },
-  sectionGlass: {
-    backgroundColor: GLASS_BG,
+  headerRight: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  section: {
+    backgroundColor: '#fff',
     marginHorizontal: 20,
-    marginBottom: 18,
-    padding: 18,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 6,
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 16,
   },
-  orderItemRow: {
+  emptyCart: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyCartText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  shopNowButton: {
+    backgroundColor: ACCENT,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  shopNowButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  orderItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
   },
   orderItemImage: {
-    width: 48,
-    height: 48,
+    width: 50,
+    height: 50,
     borderRadius: 12,
-    backgroundColor: '#eee',
+    marginRight: 12,
+  },
+  orderItemInfo: {
+    flex: 1,
   },
   orderItemName: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#222',
-    marginBottom: 2,
+    color: '#2c3e50',
+    marginBottom: 4,
   },
-  orderItemQty: {
-    fontSize: 12,
-    color: '#888',
+  orderItemQuantity: {
+    fontSize: 14,
+    color: '#7f8c8d',
   },
   orderItemPrice: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: ACCENT,
-    marginLeft: 8,
+    alignItems: 'flex-end',
   },
-  inputRow: {
+  priceText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ACCENT,
+  },
+  addressInput: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(139,92,246,0.08)',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginTop: 6,
+    alignItems: 'flex-start',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#ecf0f1',
+  },
+  inputIcon: {
+    marginRight: 12,
+    marginTop: 2,
   },
   input: {
     flex: 1,
-    fontSize: 15,
-    color: '#222',
-    paddingVertical: 4,
+    fontSize: 16,
+    color: '#2c3e50',
+    minHeight: 40,
   },
-  paymentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(139,92,246,0.06)',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-  },
-  paymentRowActive: {
-    borderWidth: 2,
-    borderColor: ACCENT,
-    backgroundColor: 'rgba(139,92,246,0.13)',
-  },
-  paymentType: {
-    fontSize: 15,
-    color: '#333',
-    fontWeight: '600',
-  },
-  addCardBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    padding: 10,
-  },
-  addCardText: {
-    fontSize: 15,
-    color: ACCENT,
-    fontWeight: '600',
-  },
-  totalRow: {
+  paymentMethod: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#ecf0f1',
+  },
+  paymentMethodSelected: {
+    borderColor: ACCENT,
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+  },
+  paymentMethodLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  paymentMethodText: {
+    fontSize: 16,
+    color: '#2c3e50',
+    marginLeft: 12,
+    fontWeight: '500',
+  },
+  addPaymentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  addPaymentText: {
+    fontSize: 16,
+    color: ACCENT,
+    fontWeight: '500',
+    marginLeft: 8,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  summaryLabel: {
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  summaryValue: {
+    fontSize: 16,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  totalRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#ecf0f1',
+    marginTop: 8,
+    paddingTop: 16,
   },
   totalLabel: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: 'bold',
+    fontSize: 18,
+    color: '#2c3e50',
+    fontWeight: '600',
   },
   totalAmount: {
     fontSize: 20,
     color: ACCENT,
     fontWeight: 'bold',
   },
-  stickyBar: {
+  bottomBar: {
     position: 'absolute',
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: 'transparent',
-    padding: 20,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     paddingBottom: 32,
-    zIndex: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 8,
   },
-  placeOrderBtn: {
-    borderRadius: 30,
+  placeOrderButton: {
+    borderRadius: 16,
     overflow: 'hidden',
   },
-  placeOrderBtnGradient: {
+  placeOrderButtonDisabled: {
+    opacity: 0.6,
+  },
+  placeOrderGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
-    borderRadius: 30,
+    borderRadius: 16,
   },
-  placeOrderBtnText: {
+  placeOrderText: {
     color: '#fff',
-    fontSize: 17,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  spinningIcon: {
+    transform: [{ rotate: '360deg' }],
   },
 }); 
