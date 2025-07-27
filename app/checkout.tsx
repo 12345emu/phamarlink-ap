@@ -43,13 +43,13 @@ export default function CheckoutScreen() {
     
     // Simulate order processing
     setTimeout(() => {
-      addOrder({
-        items: cart,
-        address,
-        paymentMethod: selectedPayment,
+    addOrder({
+      items: cart,
+      address,
+      paymentMethod: selectedPayment,
         total: grandTotal,
-      });
-      clearCart();
+    });
+    clearCart();
       setPlacingOrder(false);
       Alert.alert(
         'Order Placed Successfully!',
@@ -117,9 +117,9 @@ export default function CheckoutScreen() {
             ) : (
               cart.map((item, idx) => (
                 <View key={item.medicine.id || idx} style={styles.orderItem}>
-                  <Image source={{ uri: item.medicine.image }} style={styles.orderItemImage} />
+                <Image source={{ uri: item.medicine.image }} style={styles.orderItemImage} />
                   <View style={styles.orderItemInfo}>
-                    <Text style={styles.orderItemName}>{item.medicine.name}</Text>
+                  <Text style={styles.orderItemName}>{item.medicine.name}</Text>
                     <Text style={styles.orderItemQuantity}>Quantity: {item.quantity}</Text>
                   </View>
                   <View style={styles.orderItemPrice}>

@@ -4,7 +4,7 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
@@ -33,7 +33,9 @@ interface Pharmacy {
 }
 
 export default function PharmaciesScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const [searchQuery, setSearchQuery] = useState(params.searchQuery as string || '');
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
   const [activeTab, setActiveTab] = useState<'pharmacies' | 'hospitals'>('pharmacies');
   const [showFilters, setShowFilters] = useState(false);
@@ -42,7 +44,6 @@ export default function PharmaciesScreen() {
   const [filterDelivery, setFilterDelivery] = useState(false);
   const [filterInsurance, setFilterInsurance] = useState(false);
   const [filterEmergency, setFilterEmergency] = useState(false);
-  const router = useRouter();
   
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([
     {
@@ -172,6 +173,12 @@ export default function PharmaciesScreen() {
   useEffect(() => {
     getCurrentLocation();
   }, []);
+
+  useEffect(() => {
+    if (params.searchQuery) {
+      setSearchQuery(params.searchQuery as string);
+    }
+  }, [params.searchQuery]);
 
   const getCurrentLocation = async () => {
     try {
@@ -421,11 +428,18 @@ export default function PharmaciesScreen() {
       </View>
 
       {/* Items List */}
-      <ScrollView style={styles.itemsList} showsVerticalScrollIndicator={false}>
-        {filteredItems.map((item) => (
+      <ScrollView 
+        style={styles.itemsList} 
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {filteredItems.map((item, index) => (
           <TouchableOpacity 
             key={item.id} 
-            style={styles.itemCard}
+            style={[
+              styles.itemCard,
+              index === filteredItems.length - 1 && { marginBottom: 100 }
+            ]}
             onPress={() => navigateToDetails(item)}
             activeOpacity={0.7}
           >

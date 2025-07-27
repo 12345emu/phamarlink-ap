@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { View, TouchableOpacity, StyleSheet, Animated, Platform, Dimensions, PanResponder, TouchableWithoutFeedback, Text } from 'react-native';
+import React from 'react';
+import { View, TouchableOpacity, StyleSheet, Animated, Dimensions, Text } from 'react-native';
 import { BlurView } from 'expo-blur';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -8,7 +8,6 @@ import { useCart } from '../context/CartContext';
 const { width } = Dimensions.get('window');
 const TAB_HEIGHT = 80;
 const TAB_SPACING = width / 5; // Equal spacing for 5 tabs
-const AUTO_HIDE_DELAY = 3000; // 3 seconds
 
 // All tabs including Home (removed cart)
 const sideTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label: string; route: string }[] = [
@@ -21,98 +20,12 @@ const sideTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label:
 
 export default function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { cart } = useCart();
-  const [visible, setVisible] = useState(true);
-  const hideAnim = useRef(new Animated.Value(0)).current; // 0: visible, 1: hidden
-  const hideTimeout = useRef<number | null>(null);
-  const [isHandleVisible, setIsHandleVisible] = useState(false);
-
-  // PanResponder for swipe down/up
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to vertical swipes
-        return Math.abs(gestureState.dy) > 10;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 30) {
-          // Swipe down to hide
-          setVisible(false);
-          setIsHandleVisible(true);
-        }
-        if (gestureState.dy < -30 && isHandleVisible) {
-          // Swipe up to show
-          setVisible(true);
-          setIsHandleVisible(false);
-        }
-      },
-    })
-  ).current;
-
-  // Animate visibility
-  useEffect(() => {
-    Animated.timing(hideAnim, {
-      toValue: visible ? 0 : 1,
-      duration: 350,
-      useNativeDriver: true,
-    }).start();
-  }, [visible]);
-
-  // Auto-hide after inactivity
-  const resetHideTimer = () => {
-    if (hideTimeout.current) clearTimeout(hideTimeout.current);
-    setVisible(true);
-    setIsHandleVisible(false);
-    hideTimeout.current = setTimeout(() => {
-      setVisible(false);
-      setIsHandleVisible(true);
-    }, AUTO_HIDE_DELAY);
-  };
-
-  useEffect(() => {
-    resetHideTimer();
-    return () => {
-      if (hideTimeout.current) clearTimeout(hideTimeout.current);
-    };
-  }, [state.index]);
-
-  // Listen for any touch to reset timer
-  useEffect(() => {
-    const touchListener = () => resetHideTimer();
-    // Add global touch listener
-    const subscription = () => {
-      // For Expo/React Native, you may need to use a custom event or wrap the app in TouchableWithoutFeedback
-      // Here, we assume the tab bar is wrapped in TouchableWithoutFeedback
-    };
-    return () => {
-      // Clean up
-    };
-  }, []);
-
-  // Animated translateY for hide/show
-  const translateY = hideAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, TAB_HEIGHT + 80],
-  });
 
   // Map sideTabs to their actual index in state.routes
   const getTabIndex = (routeName: string) => state.routes.findIndex(r => r.name === routeName);
 
   return (
-    <>
-      {/* Handle for manual reveal */}
-      {isHandleVisible && (
-        <TouchableOpacity
-          style={styles.handleContainer}
-          onPress={() => { setVisible(true); setIsHandleVisible(false); }}
-          activeOpacity={0.7}
-        >
-          <View style={styles.handle} />
-        </TouchableOpacity>
-      )}
-      <Animated.View
-        style={[styles.wrapper, { transform: [{ translateY }] }]}
-        {...panResponder.panHandlers}
-      >
+    <View style={styles.wrapper}>
         {/* Modern Background */}
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           <View style={styles.backgroundGradient} />
@@ -161,8 +74,7 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
             </TouchableOpacity>
           );
         })}
-      </Animated.View>
-    </>
+      </View>
   );
 }
 

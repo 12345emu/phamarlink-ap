@@ -16,10 +16,10 @@ interface LocalOrder {
   total: number;
   items: Array<{
     medicine: {
-      id: number;
-      name: string;
-      price: number;
-      image: string;
+  id: number;
+  name: string;
+  price: number;
+  image: string;
     };
     quantity: number;
   }>;
@@ -175,21 +175,21 @@ export default function OrdersScreen() {
       
       {/* Search and Filter Section */}
       <View style={styles.searchSection}>
-        <View style={styles.searchContainer}>
+          <View style={styles.searchContainer}>
           <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
+            <TextInput
+              style={styles.searchInput}
             placeholder="Search orders by ID or pharmacy..."
             placeholderTextColor="#95a5a6"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+      </View>
 
         {/* Filter Options */}
         <View style={styles.filterContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.filterChip, activeFilter === 'all' && styles.activeFilterChip]}
               onPress={() => setActiveFilter('all')}
             >
@@ -207,7 +207,7 @@ export default function OrdersScreen() {
               </Text>
             </TouchableOpacity>
             
-            <TouchableOpacity 
+              <TouchableOpacity
               style={[styles.filterChip, activeFilter === 'confirmed' && styles.activeFilterChip]}
               onPress={() => setActiveFilter('confirmed')}
             >
@@ -229,7 +229,7 @@ export default function OrdersScreen() {
           {/* Sort Options */}
           <View style={styles.sortContainer}>
             <Text style={styles.sortLabel}>Sort by:</Text>
-            <TouchableOpacity 
+                      <TouchableOpacity
               style={[styles.sortButton, sortBy === 'date' && styles.activeSortButton]}
               onPress={() => setSortBy('date')}
             >
@@ -244,7 +244,7 @@ export default function OrdersScreen() {
               <Text style={[styles.sortButtonText, sortBy === 'status' && styles.activeSortButtonText]}>
                 Status
               </Text>
-            </TouchableOpacity>
+                      </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.sortButton, sortBy === 'total' && styles.activeSortButton]}
               onPress={() => setSortBy('total')}
@@ -252,13 +252,17 @@ export default function OrdersScreen() {
               <Text style={[styles.sortButtonText, sortBy === 'total' && styles.activeSortButtonText]}>
                 Total
               </Text>
-            </TouchableOpacity>
-          </View>
+              </TouchableOpacity>
+            </View>
         </View>
       </View>
 
       {/* Orders List */}
-      <ScrollView style={styles.ordersList} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.ordersList} 
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+      >
         {filteredOrders.length === 0 ? (
           <View style={styles.emptyState}>
             <FontAwesome name="shopping-bag" size={60} color="#95a5a6" />
@@ -271,7 +275,7 @@ export default function OrdersScreen() {
           </View>
         ) : (
           filteredOrders.map((order) => (
-            <View key={order.id} style={styles.orderCard}>
+          <View key={order.id} style={styles.orderCard}>
               <View style={styles.orderHeader}>
                 <View style={styles.orderInfo}>
                   <Text style={styles.orderId}>{order.id}</Text>
@@ -281,7 +285,7 @@ export default function OrdersScreen() {
                   <FontAwesome name={getStatusIcon(order.status) as any} size={12} color="#fff" />
                   <Text style={styles.statusText}>{getStatusText(order.status)}</Text>
                 </View>
-              </View>
+                  </View>
 
               <View style={styles.pharmacyInfo}>
                 <FontAwesome name="medkit" size={14} color={ACCENT} />
@@ -306,10 +310,10 @@ export default function OrdersScreen() {
                 <View style={styles.orderDetails}>
                   <Text style={styles.deliveryAddress}>{order.address}</Text>
                   {order.estimatedDelivery && (
-                    <Text style={styles.estimatedDelivery}>
+                  <Text style={styles.estimatedDelivery}>
                       Est. Delivery: {new Date(order.estimatedDelivery).toLocaleDateString()}
-                    </Text>
-                  )}
+                  </Text>
+                )}
                   {order.trackingNumber && (
                     <Text style={styles.trackingNumber}>Track: {order.trackingNumber}</Text>
                   )}
@@ -329,27 +333,27 @@ export default function OrdersScreen() {
                   >
                     <FontAwesome name="map-marker" size={14} color={ACCENT} />
                     <Text style={styles.actionButtonText}>Track</Text>
-                  </TouchableOpacity>
+              </TouchableOpacity>
                 )}
-                
-                <TouchableOpacity 
+
+        <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => handleReorder(order)}
                   activeOpacity={0.7}
-                >
+        >
                   <FontAwesome name="refresh" size={14} color={ACCENT} />
                   <Text style={styles.actionButtonText}>Reorder</Text>
-                </TouchableOpacity>
+        </TouchableOpacity>
                 
-                <TouchableOpacity 
+          <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => handleContactPharmacy(order.pharmacy)}
                   activeOpacity={0.7}
-                >
+          >
                   <FontAwesome name="phone" size={14} color={ACCENT} />
                   <Text style={styles.actionButtonText}>Contact</Text>
-                </TouchableOpacity>
-              </View>
+          </TouchableOpacity>
+        </View>
             </View>
           ))
         )}

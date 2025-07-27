@@ -174,7 +174,11 @@ export default function ChatScreen() {
   };
 
   const renderContactsTab = () => (
-    <ScrollView style={styles.contactsList} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={styles.contactsList} 
+      contentContainerStyle={{ paddingBottom: 120 }}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.searchSection}>
         <View style={styles.searchContainer}>
           <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
@@ -257,6 +261,7 @@ export default function ChatScreen() {
       <ScrollView 
         ref={scrollViewRef}
         style={styles.messagesContainer}
+        contentContainerStyle={{ paddingBottom: 120 }}
         onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
         showsVerticalScrollIndicator={false}
       >
@@ -292,6 +297,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.inputContainer}
+        keyboardVerticalOffset={150}
       >
         <View style={styles.inputWrapper}>
           <TextInput
@@ -309,7 +315,7 @@ export default function ChatScreen() {
             disabled={!messageText.trim()}
             activeOpacity={0.8}
           >
-            <FontAwesome name="send" size={16} color="white" />
+            <FontAwesome name="send" size={16} color="#2c3e50" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -320,14 +326,6 @@ export default function ChatScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
       
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Chat</Text>
-        <TouchableOpacity style={styles.emergencyButton} onPress={handleEmergencyCall}>
-          <FontAwesome name="phone" size={20} color="#e74c3c" />
-        </TouchableOpacity>
-      </View>
-
       {activeTab === 'contacts' && renderContactsTab()}
       {activeTab === 'chat' && selectedContact && renderChatTab()}
     </View>
@@ -611,6 +609,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    paddingBottom: 120, // Reduced padding since keyboard will handle spacing
+    marginBottom: 80, // Reduced margin for better keyboard handling
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -632,13 +632,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   sendButton: {
-    backgroundColor: ACCENT,
+    backgroundColor: '#43e97b', // Green color to match the app theme
     width: 44,
     height: 44,
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: ACCENT,
+    shadowColor: '#43e97b',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,

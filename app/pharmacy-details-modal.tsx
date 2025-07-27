@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Animated, View, Text, Platform, Alert } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Animated, View, Text, Platform, Alert, Linking, TextInput } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,6 +25,9 @@ export default function PharmacyDetailsScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const { addToCart } = useCart();
+  const [addedToCart, setAddedToCart] = useState<Set<number>>(new Set());
+  const [loadingItem, setLoadingItem] = useState<number | null>(null);
+  const [medicineSearch, setMedicineSearch] = useState('');
 
   const pharmacy = {
     name: params.pharmacyName as string || 'CityMed Pharmacy',
@@ -150,7 +153,27 @@ export default function PharmacyDetailsScreen() {
   ];
 
   const handleCall = () => {
-    // Add real call logic here
+    const phoneNumber = pharmacy.phone;
+    if (phoneNumber) {
+      Alert.alert(
+        'Call Pharmacy',
+        `Would you like to call ${pharmacy.name} at ${phoneNumber}?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Call',
+            onPress: () => {
+              Linking.openURL(`tel:${phoneNumber}`);
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Phone Number Unavailable', 'Phone number is not available for this pharmacy.');
+    }
   };
   
   const handleDirections = () => {
@@ -173,15 +196,25 @@ export default function PharmacyDetailsScreen() {
   };
 
   const handleAddToCart = (medicine: any) => {
-    addToCart({
-      id: medicine.id,
-      name: medicine.name,
-      price: parseFloat(medicine.price.replace('GHS ', '')),
-      description: medicine.name,
-      prescription: medicine.prescription,
-      category: 'general',
-      image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80'
-    });
+    setLoadingItem(medicine.id);
+    
+    // Simulate loading
+    setTimeout(() => {
+      addToCart({
+        id: medicine.id,
+        name: medicine.name,
+        price: parseFloat(medicine.price.replace('GHS ', '')),
+        description: medicine.name,
+        prescription: medicine.prescription,
+        category: 'general',
+        image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80'
+      });
+      
+      setAddedToCart(prev => new Set(prev).add(medicine.id));
+      setLoadingItem(null);
+      
+      Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
+    }, 500);
   };
 
   const handleChatWithPharmacist = (pharmacist: any) => {
@@ -193,11 +226,79 @@ export default function PharmacyDetailsScreen() {
   };
 
   const handleEmail = () => {
-    Alert.alert('Email Pharmacy', `Would send email to ${pharmacy.email}`);
+    const emailAddress = pharmacy.email;
+    if (emailAddress) {
+      Alert.alert(
+        'Email Pharmacy',
+        `Would you like to send an email to ${pharmacy.name} at ${emailAddress}?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Send Email',
+            onPress: () => {
+              const subject = encodeURIComponent('Inquiry from PharmaLink App');
+              const body = encodeURIComponent(`Hello ${pharmacy.name},\n\nI would like to inquire about your services.\n\nBest regards,\nPharmaLink User`);
+              Linking.openURL(`mailto:${emailAddress}?subject=${subject}&body=${body}`);
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Email Unavailable', 'Email address is not available for this pharmacy.');
+    }
   };
 
   const handleDelivery = () => {
-    Alert.alert('Delivery Service', 'Would open delivery booking system');
+    Alert.alert(
+      'Request Delivery',
+      `Would you like to request delivery service from ${pharmacy.name}?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Request Delivery',
+          onPress: () => {
+            // Log the delivery request
+            console.log(`Delivery request submitted for ${pharmacy.name}`);
+            
+            Alert.alert(
+              'Delivery Request Submitted',
+              `Your delivery request has been submitted to ${pharmacy.name}. Their team will contact you shortly to confirm your order and delivery details.`,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    // Could navigate to delivery form or order page here
+                    console.log('User acknowledged delivery request');
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  // Filter medicines based on search query
+  const getFilteredMedicineCategories = () => {
+    if (!medicineSearch.trim()) {
+      return medicineCategories;
+    }
+
+    const searchLower = medicineSearch.toLowerCase();
+    return medicineCategories.map(category => ({
+      ...category,
+      medicines: category.medicines.filter(medicine =>
+        medicine.name.toLowerCase().includes(searchLower) ||
+        category.name.toLowerCase().includes(searchLower)
+      )
+    })).filter(category => category.medicines.length > 0);
   };
 
   return (
@@ -207,12 +308,12 @@ export default function PharmacyDetailsScreen() {
         <View style={styles.headerContainer}>
           <View style={styles.logoContainer}>
             <FontAwesome name="medkit" size={40} color="#fff" />
-          </View>
-          <Text style={styles.pharmacyName}>{pharmacy.name}</Text>
+            </View>
+            <Text style={styles.pharmacyName}>{pharmacy.name}</Text>
           <View style={styles.locationInfo}>
             <FontAwesome name="map-marker" size={14} color="#e74c3c" />
             <Text style={styles.locationText}>Pharmacy • {pharmacy.distance}</Text>
-          </View>
+            </View>
           <View style={styles.pharmacyDetails}>
             <Text style={styles.pharmacyDetail}>License: {pharmacy.license}</Text>
             <Text style={styles.pharmacyDetail}>Pharmacist: {pharmacy.pharmacist}</Text>
@@ -246,15 +347,18 @@ export default function PharmacyDetailsScreen() {
               pinColor="#3498db"
             />
           </MapView>
-          <View style={styles.mapOverlay}>
-            <TouchableOpacity 
-              style={styles.directionsButton}
-              onPress={handleDirections}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.directionsButtonText}>Get Directions</Text>
-            </TouchableOpacity>
-          </View>
+        </View>
+
+        {/* Get Directions Button */}
+        <View style={styles.directionsButtonContainer}>
+          <TouchableOpacity 
+            style={styles.directionsButton}
+            onPress={handleDirections}
+            activeOpacity={0.8}
+          >
+            <FontAwesome name="map-marker" size={16} color="#fff" />
+            <Text style={styles.directionsButtonText}>Get Directions</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Quick Actions */}
@@ -306,13 +410,36 @@ export default function PharmacyDetailsScreen() {
                 </View>
               </View>
             ))}
-          </View>
+            </View>
         </View>
 
         {/* Medicine Categories */}
         <View style={styles.categoriesSection}>
           <Text style={styles.sectionTitle}>Medicine Categories</Text>
-          {medicineCategories.map((category) => (
+          
+          {/* Search Bar */}
+          <View style={styles.searchContainer}>
+            <FontAwesome name="search" size={16} color="#95a5a6" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search medicines..."
+              placeholderTextColor="#95a5a6"
+              value={medicineSearch}
+              onChangeText={setMedicineSearch}
+              returnKeyType="search"
+            />
+            {medicineSearch.length > 0 && (
+              <TouchableOpacity 
+                onPress={() => setMedicineSearch('')}
+                style={styles.clearSearchButton}
+                activeOpacity={0.7}
+              >
+                <FontAwesome name="times" size={16} color="#95a5a6" />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          {getFilteredMedicineCategories().map((category) => (
             <View key={category.id} style={styles.categoryCard}>
               <View style={styles.categoryHeader}>
                 <View style={styles.categoryIcon}>
@@ -323,8 +450,8 @@ export default function PharmacyDetailsScreen() {
               <View style={styles.medicinesList}>
                 {category.medicines.map((medicine) => (
                   <View key={medicine.id} style={styles.medicineItem}>
-                    <View style={styles.medicineInfo}>
-                      <Text style={styles.medicineName}>{medicine.name}</Text>
+                  <View style={styles.medicineInfo}>
+                    <Text style={styles.medicineName}>{medicine.name}</Text>
                       <Text style={styles.medicinePrice}>{medicine.price}</Text>
                       {medicine.prescription && (
                         <View style={styles.prescriptionBadge}>
@@ -334,11 +461,28 @@ export default function PharmacyDetailsScreen() {
                       )}
                     </View>
                     <TouchableOpacity 
-                      style={styles.addToCartButton}
+                      style={[
+                        styles.addToCartButton,
+                        addedToCart.has(medicine.id) && styles.addedToCartButton,
+                        loadingItem === medicine.id && styles.loadingButton
+                      ]}
                       onPress={() => handleAddToCart(medicine)}
                       activeOpacity={0.7}
+                      disabled={loadingItem === medicine.id}
                     >
-                      <Text style={styles.addToCartButtonText}>Add to Cart</Text>
+                      {loadingItem === medicine.id ? (
+                        <View style={styles.loadingContainer}>
+                          <FontAwesome name="spinner" size={14} color="#fff" style={styles.spinningIcon} />
+                          <Text style={styles.addToCartButtonText}>Adding...</Text>
+                        </View>
+                      ) : addedToCart.has(medicine.id) ? (
+                        <View style={styles.addedContainer}>
+                          <FontAwesome name="check" size={14} color="#fff" />
+                          <Text style={styles.addToCartButtonText}>Added</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.addToCartButtonText}>Add to Cart</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -369,8 +513,8 @@ export default function PharmacyDetailsScreen() {
                   <Text style={styles.statusText}>{pharmacist.available ? 'Available' : 'Busy'}</Text>
                 </View>
               </TouchableOpacity>
-            ))}
-          </View>
+              ))}
+            </View>
         </View>
 
         {/* Emergency Contact Button */}
@@ -455,17 +599,29 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
   },
+  directionsButtonContainer: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
   directionsButton: {
     backgroundColor: ACCENT,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
   },
   directionsButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+    marginLeft: 8,
   },
   quickActionsSection: {
     marginHorizontal: 20,
@@ -557,6 +713,35 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 24,
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333333',
+    marginLeft: 12,
+  },
+  clearSearchButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ecf0f1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
   categoryCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -640,6 +825,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
+  },
+  addedToCartButton: {
+    backgroundColor: '#43e97b',
+  },
+  loadingButton: {
+    backgroundColor: '#95a5a6',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  spinningIcon: {
+    marginRight: 6,
+    transform: [{ rotate: '360deg' }],
+  },
+  addedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   pharmacistsSection: {
     marginHorizontal: 20,

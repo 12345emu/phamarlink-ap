@@ -1,9 +1,10 @@
 import React, { useRef, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated, View, Text } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated, View, Text, Linking } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { Marker } from 'react-native-maps';
+import { useAppointments } from '../context/AppointmentsContext';
 
 const { width } = Dimensions.get('window');
 
@@ -15,6 +16,7 @@ const SHADOW = '#3498db';
 export default function HospitalDetailsScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
+  const { addAppointment } = useAppointments();
 
   const hospital = {
     name: params.hospitalName as string || 'Holy Family Hospital',
@@ -91,7 +93,27 @@ export default function HospitalDetailsScreen() {
   ];
 
   const handleCall = () => {
-    Alert.alert('Call Hospital', `Would call ${hospital.name} at ${hospital.phone}`);
+    const phoneNumber = hospital.phone;
+    if (phoneNumber) {
+      Alert.alert(
+        'Call Hospital',
+        `Would you like to call ${hospital.name} at ${phoneNumber}?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Call',
+            onPress: () => {
+              Linking.openURL(`tel:${phoneNumber}`);
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Phone Number Unavailable', 'Phone number is not available for this hospital.');
+    }
   };
 
   const handleDirections = () => {
@@ -111,11 +133,132 @@ export default function HospitalDetailsScreen() {
   };
 
   const handleBookAppointment = () => {
-    Alert.alert('Book Appointment', 'Would open appointment booking system');
+    // Show available doctors and specialties
+    Alert.alert(
+      'Book Appointment',
+      'Select a specialty to book an appointment:',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'General Medicine',
+          onPress: () => showAvailableSlots('General Medicine', 'Dr. Kwame Asante'),
+        },
+        {
+          text: 'Pediatrics',
+          onPress: () => showAvailableSlots('Pediatrics', 'Dr. Sarah Mensah'),
+        },
+        {
+          text: 'Cardiology',
+          onPress: () => showAvailableSlots('Cardiology', 'Dr. Michael Osei'),
+        },
+      ]
+    );
+  };
+
+  const showAvailableSlots = (specialty: string, doctorName: string) => {
+    const availableSlots = [
+      { time: '9:00 AM', date: 'Tomorrow', available: true },
+      { time: '10:30 AM', date: 'Tomorrow', available: true },
+      { time: '2:00 PM', date: 'Tomorrow', available: true },
+      { time: '9:00 AM', date: 'Day After Tomorrow', available: true },
+      { time: '11:00 AM', date: 'Day After Tomorrow', available: true },
+      { time: '3:30 PM', date: 'Day After Tomorrow', available: true },
+    ];
+
+    const slotOptions = availableSlots.map(slot => ({
+      text: `${slot.time} - ${slot.date}`,
+      onPress: () => confirmAppointment(specialty, doctorName, slot.time, slot.date),
+    }));
+
+    Alert.alert(
+      `Available Slots - ${specialty}`,
+      `Select a time slot with ${doctorName}:`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...slotOptions,
+      ]
+    );
+  };
+
+  const confirmAppointment = (specialty: string, doctorName: string, time: string, date: string) => {
+    Alert.alert(
+      'Confirm Appointment',
+      `Appointment Details:\n\nSpecialty: ${specialty}\nDoctor: ${doctorName}\nDate: ${date}\nTime: ${time}\n\nWould you like to confirm this appointment?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Confirm Appointment',
+          onPress: () => {
+            // Add the appointment to the context
+            addAppointment({
+              hospitalName: hospital.name,
+              doctorName,
+              specialty,
+              date,
+              time,
+              status: 'upcoming',
+              hospitalImage: hospital.image,
+            });
+            
+            // Log the confirmed appointment
+            console.log(`Appointment confirmed: ${specialty} with ${doctorName} on ${date} at ${time}`);
+            
+            Alert.alert(
+              'Appointment Confirmed!',
+              `Your appointment has been successfully booked!\n\nSpecialty: ${specialty}\nDoctor: ${doctorName}\nDate: ${date}\nTime: ${time}\n\nYou will receive a confirmation email shortly.`,
+              [
+                {
+                  text: 'View My Appointments',
+                  onPress: () => {
+                    // Navigate to appointments page
+                    console.log('User wants to view appointments');
+                    router.push('/(tabs)/appointments');
+                  },
+                },
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    console.log('User acknowledged appointment confirmation');
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
   };
 
   const handleEmail = () => {
-    Alert.alert('Email Hospital', `Would send email to ${hospital.email}`);
+    const emailAddress = hospital.email;
+    if (emailAddress) {
+      Alert.alert(
+        'Email Hospital',
+        `Would you like to send an email to ${hospital.name} at ${emailAddress}?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Send Email',
+            onPress: () => {
+              const subject = encodeURIComponent('Inquiry from PharmaLink App');
+              const body = encodeURIComponent(`Hello ${hospital.name},\n\nI would like to inquire about your services and book an appointment.\n\nBest regards,\nPharmaLink User`);
+              Linking.openURL(`mailto:${emailAddress}?subject=${subject}&body=${body}`);
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Email Unavailable', 'Email address is not available for this hospital.');
+    }
   };
 
   return (
@@ -160,15 +303,18 @@ export default function HospitalDetailsScreen() {
               pinColor="#e74c3c"
             />
           </MapView>
-          <View style={styles.mapOverlay}>
-            <TouchableOpacity 
-              style={styles.directionsButton}
-              onPress={handleDirections}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.directionsButtonText}>Get Directions</Text>
-            </TouchableOpacity>
-          </View>
+        </View>
+        
+        {/* Get Directions Button */}
+        <View style={styles.directionsButtonContainer}>
+          <TouchableOpacity 
+            style={styles.directionsButton}
+            onPress={handleDirections}
+            activeOpacity={0.8}
+          >
+            <FontAwesome name="map-marker" size={16} color="#fff" />
+            <Text style={styles.directionsButtonText}>Get Directions</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Quick Actions */}
@@ -321,17 +467,29 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
   },
+  directionsButtonContainer: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
   directionsButton: {
     backgroundColor: ACCENT,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
   },
   directionsButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+    marginLeft: 8,
   },
   quickActionsSection: {
     marginHorizontal: 20,

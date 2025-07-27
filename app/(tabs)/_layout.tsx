@@ -1,8 +1,11 @@
 import React, { useRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
+import { Link, Tabs, useRouter } from 'expo-router';
 import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
 import CartHeaderButton from '@/components/CartHeaderButton';
+import AppointmentsHeaderButton from '@/components/AppointmentsHeaderButton';
+import ProfileImage from '@/components/ProfileImage';
+import { useProfile } from '../../context/ProfileContext';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -47,6 +50,7 @@ function AnimatedTabBarIcon({ name, focused }: { name: React.ComponentProps<type
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
 
   return (
     <View style={styles.container}>
@@ -89,23 +93,21 @@ export default function TabLayout() {
             ),
             headerRight: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
                 <CartHeaderButton />
-                <TouchableOpacity style={{ 
-                  width: 36, 
-                  height: 36, 
-                  borderRadius: 18, 
-                  backgroundColor: '#ecf0f1', 
-                  alignItems: 'center', 
-                  justifyContent: 'center'
-                }}>
-                  <Image 
-                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
-                    style={{ 
-                      width: 32, 
-                      height: 32, 
-                      borderRadius: 16 
-                    }} 
-                  />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
                 </TouchableOpacity>
               </View>
             ),
@@ -140,23 +142,21 @@ export default function TabLayout() {
             ),
             headerRight: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
                 <CartHeaderButton />
-                <TouchableOpacity style={{ 
-                  width: 36, 
-                  height: 36, 
-                  borderRadius: 18, 
-                  backgroundColor: '#ecf0f1', 
-                  alignItems: 'center', 
-                  justifyContent: 'center'
-                }}>
-                  <Image 
-                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
-                    style={{ 
-                      width: 32, 
-                      height: 32, 
-                      borderRadius: 16 
-                    }} 
-                  />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
                 </TouchableOpacity>
               </View>
             ),
@@ -191,28 +191,28 @@ export default function TabLayout() {
             ),
             headerRight: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
                 <CartHeaderButton />
-                <TouchableOpacity style={{ 
-                  width: 36, 
-                  height: 36, 
-                  borderRadius: 18, 
-                  backgroundColor: '#ecf0f1', 
-                  alignItems: 'center', 
-                  justifyContent: 'center'
-                }}>
-                  <Image 
-                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
-                    style={{ 
-                      width: 32, 
-                      height: 32, 
-                      borderRadius: 16 
-                    }} 
-                  />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
                 </TouchableOpacity>
               </View>
             ),
           }}
         />
+
+
 
         <Tabs.Screen
           name="chat"
@@ -243,23 +243,71 @@ export default function TabLayout() {
             ),
             headerRight: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
                 <CartHeaderButton />
-                <TouchableOpacity style={{ 
-                  width: 36, 
-                  height: 36, 
-                  borderRadius: 18, 
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
+                </TouchableOpacity>
+              </View>
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="appointments"
+          options={{
+            title: '',
+            tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="calendar" focused={focused} />,
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
                   backgroundColor: '#ecf0f1', 
                   alignItems: 'center', 
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  marginRight: 8
                 }}>
-                  <Image 
-                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
-                    style={{ 
-                      width: 32, 
-                      height: 32, 
-                      borderRadius: 16 
-                    }} 
-                  />
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
+                <CartHeaderButton />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
                 </TouchableOpacity>
               </View>
             ),
@@ -295,23 +343,21 @@ export default function TabLayout() {
             ),
             headerRight: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
                 <CartHeaderButton />
-                <TouchableOpacity style={{ 
-                  width: 36, 
-                  height: 36, 
-                  borderRadius: 18, 
-                  backgroundColor: '#ecf0f1', 
-                  alignItems: 'center', 
-                  justifyContent: 'center'
-                }}>
-                  <Image 
-                    source={{ uri: 'https://randomuser.me/api/portraits/men/1.jpg' }} 
-                    style={{ 
-                      width: 32, 
-                      height: 32, 
-                      borderRadius: 16 
-                    }} 
-                  />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
                 </TouchableOpacity>
               </View>
             ),
