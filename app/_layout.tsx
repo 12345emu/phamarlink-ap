@@ -19,6 +19,8 @@ export default function RootLayout() {
                         <Stack.Screen name="hospital-registration" options={{ headerShown: false }} />
                         <Stack.Screen name="pharmacist-registration" options={{ headerShown: false }} />
                         <Stack.Screen name="doctor-registration" options={{ headerShown: false }} />
+                        <Stack.Screen name="hospital-map-modal" options={{ headerShown: false }} />
+                        <Stack.Screen name="pharmacy-map-modal" options={{ headerShown: false }} />
                         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
             </Stack>
           </CartProvider>

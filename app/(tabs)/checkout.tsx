@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image,
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
-import { useCart } from '../context/CartContext';
-import { useOrders } from '../context/OrdersContext';
+import { useCart } from '../../context/CartContext';
+import { useOrders } from '../../context/OrdersContext';
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
+
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -27,6 +29,7 @@ export default function CheckoutScreen() {
   const [address, setAddress] = useState('123 Main St, Apt 4B, Accra, Ghana');
   const [selectedPayment, setSelectedPayment] = useState(paymentMethods[0].id);
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
 
   const total = cart.reduce((sum, item) => sum + item.medicine.price * item.quantity, 0);
   const deliveryFee = 5.00;
@@ -83,21 +86,50 @@ export default function CheckoutScreen() {
     }
   };
 
+  const getCurrentLocation = async () => {
+    setIsGettingLocation(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to get your current location.');
+        setIsGettingLocation(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      // Get address from coordinates
+      const reverseGeocode = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (reverseGeocode.length > 0) {
+        const address = reverseGeocode[0];
+        const fullAddress = `${address.street || ''} ${address.name || ''} ${address.city || ''} ${address.region || ''} ${address.country || ''}`.trim();
+        setAddress(fullAddress);
+        Alert.alert('Location Updated', 'Your current location has been set as the delivery address!');
+      } else {
+        // Fallback to coordinates if reverse geocoding fails
+        const coordinateAddress = `${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`;
+        setAddress(coordinateAddress);
+        Alert.alert('Location Updated', 'Coordinates set successfully! Please edit the address manually if needed.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not get your current location. Please try again or enter manually.');
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={handleBackPress} activeOpacity={0.7}>
-              <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Checkout</Text>
-            <View style={styles.headerRight}>
-              <FontAwesome name="shopping-cart" size={20} color={ACCENT} />
-            </View>
-          </View>
+
 
           {/* Order Summary */}
           <View style={styles.section}>
@@ -133,6 +165,25 @@ export default function CheckoutScreen() {
           {/* Delivery Address */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Delivery Address</Text>
+            
+            {/* Use Current Location Button */}
+            <TouchableOpacity 
+              style={styles.locationButton}
+              onPress={getCurrentLocation}
+              disabled={isGettingLocation}
+              activeOpacity={0.7}
+            >
+              <FontAwesome 
+                name={isGettingLocation ? "spinner" : "location-arrow"} 
+                size={16} 
+                color="#fff" 
+                style={isGettingLocation && styles.spinningIcon}
+              />
+              <Text style={styles.locationButtonText}>
+                {isGettingLocation ? 'Getting Location...' : 'Use Current Location'}
+              </Text>
+            </TouchableOpacity>
+            
             <View style={styles.addressInput}>
               <FontAwesome name="map-marker" size={16} color={ACCENT} style={styles.inputIcon} />
               <TextInput
@@ -235,41 +286,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#2c3e50',
-  },
-  headerRight: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(52, 152, 219, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+
   section: {
     backgroundColor: '#fff',
     marginHorizontal: 20,
@@ -362,6 +379,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#2c3e50',
     minHeight: 40,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ACCENT,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  locationButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   paymentMethod: {
     flexDirection: 'row',

@@ -13,20 +13,20 @@ const SUCCESS = '#43e97b';
 const DANGER = '#e74c3c';
 const BACKGROUND = '#f8f9fa';
 
-export default function PharmacyMapModal() {
+export default function HospitalMapModal() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
   const [locationPermission, setLocationPermission] = useState(false);
 
-  const pharmacy = {
-    name: params.pharmacyName as string || 'CityMed Pharmacy',
-    address: params.pharmacyAddress as string || '456 Oak St, Accra',
-    phone: params.pharmacyPhone as string || '+233-555-0456',
-    rating: parseFloat(params.pharmacyRating as string) || 4.3,
-    distance: params.pharmacyDistance as string || '1.2 km',
-    latitude: parseFloat(params.latitude as string) || 5.5600,
-    longitude: parseFloat(params.longitude as string) || -0.2057,
+  const hospital = {
+    name: params.hospitalName as string || 'Holy Family Hospital',
+    address: params.hospitalAddress as string || '123 Main St, Accra',
+    phone: params.hospitalPhone as string || '+233-555-0123',
+    rating: parseFloat(params.hospitalRating as string) || 4.5,
+    distance: params.hospitalDistance as string || '2.1 km',
+    latitude: parseFloat(params.latitude as string) || 5.6037,
+    longitude: parseFloat(params.longitude as string) || -0.1870,
   };
 
   useEffect(() => {
@@ -47,27 +47,27 @@ export default function PharmacyMapModal() {
   const getMapRegion = () => {
     if (userLocation) {
       return {
-        latitude: (userLocation.coords.latitude + pharmacy.latitude) / 2,
-        longitude: (userLocation.coords.longitude + pharmacy.longitude) / 2,
+        latitude: (userLocation.coords.latitude + hospital.latitude) / 2,
+        longitude: (userLocation.coords.longitude + hospital.longitude) / 2,
         latitudeDelta: 0.02,
         longitudeDelta: 0.02,
       };
     }
     return {
-      latitude: pharmacy.latitude,
-      longitude: pharmacy.longitude,
+      latitude: hospital.latitude,
+      longitude: hospital.longitude,
       latitudeDelta: 0.01,
       longitudeDelta: 0.01,
     };
   };
 
   const handleGetDirections = () => {
-    const pharmacyAddress = pharmacy.address;
-    const pharmacyName = pharmacy.name;
+    const hospitalAddress = hospital.address;
+    const hospitalName = hospital.name;
     
     Alert.alert(
       'Get Directions',
-      `Would you like to open directions to ${pharmacyName}?`,
+      `Would you like to open directions to ${hospitalName}?`,
       [
         {
           text: 'Cancel',
@@ -78,7 +78,7 @@ export default function PharmacyMapModal() {
           onPress: async () => {
             try {
               // First try to open Google Maps app
-              const googleMapsUrl = `comgooglemaps://?daddr=${encodeURIComponent(pharmacyAddress)}&directionsmode=driving`;
+              const googleMapsUrl = `comgooglemaps://?daddr=${encodeURIComponent(hospitalAddress)}&directionsmode=driving`;
               const canOpenGoogleMaps = await Linking.canOpenURL(googleMapsUrl);
               
               if (canOpenGoogleMaps) {
@@ -86,7 +86,7 @@ export default function PharmacyMapModal() {
                 await Linking.openURL(googleMapsUrl);
               } else {
                 // Google Maps app not installed, open in browser
-                const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pharmacyAddress)}`;
+                const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hospitalAddress)}`;
                 await Linking.openURL(webUrl);
               }
             } catch (err) {
@@ -102,12 +102,12 @@ export default function PharmacyMapModal() {
     );
   };
 
-  const handleCallPharmacy = () => {
-    const phoneNumber = pharmacy.phone;
+  const handleCallHospital = () => {
+    const phoneNumber = hospital.phone;
     if (phoneNumber) {
       Alert.alert(
-        'Call Pharmacy',
-        `Would you like to call ${pharmacy.name} at ${phoneNumber}?`,
+        'Call Hospital',
+        `Would you like to call ${hospital.name} at ${phoneNumber}?`,
         [
           {
             text: 'Cancel',
@@ -124,18 +124,18 @@ export default function PharmacyMapModal() {
         ]
       );
     } else {
-      Alert.alert('Phone Number Unavailable', 'Phone number is not available for this pharmacy.');
+      Alert.alert('Phone Number Unavailable', 'Phone number is not available for this hospital.');
     }
   };
 
   const calculateDistance = () => {
-    if (!userLocation) return pharmacy.distance;
+    if (!userLocation) return hospital.distance;
     
     const R = 6371; // Earth's radius in kilometers
     const lat1 = userLocation.coords.latitude * Math.PI / 180;
-    const lat2 = pharmacy.latitude * Math.PI / 180;
-    const deltaLat = (pharmacy.latitude - userLocation.coords.latitude) * Math.PI / 180;
-    const deltaLon = (pharmacy.longitude - userLocation.coords.longitude) * Math.PI / 180;
+    const lat2 = hospital.latitude * Math.PI / 180;
+    const deltaLat = (hospital.latitude - userLocation.coords.latitude) * Math.PI / 180;
+    const deltaLon = (hospital.longitude - userLocation.coords.longitude) * Math.PI / 180;
 
     const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
               Math.cos(lat1) * Math.cos(lat2) *
@@ -150,7 +150,7 @@ export default function PharmacyMapModal() {
     <View style={styles.container}>
       {/* Header */}
       <LinearGradient
-        colors={[ACCENT, '#2980b9']}
+        colors={[DANGER, '#c0392b']}
         style={styles.header}
       >
         <TouchableOpacity
@@ -160,7 +160,7 @@ export default function PharmacyMapModal() {
           <FontAwesome name="arrow-left" size={20} color="white" />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>{pharmacy.name}</Text>
+          <Text style={styles.headerTitle}>{hospital.name}</Text>
           <Text style={styles.headerSubtitle}>Location & Directions</Text>
         </View>
         <View style={styles.placeholder} />
@@ -189,32 +189,32 @@ export default function PharmacyMapModal() {
             />
           )}
           
-          {/* Pharmacy Marker */}
+          {/* Hospital Marker */}
           <Marker
             coordinate={{
-              latitude: pharmacy.latitude,
-              longitude: pharmacy.longitude,
+              latitude: hospital.latitude,
+              longitude: hospital.longitude,
             }}
-            title={pharmacy.name}
-            description={`${pharmacy.address} • ${calculateDistance()}`}
-            pinColor={ACCENT}
+            title={hospital.name}
+            description={`${hospital.address} • ${calculateDistance()}`}
+            pinColor={DANGER}
           />
         </MapView>
       </View>
 
-      {/* Pharmacy Info Card */}
+      {/* Hospital Info Card */}
       <View style={styles.infoCard}>
-        <View style={styles.pharmacyInfo}>
-          <View style={styles.pharmacyHeader}>
-            <View style={styles.pharmacyIcon}>
-              <FontAwesome name="medkit" size={24} color={ACCENT} />
+        <View style={styles.hospitalInfo}>
+          <View style={styles.hospitalHeader}>
+            <View style={styles.hospitalIcon}>
+              <FontAwesome name="hospital-o" size={24} color={DANGER} />
             </View>
-            <View style={styles.pharmacyDetails}>
-              <Text style={styles.pharmacyName}>{pharmacy.name}</Text>
-              <Text style={styles.pharmacyAddress}>{pharmacy.address}</Text>
+            <View style={styles.hospitalDetails}>
+              <Text style={styles.hospitalName}>{hospital.name}</Text>
+              <Text style={styles.hospitalAddress}>{hospital.address}</Text>
               <View style={styles.ratingContainer}>
                 <FontAwesome name="star" size={14} color="#f39c12" />
-                <Text style={styles.ratingText}>{pharmacy.rating}</Text>
+                <Text style={styles.ratingText}>{hospital.rating}</Text>
                 <Text style={styles.distanceText}>• {calculateDistance()}</Text>
               </View>
             </View>
@@ -234,11 +234,11 @@ export default function PharmacyMapModal() {
 
           <TouchableOpacity
             style={[styles.actionButton, styles.callButton]}
-            onPress={handleCallPharmacy}
+            onPress={handleCallHospital}
             activeOpacity={0.8}
           >
             <FontAwesome name="phone" size={18} color="white" />
-            <Text style={styles.actionButtonText}>Call Pharmacy</Text>
+            <Text style={styles.actionButtonText}>Call Hospital</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -303,32 +303,32 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  pharmacyInfo: {
+  hospitalInfo: {
     marginBottom: 20,
   },
-  pharmacyHeader: {
+  hospitalHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  pharmacyIcon: {
+  hospitalIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    backgroundColor: 'rgba(231, 76, 60, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
   },
-  pharmacyDetails: {
+  hospitalDetails: {
     flex: 1,
   },
-  pharmacyName: {
+  hospitalName: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
     marginBottom: 4,
   },
-  pharmacyAddress: {
+  hospitalAddress: {
     fontSize: 14,
     color: '#7f8c8d',
     marginBottom: 8,

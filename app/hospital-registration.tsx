@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
@@ -17,6 +18,10 @@ interface HospitalRegistration {
   phone: string;
   address: string;
   city: string;
+  region: string;
+  postalCode: string;
+  latitude: string;
+  longitude: string;
   licenseNumber: string;
   registrationNumber: string;
   specialties: string[];
@@ -32,6 +37,11 @@ interface HospitalRegistration {
 export default function HospitalRegistrationScreen() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [showCoordinates, setShowCoordinates] = useState(false);
+  
+  // Debug logging
+  console.log('HospitalRegistrationScreen render - showCoordinates:', showCoordinates);
   const [formData, setFormData] = useState<HospitalRegistration>({
     hospitalName: '',
     administratorName: '',
@@ -39,6 +49,10 @@ export default function HospitalRegistrationScreen() {
     phone: '',
     address: '',
     city: '',
+    region: '',
+    postalCode: '',
+    latitude: '',
+    longitude: '',
     licenseNumber: '',
     registrationNumber: '',
     specialties: [],
@@ -50,6 +64,14 @@ export default function HospitalRegistrationScreen() {
     hasAmbulance: false,
     acceptsInsurance: false,
   });
+  
+  // Debug logging
+  console.log('HospitalRegistrationScreen render - showCoordinates:', showCoordinates, 'latitude:', formData.latitude, 'longitude:', formData.longitude);
+  
+  // Monitor formData changes
+  useEffect(() => {
+    console.log('formData changed - latitude:', formData.latitude, 'longitude:', formData.longitude);
+  }, [formData.latitude, formData.longitude]);
 
   const availableSpecialties = [
     'Cardiology',
@@ -79,6 +101,42 @@ export default function HospitalRegistrationScreen() {
     }));
   };
 
+  const getCurrentLocation = async () => {
+    setIsGettingLocation(true);
+    try {
+      // For testing - simulate location without actual GPS
+      console.log('getCurrentLocation called');
+      
+      // Simulate a delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Set test coordinates
+      setFormData(prev => {
+        const newData = {
+          ...prev,
+          latitude: '5.6037',
+          longitude: '-0.1870',
+          address: '123 Test Street',
+          city: 'Accra',
+          region: 'Greater Accra',
+          postalCode: '00233',
+        };
+        console.log('Updated formData with coordinates (hospital):', newData.latitude, newData.longitude);
+        return newData;
+      });
+      
+      setShowCoordinates(true);
+      console.log('Setting showCoordinates to true with test coordinates');
+      Alert.alert('Location Updated', 'Test location has been set successfully!');
+      
+    } catch (error) {
+      console.log('Error in getCurrentLocation:', error);
+      Alert.alert('Error', 'Could not get your current location. Please try again or enter manually.');
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
+
   const handleSubmit = async () => {
     // Validation
     if (!formData.hospitalName.trim()) {
@@ -101,6 +159,12 @@ export default function HospitalRegistrationScreen() {
       Alert.alert('Error', 'Please enter address');
       return;
     }
+    if (!formData.city.trim()) {
+      Alert.alert('Error', 'Please enter city');
+      return;
+    }
+    // Coordinates are optional - only validate if user wants to use current location
+    // If they're empty, that's fine for manual address entry
     if (!formData.licenseNumber.trim()) {
       Alert.alert('Error', 'Please enter license number');
       return;
@@ -217,6 +281,21 @@ export default function HospitalRegistrationScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Location Information</Text>
           
+          <TouchableOpacity 
+            style={styles.locationButton}
+            onPress={getCurrentLocation}
+            disabled={isGettingLocation}
+          >
+            <FontAwesome 
+              name={isGettingLocation ? "spinner" : "location-arrow"} 
+              size={16} 
+              color="#fff" 
+            />
+            <Text style={styles.locationButtonText}>
+              {isGettingLocation ? 'Getting Location...' : 'Use Current Location'}
+            </Text>
+          </TouchableOpacity>
+          
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Address *</Text>
             <TextInput
@@ -230,7 +309,7 @@ export default function HospitalRegistrationScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>City</Text>
+            <Text style={styles.label}>City *</Text>
             <TextInput
               style={styles.input}
               value={formData.city}
@@ -238,6 +317,55 @@ export default function HospitalRegistrationScreen() {
               placeholder="Enter city"
             />
           </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Region/State</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.region}
+              onChangeText={(text) => setFormData(prev => ({ ...prev, region: text }))}
+              placeholder="Enter region or state"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Postal Code</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.postalCode}
+              onChangeText={(text) => setFormData(prev => ({ ...prev, postalCode: text }))}
+              placeholder="Enter postal code"
+              keyboardType="numeric"
+            />
+          </View>
+
+          {showCoordinates && (
+            <View style={styles.coordinatesContainer}>
+              <Text style={styles.coordinatesNote}>
+                Coordinates help with Google Maps integration. You can edit these values if needed.
+              </Text>
+              <View style={styles.coordinateInput}>
+                <Text style={styles.label}>Latitude</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.latitude}
+                  onChangeText={(text) => setFormData(prev => ({ ...prev, latitude: text }))}
+                  placeholder="e.g., 5.6037"
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={styles.coordinateInput}>
+                <Text style={styles.label}>Longitude</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.longitude}
+                  onChangeText={(text) => setFormData(prev => ({ ...prev, longitude: text }))}
+                  placeholder="e.g., -0.1870"
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -555,5 +683,40 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  locationButton: {
+    backgroundColor: ACCENT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  locationButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  coordinatesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  coordinateInput: {
+    flex: 0.48,
+  },
+  coordinatesNote: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginBottom: 12,
+    fontStyle: 'italic',
   },
 }); 

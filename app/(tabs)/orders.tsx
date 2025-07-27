@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, Linking } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useOrders } from '../../context/OrdersContext';
+import { useCart } from '../../context/CartContext';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -24,6 +25,7 @@ interface LocalOrder {
     quantity: number;
   }>;
   pharmacy: string;
+  pharmacyPhone: string;
   address: string;
   estimatedDelivery?: string;
   trackingNumber?: string;
@@ -35,6 +37,7 @@ export default function OrdersScreen() {
   const [sortBy, setSortBy] = useState<'date' | 'status' | 'total'>('date');
   const router = useRouter();
   const { orders } = useOrders();
+  const { addToCart } = useCart();
 
   // Sample orders data
   const sampleOrders: LocalOrder[] = [
@@ -49,6 +52,7 @@ export default function OrdersScreen() {
         { medicine: { id: 3, name: "Ibuprofen 400mg", price: 13.00, image: "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
       ],
       pharmacy: "Alpha Pharmacy",
+      pharmacyPhone: "+233-555-0123",
       address: "123 Main St, Accra",
       estimatedDelivery: "2024-01-16",
       trackingNumber: "TRK-123456789"
@@ -63,6 +67,7 @@ export default function OrdersScreen() {
         { medicine: { id: 5, name: "Bandages", price: 3.50, image: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
       ],
       pharmacy: "MediCare Pharmacy",
+      pharmacyPhone: "+233-555-0456",
       address: "456 Oak Ave, Accra",
       estimatedDelivery: "2024-01-15",
       trackingNumber: "TRK-987654321"
@@ -78,6 +83,7 @@ export default function OrdersScreen() {
         { medicine: { id: 8, name: "Pain Relief Gel", price: 11.25, image: "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
       ],
       pharmacy: "Green Cross Pharmacy",
+      pharmacyPhone: "+233-555-0789",
       address: "789 Pine St, Accra",
       estimatedDelivery: "2024-01-17"
     },
@@ -91,6 +97,7 @@ export default function OrdersScreen() {
         { medicine: { id: 10, name: "Antiseptic Solution", price: 7.99, image: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
       ],
       pharmacy: "WellCare Pharmacy",
+      pharmacyPhone: "+233-555-0321",
       address: "321 Elm St, Accra"
     }
   ];
@@ -155,18 +162,72 @@ export default function OrdersScreen() {
 
   const handleTrackOrder = (order: LocalOrder) => {
     if (order.trackingNumber) {
-      Alert.alert('Track Order', `Tracking number: ${order.trackingNumber}`);
+      router.push({
+        pathname: '/(tabs)/order-tracking',
+        params: {
+          orderId: order.id,
+          trackingNumber: order.trackingNumber
+        }
+      });
     } else {
       Alert.alert('Track Order', 'Tracking information not available yet.');
     }
   };
 
   const handleReorder = (order: LocalOrder) => {
-    Alert.alert('Reorder', 'Would add all items from this order to cart');
+    Alert.alert(
+      'Reorder',
+      `Add all ${order.items.length} items from this order to cart?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Add to Cart', 
+          onPress: () => {
+            order.items.forEach(item => {
+              // Add each item to cart with its original quantity
+              for (let i = 0; i < item.quantity; i++) {
+                addToCart(item.medicine);
+              }
+            });
+            Alert.alert(
+              'Added to Cart', 
+              `${order.items.length} items have been added to your cart!`,
+              [
+                { text: 'Continue Shopping', style: 'cancel' },
+                { text: 'View Cart', onPress: () => router.push('/(tabs)/cart' as any) }
+              ]
+            );
+          }
+        }
+      ]
+    );
   };
 
-  const handleContactPharmacy = (pharmacy: string) => {
-    Alert.alert('Contact Pharmacy', `Would contact ${pharmacy}`);
+  const handleContactPharmacy = (order: LocalOrder) => {
+    const phoneNumber = order.pharmacyPhone;
+    
+    Alert.alert(
+      'Contact Pharmacy',
+      `How would you like to contact ${order.pharmacy}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Call', 
+          onPress: () => {
+            Linking.openURL(`tel:${phoneNumber}`);
+          }
+        },
+        { 
+          text: 'Send Email', 
+          onPress: () => {
+            const email = `${order.pharmacy.toLowerCase().replace(/\s+/g, '')}@pharmalink.com`;
+            const subject = 'Inquiry about my order';
+            const body = `Hello, I have a question about my recent order (${order.id}).`;
+            Linking.openURL(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -347,7 +408,7 @@ export default function OrdersScreen() {
                 
           <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={() => handleContactPharmacy(order.pharmacy)}
+                  onPress={() => handleContactPharmacy(order)}
                   activeOpacity={0.7}
           >
                   <FontAwesome name="phone" size={14} color={ACCENT} />

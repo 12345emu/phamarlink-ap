@@ -177,16 +177,17 @@ export default function PharmacyDetailsScreen() {
   };
   
   const handleDirections = () => {
+    // Navigate to the pharmacy map modal with pharmacy data
     router.push({
       pathname: '/pharmacy-map-modal',
       params: {
-        id: pharmacy.id,
-        name: pharmacy.name,
-        address: pharmacy.address,
-        latitude: params.latitude,
-        longitude: params.longitude,
-        image: pharmacy.image,
-        isOpen: pharmacy.isOpen ? 'true' : 'false',
+        pharmacyName: pharmacy.name,
+        pharmacyAddress: pharmacy.address,
+        pharmacyPhone: pharmacy.phone,
+        pharmacyRating: pharmacy.rating.toString(),
+        pharmacyDistance: pharmacy.distance,
+        latitude: '5.5600',
+        longitude: '-0.2057',
       }
     });
   };

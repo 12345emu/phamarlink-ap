@@ -117,11 +117,53 @@ export default function HospitalDetailsScreen() {
   };
 
   const handleDirections = () => {
-    Alert.alert('Directions', `Would open directions to ${hospital.name}`);
+    // Navigate to the hospital map modal with hospital data
+    router.push({
+      pathname: '/hospital-map-modal',
+      params: {
+        hospitalName: hospital.name,
+        hospitalAddress: hospital.address,
+        hospitalPhone: hospital.phone,
+        hospitalRating: hospital.rating.toString(),
+        hospitalDistance: hospital.distance,
+        latitude: '5.6037',
+        longitude: '-0.1870',
+      }
+    });
   };
 
   const handleEmergency = () => {
-    Alert.alert('Emergency', 'Call 911 for medical emergencies');
+    Alert.alert(
+      'Emergency Services',
+      'For medical emergencies, please call the emergency services:',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Call Emergency (112)',
+          onPress: () => {
+            Linking.openURL('tel:112').catch((err) => {
+              Alert.alert('Error', 'Could not make the call. Please try again.');
+            });
+          },
+        },
+        {
+          text: 'Call Hospital',
+          onPress: () => {
+            const phoneNumber = hospital.phone;
+            if (phoneNumber) {
+              Linking.openURL(`tel:${phoneNumber}`).catch((err) => {
+                Alert.alert('Error', 'Could not make the call. Please try again.');
+              });
+            } else {
+              Alert.alert('Phone Number Unavailable', 'Hospital phone number is not available.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleChatWithDoctor = (doctor: any) => {
@@ -269,7 +311,7 @@ export default function HospitalDetailsScreen() {
           <View style={styles.logoContainer}>
             <FontAwesome name="hospital-o" size={40} color="#fff" />
           </View>
-          <Text style={styles.hospitalName}>{hospital.name}</Text>
+              <Text style={styles.hospitalName}>{hospital.name}</Text>
           <View style={styles.locationInfo}>
             <FontAwesome name="map-marker" size={14} color="#e74c3c" />
             <Text style={styles.locationText}>Hospital • {hospital.distance}</Text>
@@ -303,7 +345,7 @@ export default function HospitalDetailsScreen() {
               pinColor="#e74c3c"
             />
           </MapView>
-        </View>
+          </View>
         
         {/* Get Directions Button */}
         <View style={styles.directionsButtonContainer}>
@@ -333,21 +375,21 @@ export default function HospitalDetailsScreen() {
                 <FontAwesome name="envelope" size={24} color={ACCENT} />
               </View>
               <Text style={styles.quickActionText}>Send Email</Text>
-            </TouchableOpacity>
-            
+          </TouchableOpacity>
+          
             <TouchableOpacity style={styles.quickActionCard} onPress={handleBookAppointment}>
               <View style={styles.quickActionIcon}>
                 <FontAwesome name="calendar" size={24} color={ACCENT} />
               </View>
               <Text style={styles.quickActionText}>Book Appointment</Text>
-            </TouchableOpacity>
-            
+          </TouchableOpacity>
+          
             <TouchableOpacity style={styles.quickActionCard} onPress={handleEmergency}>
               <View style={styles.quickActionIcon}>
                 <FontAwesome name="ambulance" size={24} color="#e74c3c" />
               </View>
               <Text style={styles.quickActionText}>Emergency</Text>
-            </TouchableOpacity>
+          </TouchableOpacity>
           </View>
         </View>
 
@@ -391,11 +433,11 @@ export default function HospitalDetailsScreen() {
                 </View>
               </TouchableOpacity>
             ))}
-          </View>
+            </View>
         </View>
 
         {/* Emergency Contact Button */}
-        <TouchableOpacity style={styles.emergencyButton} onPress={handleEmergency}>
+        <TouchableOpacity style={styles.emergencyButton} onPress={handleCall}>
           <FontAwesome name="phone" size={18} color="#fff" />
           <Text style={styles.emergencyButtonText}>Emergency Contact</Text>
         </TouchableOpacity>

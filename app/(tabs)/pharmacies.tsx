@@ -49,7 +49,7 @@ export default function PharmaciesScreen() {
     {
       id: 1,
       name: "Alpha Pharmacy",
-      address: "123 Main St, Downtown",
+      address: "123 Main St, Downtown Accra",
       distance: "0,6 km",
       rating: 4.5,
       isOpen: true,
@@ -66,12 +66,12 @@ export default function PharmaciesScreen() {
     {
       id: 2,
       name: "MediCare Pharmacy",
-      address: "456 Oak Ave, Midtown",
+      address: "456 Oak Ave, East Legon, Accra",
       distance: "1,1 km",
       rating: 4.2,
       isOpen: true,
       phone: "+233-555-0124",
-      coordinates: { latitude: 5.5650, longitude: -0.2100 },
+      coordinates: { latitude: 5.6037, longitude: -0.1870 },
       image: "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80",
       openingHours: "7:00 AM - 11:00 PM",
       services: ["Prescription", "Vaccination", "Health Check"],
@@ -83,7 +83,7 @@ export default function PharmaciesScreen() {
     {
       id: 3,
       name: "Green Cross Pharmacy",
-      address: "789 Pine St, Uptown",
+      address: "789 Pine St, Osu, Accra",
       distance: "1,5 km",
       rating: 4.0,
       isOpen: false,
@@ -100,7 +100,7 @@ export default function PharmaciesScreen() {
     {
       id: 4,
       name: "WellCare Pharmacy",
-      address: "321 Elm St, Downtown",
+      address: "321 Elm St, Cantonments, Accra",
       distance: "2,0 km",
       rating: 4.7,
       isOpen: true,
@@ -120,12 +120,12 @@ export default function PharmaciesScreen() {
     {
       id: 1,
       name: "Holy Family Hospital",
-      address: "123 Hospital Ave, Downtown",
+      address: "123 Hospital Ave, Downtown Accra",
       distance: "0,8 km",
       rating: 4.5,
       isOpen: true,
       phone: "+233-555-0127",
-      coordinates: { latitude: 5.5600, longitude: -0.2057 },
+      coordinates: { latitude: 5.6037, longitude: -0.1870 },
       image: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80",
       openingHours: "24/7",
       services: ["Emergency", "Surgery", "Consultation"],
@@ -137,12 +137,12 @@ export default function PharmaciesScreen() {
     {
       id: 2,
       name: "City General Hospital",
-      address: "456 Medical St, Midtown",
+      address: "456 Medical St, Cantonments, Accra",
       distance: "1,3 km",
       rating: 4.2,
       isOpen: true,
       phone: "+233-555-0128",
-      coordinates: { latitude: 5.5650, longitude: -0.2100 },
+      coordinates: { latitude: 5.5700, longitude: -0.2150 },
       image: "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80",
       openingHours: "6:00 AM - 10:00 PM",
       services: ["Emergency", "Consultation", "Laboratory"],
@@ -154,7 +154,7 @@ export default function PharmaciesScreen() {
     {
       id: 3,
       name: "East Legon Clinic",
-      address: "789 Health Blvd, Uptown",
+      address: "789 Health Blvd, East Legon, Accra",
       distance: "1,8 km",
       rating: 4.0,
       isOpen: true,
@@ -197,9 +197,9 @@ export default function PharmaciesScreen() {
 
   const navigateToDetails = (item: Pharmacy) => {
     if (activeTab === 'pharmacies') {
-      router.push({
-        pathname: '/pharmacy-details-modal',
-        params: {
+    router.push({
+      pathname: '/pharmacy-details-modal',
+      params: {
           id: item.id.toString(),
           pharmacyName: item.name,
           pharmacyAddress: item.address,
@@ -321,7 +321,7 @@ export default function PharmaciesScreen() {
             <Text style={[styles.tabText, activeTab === 'pharmacies' && styles.activeTabText]}>
               Pharmacies
             </Text>
-          </TouchableOpacity>
+              </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'hospitals' && styles.activeTab]}
             onPress={() => setActiveTab('hospitals')}
@@ -330,8 +330,8 @@ export default function PharmaciesScreen() {
             <Text style={[styles.tabText, activeTab === 'hospitals' && styles.activeTabText]}>
               Hospitals
             </Text>
-          </TouchableOpacity>
-        </View>
+              </TouchableOpacity>
+            </View>
       </View>
 
       {/* Search and Filter Section */}
@@ -450,7 +450,7 @@ export default function PharmaciesScreen() {
                   size={20} 
                   color={ACCENT} 
                 />
-              </View>
+                  </View>
               <View style={styles.itemInfo}>
                 <Text style={styles.itemName}>{item.name}</Text>
                 <View style={styles.itemMeta}>
@@ -465,7 +465,7 @@ export default function PharmaciesScreen() {
                 <Text style={styles.itemAddress}>{item.address}</Text>
                 <Text style={styles.itemHours}>{item.openingHours}</Text>
               </View>
-              <TouchableOpacity 
+                <TouchableOpacity
                 style={styles.favoriteButton}
                 onPress={() => toggleFavorite(item.id)}
                 activeOpacity={0.7}
@@ -483,7 +483,7 @@ export default function PharmaciesScreen() {
                 <FontAwesome name="map-marker" size={14} color="#95a5a6" />
                 <Text style={styles.distanceText}>{item.distance}</Text>
               </View>
-              
+
               <View style={styles.itemServices}>
                 {item.deliveryAvailable && (
                   <View style={styles.serviceBadge}>
@@ -500,7 +500,7 @@ export default function PharmaciesScreen() {
               </View>
 
               <View style={styles.itemActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => callPlace(item.phone)}
                   activeOpacity={0.7}

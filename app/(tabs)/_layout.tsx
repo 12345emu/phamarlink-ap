@@ -5,6 +5,7 @@ import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text
 import CartHeaderButton from '@/components/CartHeaderButton';
 import AppointmentsHeaderButton from '@/components/AppointmentsHeaderButton';
 import ProfileImage from '@/components/ProfileImage';
+import FloatingMedicineButton from '@/components/FloatingMedicineButton';
 import { useProfile } from '../../context/ProfileContext';
 
 import Colors from '@/constants/Colors';
@@ -364,7 +365,205 @@ export default function TabLayout() {
           }}
         />
 
+        <Tabs.Screen
+          name="checkout"
+          options={{
+            title: '',
+            tabBarButton: () => null, // Hide from tab bar
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <TouchableOpacity 
+                  style={{ 
+                    width: 40, 
+                    height: 40, 
+                    borderRadius: 20, 
+                    backgroundColor: '#f8f9fa', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    marginRight: 12
+                  }}
+                  onPress={() => router.back()}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
+                </TouchableOpacity>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
+                <CartHeaderButton />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
+                </TouchableOpacity>
+              </View>
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="order-tracking"
+          options={{
+            title: '',
+            tabBarButton: () => null, // Hide from tab bar
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <TouchableOpacity 
+                  style={{ 
+                    width: 40, 
+                    height: 40, 
+                    borderRadius: 20, 
+                    backgroundColor: '#f8f9fa', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    marginRight: 12
+                  }}
+                  onPress={() => router.back()}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
+                </TouchableOpacity>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
+                <CartHeaderButton />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
+                </TouchableOpacity>
+              </View>
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="medicines"
+          options={{
+            title: '',
+            tabBarButton: () => null, // Hide from tab bar
+            headerLeft: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
+                <TouchableOpacity 
+                  style={{ 
+                    width: 40, 
+                    height: 40, 
+                    borderRadius: 20, 
+                    backgroundColor: '#f8f9fa', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    marginRight: 12
+                  }}
+                  onPress={() => router.back()}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
+                </TouchableOpacity>
+                <View style={{ 
+                  width: 32, 
+                  height: 32, 
+                  borderRadius: 16, 
+                  backgroundColor: '#ecf0f1', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  marginRight: 8
+                }}>
+                  <FontAwesome name="heartbeat" size={18} color="#3498db" />
+                </View>
+                <Text style={{ 
+                  fontSize: 20, 
+                  fontWeight: 'bold', 
+                  color: '#2c3e50' 
+                }}>
+                  PharmaLink
+                </Text>
+              </View>
+            ),
+            headerRight: () => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+                <AppointmentsHeaderButton />
+                <CartHeaderButton />
+                <TouchableOpacity 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 18, 
+                    backgroundColor: '#ecf0f1', 
+                    alignItems: 'center', 
+                    justifyContent: 'center'
+                  }}
+                  onPress={() => router.push('/(tabs)/profile')}
+                  activeOpacity={0.7}
+                >
+                  <ProfileImage size={32} />
+                </TouchableOpacity>
+              </View>
+            ),
+          }}
+        />
+
       </Tabs>
+      
+      {/* Floating Medicine Button */}
+      <FloatingMedicineButton />
     </View>
   );
 }
