@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useProfile } from '../../context/ProfileContext';
+import { useAuth } from '../../context/AuthContext';
 import ProfileImage from '@/components/ProfileImage';
 
 const ACCENT = '#3498db';
@@ -52,6 +53,7 @@ export default function ProfileScreen() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const router = useRouter();
   const { profileImage, updateProfileImage } = useProfile();
+  const { logout: authLogout } = useAuth();
 
   const formatDateForDisplay = (date: Date): string => {
     return date.toLocaleDateString('en-US', {
@@ -426,7 +428,19 @@ export default function ProfileScreen() {
       'Are you sure you want to logout?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: () => Alert.alert('Logged out successfully') }
+        { 
+          text: 'Logout', 
+          style: 'destructive', 
+          onPress: async () => {
+            try {
+              await authLogout();
+              // Navigate to login page after logout
+              router.push('/login');
+            } catch (error) {
+              console.error('Logout error:', error);
+            }
+          }
+        }
       ]
     );
   };

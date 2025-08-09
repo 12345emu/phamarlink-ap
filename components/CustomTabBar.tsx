@@ -4,6 +4,7 @@ import { BlurView } from 'expo-blur';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useCart } from '../context/CartContext';
+import { useOrders } from '../context/OrdersContext';
 
 const { width } = Dimensions.get('window');
 const TAB_HEIGHT = 80;
@@ -20,6 +21,7 @@ const sideTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label:
 
 export default function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { cart } = useCart();
+  const { orders } = useOrders();
 
   // Map sideTabs to their actual index in state.routes
   const getTabIndex = (routeName: string) => state.routes.findIndex(r => r.name === routeName);
@@ -63,6 +65,14 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
                     size={22} 
                     color={isActive ? '#43e97b' : '#8e8e93'} 
                   />
+                  {/* Orders Badge */}
+                  {tab.route === 'orders' && orders.length > 0 && (
+                    <View style={styles.ordersBadge}>
+                      <Text style={styles.ordersBadgeText}>
+                        {orders.length > 99 ? '99+' : orders.length}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={[
                   styles.tabLabel,
@@ -169,6 +179,24 @@ const styles = StyleSheet.create({
   cartBadgeTabText: {
     color: '#fff',
     fontSize: 11,
+    fontWeight: 'bold',
+  },
+  ordersBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#e74c3c',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  ordersBadgeText: {
+    color: '#fff',
+    fontSize: 10,
     fontWeight: 'bold',
   },
 }); 

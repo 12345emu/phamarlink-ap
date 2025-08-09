@@ -67,6 +67,31 @@ export default function HomeScreen(props: any) {
   const [locationPermission, setLocationPermission] = useState(false);
   const router = useRouter();
 
+  // Filter nearby options based on search query
+  const filteredNearbyOptions = nearbyOptions.filter(option =>
+    option.name.toLowerCase().includes(search.toLowerCase()) ||
+    option.type.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // Filter order options based on search query
+  const filteredOrderOptions = orderOptions.filter(option =>
+    option.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // Sort order options to prioritize medicine-related items when searching for "medicine"
+  const sortedOrderOptions = [...filteredOrderOptions].sort((a, b) => {
+    const searchLower = search.toLowerCase();
+    if (searchLower.includes('medicine') || searchLower.includes('med')) {
+      // If searching for medicine, prioritize medicine items
+      const aIsMedicine = a.name.toLowerCase().includes('medicine') || a.name.toLowerCase().includes('med');
+      const bIsMedicine = b.name.toLowerCase().includes('medicine') || b.name.toLowerCase().includes('med');
+      
+      if (aIsMedicine && !bIsMedicine) return -1; // a comes first
+      if (!aIsMedicine && bIsMedicine) return 1;  // b comes first
+    }
+    return 0; // Keep original order if no medicine priority
+  });
+
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -120,21 +145,32 @@ export default function HomeScreen(props: any) {
         {/* Search Bar */}
         <View style={styles.searchCard}>
           <FontAwesome name="search" size={18} color="#95a5a6" />
-              <TextInput
+          <TextInput
             style={styles.searchInput}
             placeholder="Search Pharmacy or Hospital"
             placeholderTextColor="#95a5a6"
-                value={search}
-                onChangeText={setSearch}
-                returnKeyType="search"
-              />
-            </View>
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.7}>
+              <FontAwesome name="times-circle" size={18} color="#95a5a6" />
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Nearby Options Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Nearby options</Text>
           <View style={styles.nearbyList}>
-            {nearbyOptions.map((option, index) => (
+            {filteredNearbyOptions.length === 0 && search.length > 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="search" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No nearby places found</Text>
+              </View>
+            ) : (
+              filteredNearbyOptions.map((option, index) => (
               <TouchableOpacity 
                 key={option.name} 
                 style={styles.nearbyItem}
@@ -173,7 +209,8 @@ export default function HomeScreen(props: any) {
                   <FontAwesome name="angle-right" size={16} color="#95a5a6" />
                 </View>
               </TouchableOpacity>
-            ))}
+            ))
+            )}
           </View>
         </View>
         
@@ -251,7 +288,13 @@ export default function HomeScreen(props: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Medicine or Book Appointment</Text>
           <View style={styles.orderList}>
-            {orderOptions.map((option, index) => (
+            {sortedOrderOptions.length === 0 && search.length > 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="search" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No order options found</Text>
+              </View>
+            ) : (
+              sortedOrderOptions.map((option, index) => (
               <View key={option.name} style={styles.orderItem}>
                 <View style={styles.orderLeft}>
                   <View style={styles.orderIcon}>
@@ -262,11 +305,38 @@ export default function HomeScreen(props: any) {
                     {option.price && <Text style={styles.orderPrice}>{option.price}</Text>}
                   </View>
                 </View>
-                <TouchableOpacity style={styles.orderButton} activeOpacity={0.7}>
+                <TouchableOpacity 
+                  style={styles.orderButton} 
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (option.action === 'Add to cart') {
+                      // Navigate to pharmacy details page for medicine
+                      router.push({
+                        pathname: '/pharmacy-details-modal',
+                        params: {
+                          pharmacyName: 'CityMed Pharmacy',
+                          pharmacyDistance: '1.2 km',
+                          pharmacyOpen: 'true'
+                        }
+                      });
+                    } else if (option.action === 'Book') {
+                      // Navigate to hospital details page for appointments
+                      router.push({
+                        pathname: '/hospital-details-modal',
+                        params: {
+                          hospitalName: 'Holy Family Hospital',
+                          hospitalDistance: '2.1 km',
+                          hospitalOpen: 'true'
+                        }
+                      });
+                    }
+                  }}
+                >
                   <Text style={styles.orderButtonText}>{option.action}</Text>
                 </TouchableOpacity>
               </View>
-              ))}
+            ))
+            )}
           </View>
             </View>
 
@@ -519,5 +589,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2c3e50',
     fontWeight: '500',
+  },
+  noResults: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: '#95a5a6',
+    marginTop: 12,
   },
 });

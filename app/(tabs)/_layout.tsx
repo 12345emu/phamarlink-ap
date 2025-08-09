@@ -7,6 +7,7 @@ import AppointmentsHeaderButton from '@/components/AppointmentsHeaderButton';
 import ProfileImage from '@/components/ProfileImage';
 import FloatingMedicineButton from '@/components/FloatingMedicineButton';
 import { useProfile } from '../../context/ProfileContext';
+import { useOrders } from '../../context/OrdersContext';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -45,6 +46,73 @@ function AnimatedTabBarIcon({ name, focused }: { name: React.ComponentProps<type
         name={name}
         color={focused ? activeColor : inactiveColor}
       />
+    </Animated.View>
+  );
+}
+
+function OrdersTabBarIcon({ focused }: { focused: boolean }) {
+  const { orders } = useOrders();
+  const scaleAnim = useRef(new Animated.Value(focused ? 1.15 : 1)).current;
+  
+  React.useEffect(() => {
+    Animated.spring(scaleAnim, {
+      toValue: focused ? 1.15 : 1,
+      useNativeDriver: true,
+      friction: 5,
+    }).start();
+  }, [focused]);
+  
+  const activeColor = '#43e97b';
+  const inactiveColor = '#B0B0B0';
+  const ordersCount = orders.length;
+  
+  return (
+    <Animated.View
+      style={{
+        transform: [{ scale: scaleAnim }],
+        backgroundColor: focused ? 'rgba(67,233,123,0.12)' : 'transparent',
+        borderRadius: 18,
+        padding: focused ? 8 : 0,
+        borderWidth: focused ? 2 : 0,
+        borderColor: focused ? '#43e97b' : 'transparent',
+        justifyContent: 'center',
+        alignItems: 'center',
+        position: 'relative',
+      }}
+    >
+      <FontAwesome
+        size={26}
+        style={{ marginBottom: -2 }}
+        name="list"
+        color={focused ? activeColor : inactiveColor}
+      />
+      {ordersCount > 0 && (
+        <View
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: -5,
+            backgroundColor: '#e74c3c',
+            borderRadius: 10,
+            minWidth: 20,
+            height: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 2,
+            borderColor: '#fff',
+          }}
+        >
+          <Text
+            style={{
+              color: '#fff',
+              fontSize: 10,
+              fontWeight: 'bold',
+            }}
+          >
+            {ordersCount > 99 ? '99+' : ordersCount}
+          </Text>
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -167,7 +235,7 @@ export default function TabLayout() {
           name="orders"
           options={{
             title: '',
-            tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="list" focused={focused} />,
+            tabBarIcon: ({ focused }) => <OrdersTabBarIcon focused={focused} />,
             headerLeft: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
                 <View style={{ 

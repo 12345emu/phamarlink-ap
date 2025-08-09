@@ -185,10 +185,24 @@ export default function OrderTrackingScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
       
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        contentContainerStyle={{ paddingBottom: 120 }} 
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Swipe to go back area */}
+        <TouchableOpacity 
+          style={styles.swipeArea}
+          onPress={() => router.push('/(tabs)/orders' as any)}
+          activeOpacity={0.1}
+        />
+        
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => router.push('/(tabs)/orders' as any)} 
+            activeOpacity={0.7}
+          >
             <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Track Order</Text>
@@ -555,5 +569,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  swipeArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+    zIndex: 10,
   },
 }); 
