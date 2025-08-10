@@ -6,91 +6,92 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { facilitiesService, Facility } from '../../services/facilitiesService';
+import { medicinesService, Medicine } from '../../services/medicinesService';
+import { professionalsService, HealthcareProfessional } from '../../services/professionalsService';
 
 type FontAwesomeIconName = keyof typeof FontAwesome.glyphMap;
 
 const { width } = Dimensions.get('window');
 
-const nearbyOptions = [
-  {
-    name: 'Holy Family Hospital',
-    type: 'Hospital',
-    distance: '2,1 km',
-    icon: 'hospital-o',
-    iconColor: '#e74c3c',
-  },
-  {
-    name: 'CityMed Pharmacy',
-    type: 'Pharmacy',
-    distance: '1,2 km',
-    icon: 'medkit',
-    iconColor: '#3498db',
-  },
-  {
-    name: 'East Legon Clinic',
-    type: 'Clinic',
-    distance: '3,4 km',
-    icon: 'map-marker',
-    iconColor: '#3498db',
-  },
-];
-
-const orderOptions = [
-  {
-    name: 'Paracetamol',
-    price: 'GHS 10',
-    icon: 'medkit',
-    action: 'Add to cart',
-  },
-  {
-    name: 'Book Doctor Visit',
-    price: '',
-    icon: 'calendar',
-    action: 'Book',
-  },
-];
-
-const chatProfessionals = [
-  {
-    name: 'Dr. Kwame',
-    avatar: 'https://randomuser.me/api/portraits/men/32.jpg',
-  },
-  {
-    name: 'Pharmacist Am',
-    avatar: 'https://randomuser.me/api/portraits/women/44.jpg',
-  },
-];
-
 export default function HomeScreen(props: any) {
   const [search, setSearch] = useState('');
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
   const [locationPermission, setLocationPermission] = useState(false);
+  const [nearbyFacilities, setNearbyFacilities] = useState<Facility[]>([]);
+  const [availableMedicines, setAvailableMedicines] = useState<Medicine[]>([]);
+  const [availableProfessionals, setAvailableProfessionals] = useState<HealthcareProfessional[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [medicinesLoading, setMedicinesLoading] = useState(false);
+  const [professionalsLoading, setProfessionalsLoading] = useState(false);
   const router = useRouter();
 
   // Filter nearby options based on search query
-  const filteredNearbyOptions = nearbyOptions.filter(option =>
+  const filteredNearbyOptions = nearbyFacilities.filter(option =>
     option.name.toLowerCase().includes(search.toLowerCase()) ||
-    option.type.toLowerCase().includes(search.toLowerCase())
+    option.type.toLowerCase().includes(search.toLowerCase()) ||
+    option.services.some(service => 
+      service.toLowerCase().includes(search.toLowerCase())
+    )
   );
 
-  // Filter order options based on search query
-  const filteredOrderOptions = orderOptions.filter(option =>
-    option.name.toLowerCase().includes(search.toLowerCase())
+  // Debug logging
+  console.log('🔍 nearbyFacilities state:', nearbyFacilities.length, 'facilities');
+  console.log('🔍 filteredNearbyOptions:', filteredNearbyOptions.length, 'facilities');
+  if (nearbyFacilities.length > 0) {
+    console.log('🔍 First facility:', nearbyFacilities[0]);
+  }
+
+  // Filter medicines based on search query
+  const filteredMedicines = availableMedicines.filter(medicine =>
+    medicine.name.toLowerCase().includes(search.toLowerCase()) ||
+    medicine.category.toLowerCase().includes(search.toLowerCase()) ||
+    medicine.generic_name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Sort order options to prioritize medicine-related items when searching for "medicine"
-  const sortedOrderOptions = [...filteredOrderOptions].sort((a, b) => {
-    const searchLower = search.toLowerCase();
-    if (searchLower.includes('medicine') || searchLower.includes('med')) {
-      // If searching for medicine, prioritize medicine items
-      const aIsMedicine = a.name.toLowerCase().includes('medicine') || a.name.toLowerCase().includes('med');
-      const bIsMedicine = b.name.toLowerCase().includes('medicine') || b.name.toLowerCase().includes('med');
+  // Filter professionals based on search query
+  const filteredProfessionals = availableProfessionals.filter(professional =>
+    professional.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+    professional.specialty.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // Fetch available medicines
+  const fetchAvailableMedicines = async () => {
+    try {
+      setMedicinesLoading(true);
+      const response = await medicinesService.getAvailableMedicines(10);
       
-      if (aIsMedicine && !bIsMedicine) return -1; // a comes first
-      if (!aIsMedicine && bIsMedicine) return 1;  // b comes first
+      if (response.success && response.data) {
+        console.log('💊 Fetched medicines:', response.data.length, 'medicines');
+        setAvailableMedicines(response.data);
+      } else {
+        console.error('Failed to fetch medicines:', response.message);
+      }
+    } catch (error) {
+      console.error('Error fetching medicines:', error);
+    } finally {
+      setMedicinesLoading(false);
     }
-    return 0; // Keep original order if no medicine priority
-  });
+  };
+
+  // Fetch available professionals
+  const fetchAvailableProfessionals = async () => {
+    try {
+      setProfessionalsLoading(true);
+      const response = await professionalsService.getAvailableProfessionals(5);
+      
+      if (response.success && response.data) {
+        console.log('👨‍⚕️ Fetched professionals:', response.data.length, 'professionals');
+        setAvailableProfessionals(response.data);
+      } else {
+        console.error('Failed to fetch professionals:', response.message);
+      }
+    } catch (error) {
+      console.error('Error fetching professionals:', error);
+    } finally {
+      setProfessionalsLoading(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -104,8 +105,164 @@ export default function HomeScreen(props: any) {
       
       let location = await Location.getCurrentPositionAsync({});
       setUserLocation(location);
+      
+      // Fetch nearby facilities
+      await fetchNearbyFacilities(location.coords.latitude, location.coords.longitude);
+      
+      // Fetch medicines and professionals
+      await Promise.all([
+        fetchAvailableMedicines(),
+        fetchAvailableProfessionals()
+      ]);
     })();
   }, []);
+
+  const fetchNearbyFacilities = async (latitude: number, longitude: number) => {
+    try {
+      setLoading(true);
+      console.log('🔍 Fetching nearby facilities for coordinates:', latitude, longitude);
+      
+      const response = await facilitiesService.searchNearby({
+        latitude,
+        longitude,
+        radius: 10, // 10km radius
+        limit: 10,
+      });
+
+      console.log('🔍 Home page received response:', JSON.stringify(response, null, 2));
+
+      if (response.success && response.data) {
+        console.log('🔍 Setting nearby facilities:', response.data.length, 'facilities');
+        setNearbyFacilities(response.data);
+      } else {
+        console.error('Failed to fetch nearby facilities:', response.message);
+        // Fallback to sample data if API fails
+        console.log('🔍 Falling back to sample data');
+        setNearbyFacilities(getSampleFacilities());
+      }
+    } catch (error) {
+      console.error('Error fetching nearby facilities:', error);
+      // Fallback to sample data on error
+      console.log('🔍 Falling back to sample data due to error');
+      setNearbyFacilities(getSampleFacilities());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fallback sample data
+  const getSampleFacilities = (): Facility[] => [
+    {
+      id: '1',
+      name: 'Holy Family Hospital',
+      type: 'hospital',
+      description: 'A leading healthcare facility',
+      address: {
+        street: '123 Hospital Road',
+        city: 'Accra',
+        state: 'Greater Accra',
+        zipCode: '00233',
+        country: 'Ghana',
+      },
+      coordinates: {
+        latitude: 5.5600,
+        longitude: -0.2057,
+      },
+      phone: '+233 20 123 4567',
+      services: ['Emergency Care', 'Surgery', 'Maternity', 'Pediatrics'],
+      specialties: ['Cardiology', 'Neurology', 'Orthopedics'],
+      rating: 4.5,
+      reviewCount: 128,
+      isOpen: true,
+      distance: 2.1,
+      amenities: ['Parking', 'Cafeteria', 'WiFi'],
+      emergencyServices: true,
+      operatingHours: {
+        monday: { open: '08:00', close: '18:00', isOpen: true },
+        tuesday: { open: '08:00', close: '18:00', isOpen: true },
+        wednesday: { open: '08:00', close: '18:00', isOpen: true },
+        thursday: { open: '08:00', close: '18:00', isOpen: true },
+        friday: { open: '08:00', close: '18:00', isOpen: true },
+        saturday: { open: '09:00', close: '17:00', isOpen: true },
+        sunday: { open: '09:00', close: '17:00', isOpen: true },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      id: '2',
+      name: 'CityMed Pharmacy',
+      type: 'pharmacy',
+      description: 'Your trusted neighborhood pharmacy',
+      address: {
+        street: '456 Pharmacy Street',
+        city: 'Accra',
+        state: 'Greater Accra',
+        zipCode: '00233',
+        country: 'Ghana',
+      },
+      coordinates: {
+        latitude: 5.5650,
+        longitude: -0.2100,
+      },
+      phone: '+233 20 987 6543',
+      services: ['Prescription Filling', 'Over-the-counter', 'Health Consultations'],
+      rating: 4.2,
+      reviewCount: 89,
+      isOpen: true,
+      distance: 1.2,
+      amenities: ['Parking', 'Consultation Room'],
+      emergencyServices: false,
+      operatingHours: {
+        monday: { open: '08:00', close: '20:00', isOpen: true },
+        tuesday: { open: '08:00', close: '20:00', isOpen: true },
+        wednesday: { open: '08:00', close: '20:00', isOpen: true },
+        thursday: { open: '08:00', close: '20:00', isOpen: true },
+        friday: { open: '08:00', close: '20:00', isOpen: true },
+        saturday: { open: '09:00', close: '18:00', isOpen: true },
+        sunday: { open: '10:00', close: '16:00', isOpen: true },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      id: '3',
+      name: 'East Legon Clinic',
+      type: 'clinic',
+      description: 'Specialized medical clinic',
+      address: {
+        street: '789 Clinic Avenue',
+        city: 'Accra',
+        state: 'Greater Accra',
+        zipCode: '00233',
+        country: 'Ghana',
+      },
+      coordinates: {
+        latitude: 5.5550,
+        longitude: -0.2000,
+      },
+      phone: '+233 20 555 1234',
+      services: ['General Consultation', 'Specialized Care', 'Laboratory'],
+      specialties: ['Dermatology', 'Gynecology'],
+      rating: 4.0,
+      reviewCount: 67,
+      isOpen: true,
+      distance: 3.4,
+      amenities: ['Parking', 'Laboratory'],
+      emergencyServices: false,
+      operatingHours: {
+        monday: { open: '08:00', close: '17:00', isOpen: true },
+        tuesday: { open: '08:00', close: '17:00', isOpen: true },
+        wednesday: { open: '08:00', close: '17:00', isOpen: true },
+        thursday: { open: '08:00', close: '17:00', isOpen: true },
+        friday: { open: '08:00', close: '17:00', isOpen: true },
+        saturday: { open: '09:00', close: '15:00', isOpen: true },
+        sunday: { open: '09:00', close: '15:00', isOpen: true },
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ];
 
   const handleProfilePress = () => {
     if (props.goToProfile) {
@@ -131,6 +288,40 @@ export default function HomeScreen(props: any) {
       latitudeDelta: 0.01,
       longitudeDelta: 0.01,
     };
+  };
+
+  const getFacilityIcon = (type: Facility['type']): FontAwesomeIconName => {
+    switch (type) {
+      case 'hospital':
+        return 'hospital-o';
+      case 'pharmacy':
+        return 'medkit';
+      case 'clinic':
+        return 'map-marker';
+      default:
+        return 'building';
+    }
+  };
+
+  const getFacilityIconColor = (type: Facility['type']): string => {
+    switch (type) {
+      case 'hospital':
+        return '#e74c3c';
+      case 'pharmacy':
+        return '#3498db';
+      case 'clinic':
+        return '#3498db';
+      default:
+        return '#95a5a6';
+    }
+  };
+
+  const getFacilityTypeDisplayName = (type: Facility['type']): string => {
+    return facilitiesService.getFacilityTypeDisplayName(type);
+  };
+
+  const formatDistance = (distance: number): string => {
+    return facilitiesService.formatDistance(distance);
   };
 
   return (
@@ -164,48 +355,59 @@ export default function HomeScreen(props: any) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Nearby options</Text>
           <View style={styles.nearbyList}>
-            {filteredNearbyOptions.length === 0 && search.length > 0 ? (
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Loading nearby facilities...</Text>
+              </View>
+            ) : nearbyFacilities.length === 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="map-marker" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No nearby facilities found</Text>
+              </View>
+            ) : filteredNearbyOptions.length === 0 && search.length > 0 ? (
               <View style={styles.noResults}>
                 <FontAwesome name="search" size={24} color="#95a5a6" />
                 <Text style={styles.noResultsText}>No nearby places found</Text>
               </View>
             ) : (
-              filteredNearbyOptions.map((option, index) => (
+              filteredNearbyOptions.map((facility) => (
               <TouchableOpacity 
-                key={option.name} 
+                  key={facility.id} 
                 style={styles.nearbyItem}
                 onPress={() => {
-                  if (option.type === 'Hospital') {
+                    if (facility.type === 'hospital') {
                     router.push({
                       pathname: '/hospital-details-modal',
                       params: {
-                        hospitalName: option.name,
-                        hospitalDistance: option.distance,
-                        hospitalOpen: 'true'
+                          hospitalName: facility.name,
+                          hospitalDistance: formatDistance(facility.distance || 0),
+                          hospitalOpen: facility.isOpen.toString()
                       }
                     });
                   } else {
                     router.push({
                       pathname: '/pharmacy-details-modal',
                       params: {
-                        pharmacyName: option.name,
-                        pharmacyDistance: option.distance,
-                        pharmacyOpen: 'true'
+                          pharmacyName: facility.name,
+                          pharmacyDistance: formatDistance(facility.distance || 0),
+                          pharmacyOpen: facility.isOpen.toString()
                       }
                     });
                   }
                 }}
                 activeOpacity={0.7}
               >
-                <View style={[styles.nearbyIcon, { backgroundColor: option.iconColor + '20' }]}>
-                  <FontAwesome name={option.icon as FontAwesomeIconName} size={16} color={option.iconColor} />
+                  <View style={[styles.nearbyIcon, { backgroundColor: getFacilityIconColor(facility.type) + '20' }]}>
+                    <FontAwesome name={getFacilityIcon(facility.type)} size={16} color={getFacilityIconColor(facility.type)} />
                 </View>
                 <View style={styles.nearbyInfo}>
-                  <Text style={styles.nearbyName}>{option.name}</Text>
-                  <Text style={styles.nearbyType}>{option.type}</Text>
+                    <Text style={styles.nearbyName}>{facility.name}</Text>
+                    <Text style={styles.nearbyType}>{getFacilityTypeDisplayName(facility.type)}</Text>
                 </View>
                 <View style={styles.nearbyRight}>
-                  <Text style={styles.nearbyDistance}>{option.distance}</Text>
+                    <Text style={styles.nearbyDistance}>
+                      {facility.distance ? formatDistance(facility.distance) : 'N/A'}
+                    </Text>
                   <FontAwesome name="angle-right" size={16} color="#95a5a6" />
                 </View>
               </TouchableOpacity>
@@ -241,36 +443,19 @@ export default function HomeScreen(props: any) {
               />
             )}
             
-            {/* Hospital Marker */}
+            {/* Facility Markers */}
+            {nearbyFacilities.map((facility) => (
             <Marker
+                key={facility.id}
               coordinate={{
-                latitude: 5.5600,
-                longitude: -0.2057,
+                  latitude: facility.coordinates.latitude,
+                  longitude: facility.coordinates.longitude,
               }}
-              title="Holy Family Hospital"
-              description="Hospital • 2.1 km"
-              pinColor="#e74c3c"
-            />
-            {/* Pharmacy Marker */}
-            <Marker
-              coordinate={{
-                latitude: 5.5650,
-                longitude: -0.2100,
-              }}
-              title="CityMed Pharmacy"
-              description="Pharmacy • 1.2 km"
-              pinColor="#3498db"
-            />
-            {/* Clinic Marker */}
-            <Marker
-              coordinate={{
-                latitude: 5.5550,
-                longitude: -0.2000,
-              }}
-              title="East Legon Clinic"
-              description="Clinic • 3.4 km"
-              pinColor="#3498db"
-            />
+                title={facility.name}
+                description={`${getFacilityTypeDisplayName(facility.type)} • ${facility.distance ? formatDistance(facility.distance) : 'N/A'}`}
+                pinColor={getFacilityIconColor(facility.type)}
+              />
+            ))}
           </MapView>
           <View style={styles.mapOverlay}>
             <TouchableOpacity 
@@ -284,77 +469,188 @@ export default function HomeScreen(props: any) {
           </View>
                     </View>
 
-        {/* Order Medicine or Book Appointment Section */}
+        {/* Order Medicine Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Medicine or Book Appointment</Text>
+          <Text style={styles.sectionTitle}>Order Medicine</Text>
           <View style={styles.orderList}>
-            {sortedOrderOptions.length === 0 && search.length > 0 ? (
+            {medicinesLoading ? (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Loading medicines...</Text>
+              </View>
+            ) : filteredMedicines.length === 0 && search.length > 0 ? (
               <View style={styles.noResults}>
                 <FontAwesome name="search" size={24} color="#95a5a6" />
-                <Text style={styles.noResultsText}>No order options found</Text>
+                <Text style={styles.noResultsText}>No medicines found</Text>
+              </View>
+            ) : filteredMedicines.length === 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="medkit" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No medicines available</Text>
               </View>
             ) : (
-              sortedOrderOptions.map((option, index) => (
-              <View key={option.name} style={styles.orderItem}>
-                <View style={styles.orderLeft}>
-                  <View style={styles.orderIcon}>
-                    <FontAwesome name={option.icon as FontAwesomeIconName} size={18} color="#7f8c8d" />
+              filteredMedicines.slice(0, 5).map((medicine, index) => (
+                <View key={medicine.id} style={styles.orderItem}>
+                  <View style={styles.orderLeft}>
+                    <View style={[styles.orderIcon, { backgroundColor: medicinesService.getMedicineColor(medicine.category) + '20' }]}>
+                      <FontAwesome name={medicinesService.getMedicineIcon(medicine.category) as FontAwesomeIconName} size={18} color={medicinesService.getMedicineColor(medicine.category)} />
                     </View>
-                  <View style={styles.orderInfo}>
-                    <Text style={styles.orderName}>{option.name}</Text>
-                    {option.price && <Text style={styles.orderPrice}>{option.price}</Text>}
+                    <View style={styles.orderInfo}>
+                      <Text style={styles.orderName}>{medicine.name}</Text>
+                      <Text style={styles.orderPrice}>
+                        {medicinesService.formatPriceRange(medicine.min_price, medicine.max_price)}
+                        {medicine.prescription_required && (
+                          <Text style={{ color: '#e74c3c', fontSize: 12 }}> • Prescription Required</Text>
+                        )}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#7f8c8d' }}>
+                        {medicine.category} • {medicine.available_pharmacies || 0} pharmacies
+                      </Text>
+                    </View>
                   </View>
-                </View>
-                <TouchableOpacity 
-                  style={styles.orderButton} 
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    if (option.action === 'Add to cart') {
-                      // Navigate to pharmacy details page for medicine
+                  <TouchableOpacity 
+                    style={styles.orderButton} 
+                    activeOpacity={0.7}
+                    onPress={() => {
                       router.push({
                         pathname: '/pharmacy-details-modal',
                         params: {
-                          pharmacyName: 'CityMed Pharmacy',
-                          pharmacyDistance: '1.2 km',
-                          pharmacyOpen: 'true'
+                          pharmacyName: medicine.pharmacy_names?.[0] || 'Available Pharmacies',
+                          medicineName: medicine.name,
+                          medicineCategory: medicine.category
                         }
                       });
-                    } else if (option.action === 'Book') {
-                      // Navigate to hospital details page for appointments
-                      router.push({
-                        pathname: '/hospital-details-modal',
-                        params: {
-                          hospitalName: 'Holy Family Hospital',
-                          hospitalDistance: '2.1 km',
-                          hospitalOpen: 'true'
-                        }
-                      });
-                    }
-                  }}
-                >
-                  <Text style={styles.orderButtonText}>{option.action}</Text>
-                </TouchableOpacity>
-              </View>
-            ))
+                    }}
+                  >
+                    <Text style={styles.orderButtonText}>Add to Cart</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
             )}
           </View>
-            </View>
+        </View>
+
+        {/* Book Appointment Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Book Appointment</Text>
+          <View style={styles.orderList}>
+            {professionalsLoading ? (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Loading professionals...</Text>
+              </View>
+            ) : filteredProfessionals.length === 0 && search.length > 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="search" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No professionals found</Text>
+              </View>
+            ) : filteredProfessionals.length === 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="user-md" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No professionals available</Text>
+              </View>
+            ) : (
+              filteredProfessionals.slice(0, 3).map((professional, index) => (
+                <View key={professional.id} style={styles.orderItem}>
+                  <View style={styles.orderLeft}>
+                    <View style={[styles.orderIcon, { backgroundColor: professionalsService.getProfessionalColor(professional.specialty) + '20' }]}>
+                      <FontAwesome name={professionalsService.getProfessionalIcon(professional.specialty) as FontAwesomeIconName} size={18} color={professionalsService.getProfessionalColor(professional.specialty)} />
+                    </View>
+                    <View style={styles.orderInfo}>
+                      <Text style={styles.orderName}>{professional.full_name}</Text>
+                      <Text style={styles.orderPrice}>
+                        {professional.specialty} • {professional.experience_text}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                        <FontAwesome name="star" size={12} color="#f39c12" />
+                        <Text style={{ fontSize: 12, color: '#7f8c8d', marginLeft: 4 }}>
+                          {professionalsService.formatRating(professional.rating || 0)} ({professional.total_reviews || 0} reviews)
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TouchableOpacity 
+                    style={[styles.orderButton, !professional.is_available && { backgroundColor: '#95a5a6' }]} 
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      if (professional.is_available) {
+                        router.push({
+                          pathname: '/hospital-details-modal',
+                          params: {
+                            hospitalName: 'Available Hospitals',
+                            professionalName: professional.full_name,
+                            professionalSpecialty: professional.specialty
+                          }
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={styles.orderButtonText}>
+                      {professional.is_available ? 'Book Now' : 'Unavailable'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        </View>
 
         {/* Chat with Professional Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Chat with a Professional</Text>
           <View style={styles.chatList}>
-            {chatProfessionals.map((professional, index) => (
-              <TouchableOpacity 
-                key={professional.name} 
-                style={styles.chatItem}
-                onPress={() => router.push('/(tabs)/chat')}
-                activeOpacity={0.7}
-              >
-                <Image source={{ uri: professional.avatar }} style={styles.chatAvatar} />
-                <Text style={styles.chatName}>{professional.name}</Text>
-          </TouchableOpacity>
-            ))}
+            {professionalsLoading ? (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Loading professionals...</Text>
+              </View>
+            ) : filteredProfessionals.length === 0 ? (
+              <View style={styles.noResults}>
+                <FontAwesome name="user-md" size={24} color="#95a5a6" />
+                <Text style={styles.noResultsText}>No professionals available</Text>
+              </View>
+            ) : (
+              filteredProfessionals.slice(0, 3).map((professional, index) => (
+                <TouchableOpacity 
+                  key={professional.id} 
+                  style={[
+                    styles.chatItem, 
+                    !professional.is_available && styles.chatItemUnavailable,
+                    index === filteredProfessionals.slice(0, 3).length - 1 && { borderBottomWidth: 0 }
+                  ]}
+                  onPress={() => professional.is_available ? router.push('/(tabs)/chat') : null}
+                  activeOpacity={professional.is_available ? 0.7 : 1}
+                >
+                  <View style={styles.chatItemContent}>
+                    <View style={styles.chatAvatarContainer}>
+                      <Image 
+                        source={{ uri: professional.profile_image || 'https://randomuser.me/api/portraits/men/32.jpg' }} 
+                        style={styles.chatAvatar} 
+                      />
+                      {professional.is_available && (
+                        <View style={styles.onlineIndicator} />
+                      )}
+                    </View>
+                    <View style={styles.chatInfo}>
+                      <Text style={styles.chatName}>{professional.full_name}</Text>
+                      <Text style={styles.chatSpecialty}>{professional.specialty}</Text>
+                      <View style={styles.chatRating}>
+                        <FontAwesome name="star" size={12} color="#f39c12" />
+                        <Text style={styles.chatRatingText}>{professionalsService.formatRating(professional.rating || 0)}</Text>
+                        <Text style={styles.chatExperience}> • {professional.experience_text || `${professional.experience_years || 0} years experience`}</Text>
+                      </View>
+                      {!professional.is_available && (
+                        <Text style={styles.chatUnavailable}>Currently unavailable</Text>
+                      )}
+                    </View>
+                    <View style={styles.chatAction}>
+                      <FontAwesome 
+                        name={professional.is_available ? "comment" : "clock-o"} 
+                        size={16} 
+                        color={professional.is_available ? "#3498db" : "#95a5a6"} 
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
         </View>
       </ScrollView>
@@ -565,11 +861,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chatList: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
     backgroundColor: '#fff',
     borderRadius: 12,
-    paddingVertical: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -577,18 +870,77 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   chatItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  chatItemContent: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  chatItemUnavailable: {
+    opacity: 0.6,
+  },
+  chatAvatarContainer: {
+    position: 'relative',
+    marginBottom: 8,
   },
   chatAvatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    marginBottom: 8,
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#2ecc71',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  chatInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  chatAction: {
+    marginLeft: 12,
+    paddingHorizontal: 8,
   },
   chatName: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#2c3e50',
-    fontWeight: '500',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  chatSpecialty: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 4,
+  },
+  chatRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  chatRatingText: {
+    fontSize: 12,
+    color: '#f39c12',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  chatExperience: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginLeft: 4,
+  },
+  chatUnavailable: {
+    fontSize: 11,
+    color: '#e74c3c',
+    fontStyle: 'italic',
   },
   noResults: {
     alignItems: 'center',
@@ -598,5 +950,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#95a5a6',
     marginTop: 12,
+  },
+  loadingContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
   },
 });

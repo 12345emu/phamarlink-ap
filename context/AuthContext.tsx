@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authService, User, LoginCredentials, SignupData } from '../services/authService';
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  user: any | null;
+  user: User | null;
   login: (email: string, password: string) => Promise<boolean>;
-  signup: (userData: any) => Promise<boolean>;
+  signup: (userData: SignupData) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
   firstTimeUser: boolean;
@@ -26,7 +27,7 @@ export const useAuth = () => {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [firstTimeUser, setFirstTimeUser] = useState(true);
 
@@ -42,6 +43,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const firstTimeFlag = await AsyncStorage.getItem('firstTimeUser');
       
       console.log('AuthContext - Stored data:', { token: !!token, userData: !!userData, firstTimeFlag });
+      console.log('AuthContext - Raw values:', { token, userData, firstTimeFlag });
       
       // For demo/testing: Always show logo page first for new users
       // In production, you might want to check if this is a fresh app install
@@ -71,29 +73,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       
-      // Simulate API call - in real app, this would be an actual API request
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Use the auth service for real API call
+      const credentials: LoginCredentials = { email, password };
+      const response = await authService.login(credentials);
       
-      // For demo purposes, accept any email/password combination
-      if (email && password) {
-        const userData = {
-          id: '1',
-          email,
-          name: email.split('@')[0], // Use email prefix as name for demo
-          userType: 'patient'
-        };
-        
-        // Store authentication data
-        await AsyncStorage.setItem('userToken', 'demo-token-123');
-        await AsyncStorage.setItem('userData', JSON.stringify(userData));
-        
+      if (response.success && response.data) {
         setIsAuthenticated(true);
-        setUser(userData);
+        setUser(response.data.user);
         setFirstTimeUser(false); // User is not new after successful login
         return true;
+      } else {
+        console.error('Login failed:', response.message);
+        return false;
       }
-      
-      return false;
     } catch (error) {
       console.error('Login error:', error);
       return false;
@@ -102,30 +94,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (userData: any): Promise<boolean> => {
+  const signup = async (userData: SignupData): Promise<boolean> => {
     try {
       setLoading(true);
       
-      // Simulate API call - in real app, this would be an actual API request
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Use the auth service for real API call
+      const response = await authService.signup(userData);
       
-      // For demo purposes, create a user account
-      const newUser = {
-        id: Date.now().toString(),
-        email: userData.email,
-        name: userData.fullName,
-        userType: userData.selectedUserType,
-        phone: userData.phone
-      };
-      
-      // Store authentication data
-      await AsyncStorage.setItem('userToken', 'demo-token-123');
-      await AsyncStorage.setItem('userData', JSON.stringify(newUser));
-      
-      setIsAuthenticated(true);
-      setUser(newUser);
-      setFirstTimeUser(false); // User is not new after successful signup
-      return true;
+      if (response.success && response.data) {
+        setIsAuthenticated(true);
+        setUser(response.data.user);
+        setFirstTimeUser(false); // User is not new after successful signup
+        return true;
+      } else {
+        console.error('Signup failed:', response.message);
+        return false;
+      }
     } catch (error) {
       console.error('Signup error:', error);
       return false;
@@ -138,15 +122,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       
-      // Clear authentication data
-      await AsyncStorage.removeItem('userToken');
-      await AsyncStorage.removeItem('userData');
+      // Use the auth service for real API call
+      await authService.logout();
       
+      // Clear local state
       setIsAuthenticated(false);
       setUser(null);
-      setFirstTimeUser(true); // Reset firstTimeUser on logout
+      setFirstTimeUser(true); // Reset to first time user after logout
     } catch (error) {
       console.error('Logout error:', error);
+      // Even if API call fails, clear local state
+      setIsAuthenticated(false);
+      setUser(null);
+      setFirstTimeUser(true);
     } finally {
       setLoading(false);
     }
@@ -159,18 +147,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetFirstTimeUser = () => {
     setFirstTimeUser(true);
-    AsyncStorage.removeItem('firstTimeUser');
+    AsyncStorage.setItem('firstTimeUser', 'true');
   };
 
-  const clearAllData = async () => {
+  const clearAllData = async (): Promise<void> => {
     try {
       await AsyncStorage.multiRemove(['userToken', 'userData', 'firstTimeUser']);
       setIsAuthenticated(false);
       setUser(null);
       setFirstTimeUser(true);
-      setLoading(false);
     } catch (error) {
-      console.error('Error clearing data:', error);
+      console.error('Error clearing all data:', error);
     }
   };
 
@@ -184,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     firstTimeUser,
     markUserAsNotFirstTime,
     resetFirstTimeUser,
-    clearAllData
+    clearAllData,
   };
 
   return (

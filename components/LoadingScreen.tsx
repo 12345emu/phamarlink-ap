@@ -35,7 +35,7 @@ export default function LoadingScreen() {
       
       <View style={styles.content}>
         <View style={styles.logoContainer}>
-          <FontAwesome name="heartbeat" size={60} color="#fff" />
+          <FontAwesome name="heartbeat" size={60} color="#e74c3c" />
         </View>
         <Text style={styles.appName}>PharmaLink</Text>
         <Text style={styles.loadingText}>Loading...</Text>

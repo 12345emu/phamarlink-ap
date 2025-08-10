@@ -4,17 +4,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useAuth } from '../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
 export default function LogoPage() {
   const router = useRouter();
+  const { isAuthenticated, firstTimeUser } = useAuth();
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
-
-  console.log('LogoPage - Component rendered');
+  
+  console.log('LogoPage - Component rendered, Auth State:', { isAuthenticated, firstTimeUser });
 
   useEffect(() => {
     // Breathing/heartbeat animation
@@ -61,7 +63,7 @@ export default function LogoPage() {
     pulseAnimation.start();
     progressAnimation.start();
 
-    // Navigate to welcome page after 7 seconds
+    // Navigate based on authentication state after 7 seconds
     const navigationTimer = setTimeout(() => {
       // Fade out animation
       Animated.timing(opacityAnim, {
@@ -69,7 +71,17 @@ export default function LogoPage() {
         duration: 500,
         useNativeDriver: true,
       }).start(() => {
-        router.replace('/welcome');
+        // Check authentication state and navigate accordingly
+        if (isAuthenticated) {
+          console.log('LogoPage - User is authenticated, navigating to tabs');
+          router.replace('/(tabs)');
+        } else if (firstTimeUser) {
+          console.log('LogoPage - User is first time, navigating to welcome');
+          router.replace('/welcome');
+        } else {
+          console.log('LogoPage - User is returning but not authenticated, navigating to login');
+          router.replace('/login');
+        }
       });
     }, 7000);
 

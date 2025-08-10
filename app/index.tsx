@@ -15,6 +15,10 @@ export default function Index() {
     return <LoadingScreen />;
   }
 
+  // TEMPORARY: Force LogoPage for testing - remove this when flow is working
+  console.log('Index.tsx - TEMPORARY: Forcing LogoPage for testing');
+  return <LogoPage />;
+
   // For first-time users, show LogoPage first
   if (firstTimeUser) {
     console.log('Index.tsx - Showing LogoPage for first-time user');
