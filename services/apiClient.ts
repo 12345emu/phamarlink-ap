@@ -44,9 +44,17 @@ class ApiClient {
   this.client.interceptors.request.use(
     async (config: any) => {
       const token = await this.getAuthToken();
+      console.log('🔍 Request interceptor - Token found:', token ? `${token.substring(0, 20)}...` : 'No token');
+      console.log('🔍 Request URL:', config.url);
+      console.log('🔍 Request method:', config.method);
+      
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+        console.log('🔍 Authorization header set:', `Bearer ${token.substring(0, 20)}...`);
+      } else {
+        console.log('⚠️ No token available for request');
       }
+      
       return config;
     },
     (error: any) => {
@@ -112,9 +120,11 @@ class ApiClient {
   // Get auth token from storage
   private async getAuthToken(): Promise<string | null> {
     try {
-      return await AsyncStorage.getItem('userToken');
+      const token = await AsyncStorage.getItem('userToken');
+      console.log('🔍 getAuthToken - Retrieved token:', token ? `${token.substring(0, 20)}...` : 'No token found');
+      return token;
     } catch (error) {
-      console.error('Error getting auth token:', error);
+      console.error('❌ Error getting auth token:', error);
       return null;
     }
   }

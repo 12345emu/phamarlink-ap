@@ -2,17 +2,17 @@ import React, { useRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs, useRouter } from 'expo-router';
 import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
-import CartHeaderButton from '@/components/CartHeaderButton';
-import AppointmentsHeaderButton from '@/components/AppointmentsHeaderButton';
-import ProfileImage from '@/components/ProfileImage';
-import FloatingMedicineButton from '@/components/FloatingMedicineButton';
+import CartHeaderButton from '../../components/CartHeaderButton';
+import AppointmentsHeaderButton from '../../components/AppointmentsHeaderButton';
+import ProfileImage from '../../components/ProfileImage';
+import FloatingMedicineButton from '../../components/FloatingMedicineButton';
 import { useProfile } from '../../context/ProfileContext';
 import { useOrders } from '../../context/OrdersContext';
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
-import CustomTabBar from '@/components/CustomTabBar';
+import Colors from '../../constants/Colors';
+import { useColorScheme } from '../../components/useColorScheme';
+import { useClientOnlyValue } from '../../components/useClientOnlyValue';
+import CustomTabBar from '../../components/CustomTabBar';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function AnimatedTabBarIcon({ name, focused }: { name: React.ComponentProps<typeof FontAwesome>['name']; focused: boolean }) {

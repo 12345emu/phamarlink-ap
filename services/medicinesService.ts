@@ -14,9 +14,9 @@ export interface Medicine {
   manufacturer?: string;
   min_price?: number;
   max_price?: number;
-  available_pharmacies?: number;
+  available_facilities?: number;
   avg_stock?: number;
-  pharmacy_names?: string[];
+  facility_names?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -51,7 +51,17 @@ class MedicinesService {
       if (params?.sort_order) queryParams.append('sort_order', params.sort_order);
 
       const url = `${API_ENDPOINTS.MEDICINES.LIST}?${queryParams.toString()}`;
-      return await apiClient.get<Medicine[]>(url);
+      const response = await apiClient.get<any>(url);
+      
+      // Handle the backend response structure
+      if (response.success && response.data && response.data.medicines) {
+        return {
+          success: true,
+          data: response.data.medicines,
+        };
+      }
+      
+      return response;
     } catch (error) {
       console.error('Get medicines error:', error);
       return {
@@ -193,4 +203,4 @@ class MedicinesService {
 }
 
 // Export singleton instance
-export const medicinesService = new MedicinesService(); 
+export const medicinesService = new MedicinesService();

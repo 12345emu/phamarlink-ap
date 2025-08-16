@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, View, Text } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, View, Text, BackHandler } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
@@ -30,12 +30,66 @@ interface ChatContact {
 }
 
 export default function ChatScreen() {
+  const params = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState<'contacts' | 'chat'>('contacts');
   const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
+
+  // Handle incoming professional parameters and auto-start chat
+  useEffect(() => {
+    // Only run if we have professional parameters and haven't already started a chat
+    if (params.professionalId && params.professionalName && !selectedContact) {
+      const professionalContact: ChatContact = {
+        id: parseInt(params.professionalId as string),
+        name: params.professionalName as string,
+        role: (params.professionalRole as 'pharmacist' | 'doctor') || 'doctor',
+        pharmacy: params.facilityName as string || 'Unknown Facility',
+        avatar: params.professionalAvatar as string || 'user-md',
+        lastMessage: `Chat with ${params.professionalName}`,
+        lastMessageTime: 'Now',
+        unreadCount: 0,
+        isOnline: true
+      };
+      
+      // Auto-start chat with the professional
+      setSelectedContact(professionalContact);
+      setActiveTab('chat');
+      setMessages([{
+        id: 1,
+        text: `Hello! I'm ${professionalContact.name}, ${params.professionalSpecialty}. How can I help you today?`,
+        sender: professionalContact.role,
+        timestamp: new Date(),
+        isRead: true
+      }]);
+    }
+  }, [params.professionalId, params.professionalName, selectedContact]);
+
+  // Handle back button/gesture
+  useEffect(() => {
+    const backAction = () => {
+      if (activeTab === 'chat' && selectedContact) {
+        goBackToContacts();
+        return true; // Prevent default back behavior
+      }
+      return false; // Allow default back behavior
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
+    return () => backHandler.remove();
+  }, [activeTab, selectedContact]);
+
+  // Function to go back to contacts view
+  const goBackToContacts = () => {
+    setSelectedContact(null);
+    setActiveTab('contacts');
+    setMessages([]);
+    // Clear the URL parameters by navigating to the chat tab without params
+    router.replace('/(tabs)/chat');
+  };
 
   const contacts: ChatContact[] = [
     {
@@ -161,6 +215,10 @@ export default function ChatScreen() {
   const startChat = (contact: ChatContact) => {
     setSelectedContact(contact);
     setActiveTab('chat');
+    // Clear any URL parameters when starting a chat from contacts
+    if (params.professionalId) {
+      router.replace('/(tabs)/chat');
+    }
   };
 
   const handleEmergencyCall = () => {
@@ -231,9 +289,32 @@ export default function ChatScreen() {
   );
 
   const renderChatTab = () => (
-    <View style={styles.chatContainer}>
+    <View 
+      style={styles.chatContainer}
+      onTouchStart={(e) => {
+        // Store initial touch position for swipe detection
+        const touch = e.nativeEvent.touches[0];
+        if (touch) {
+          (renderChatTab as any).startX = touch.pageX;
+        }
+      }}
+      onTouchEnd={(e) => {
+        // Detect swipe gesture
+        const touch = e.nativeEvent.changedTouches[0];
+        if (touch && (renderChatTab as any).startX) {
+          const deltaX = touch.pageX - (renderChatTab as any).startX;
+          const deltaY = Math.abs(touch.pageY - (e.nativeEvent.touches[0]?.pageY || 0));
+          
+          // If it's a right swipe (deltaX > 50) and not too vertical (deltaY < 100)
+          if (deltaX > 50 && deltaY < 100) {
+            goBackToContacts();
+          }
+        }
+        (renderChatTab as any).startX = null;
+      }}
+    >
       <View style={styles.chatHeader}>
-        <TouchableOpacity onPress={() => setActiveTab('contacts')} style={styles.backButton}>
+        <TouchableOpacity onPress={goBackToContacts} style={styles.backButton}>
           <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
         </TouchableOpacity>
         <View style={styles.chatContactInfo}>

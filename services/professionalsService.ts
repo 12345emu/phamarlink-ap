@@ -19,6 +19,9 @@ export interface HealthcareProfessional {
   is_verified: boolean;
   profile_image?: string;
   bio?: string;
+  facility_id?: string;
+  facility_name?: string;
+  facility_type?: string;
   created_at: string;
   updated_at: string;
 }
@@ -134,6 +137,37 @@ class ProfessionalsService {
         success: false,
         message: 'Failed to fetch professional details. Please try again.',
         error: 'Professional Details Error',
+      };
+    }
+  }
+
+  // Get professionals by facility ID
+  async getProfessionalsByFacility(facilityId: string, limit: number = 10): Promise<ApiResponse<HealthcareProfessional[]>> {
+    try {
+      const url = `${API_ENDPOINTS.PROFESSIONALS.GET_BY_FACILITY(facilityId)}?limit=${limit}`;
+      const response = await apiClient.get<any>(url);
+      
+      if (response.success && response.data && response.data.professionals) {
+        return {
+          success: true,
+          data: response.data.professionals.map((professional: any) => ({
+            ...professional,
+            rating: parseFloat(professional.rating) || 0,
+            total_reviews: parseInt(professional.total_reviews) || 0,
+            experience_years: parseInt(professional.experience_years) || 0,
+            full_name: `${professional.first_name} ${professional.last_name}`,
+            experience_text: `${professional.experience_years || 0} years experience`
+          })),
+        };
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('Get professionals by facility error:', error);
+      return {
+        success: false,
+        message: 'Failed to fetch facility professionals. Please try again.',
+        error: 'Facility Professionals Error',
       };
     }
   }

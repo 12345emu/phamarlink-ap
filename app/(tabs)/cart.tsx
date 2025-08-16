@@ -16,7 +16,7 @@ export default function CartScreen() {
   const { cart, removeFromCart, updateQuantity, clearCart } = useCart();
   const [checkoutAnim] = useState(new Animated.Value(1));
 
-  const cartTotal = cart.reduce((total, item) => total + (item.medicine.price * item.quantity), 0);
+  const cartTotal = cart.reduce((total, item) => total + (item.pricePerUnit * item.quantity), 0);
   const deliveryFee = 5.00;
   const tax = cartTotal * 0.05; // 5% tax
   const grandTotal = cartTotal + deliveryFee + tax;
@@ -111,16 +111,20 @@ export default function CartScreen() {
           <>
             {/* Cart Items */}
             <View style={styles.cartItems}>
-              {cart.map((item) => (
-                <View key={item.medicine.id} style={styles.cartItem}>
-                  <Image source={{ uri: item.medicine.image }} style={styles.itemImage} />
+                             {cart.map((item) => (
+                 <View key={item.id} style={styles.cartItem}>
+                                     <Image 
+                     source={{ uri: item.medicine.image || 'https://via.placeholder.com/70x70?text=Medicine' }} 
+                     style={styles.itemImage}
+                     defaultSource={require('../../assets/images/icon.png')}
+                   />
                   <View style={styles.itemInfo}>
                     <Text style={styles.itemName}>{item.medicine.name}</Text>
-                    <Text style={styles.itemPrice}>GHS {item.medicine.price.toFixed(2)}</Text>
+                    <Text style={styles.itemPrice}>GHS {Number(item.pricePerUnit).toFixed(2)}</Text>
                     <View style={styles.quantityContainer}>
                       <TouchableOpacity
                         style={[styles.quantityButton, item.quantity <= 1 && styles.quantityButtonDisabled]}
-                        onPress={() => updateQuantity(item.medicine.id, item.quantity - 1)}
+                        onPress={() => updateQuantity(item.id, item.quantity - 1)}
                         disabled={item.quantity <= 1}
                         activeOpacity={0.7}
                       >
@@ -129,7 +133,7 @@ export default function CartScreen() {
                       <Text style={styles.quantityText}>{item.quantity}</Text>
                       <TouchableOpacity
                         style={styles.quantityButton}
-                        onPress={() => updateQuantity(item.medicine.id, item.quantity + 1)}
+                        onPress={() => updateQuantity(item.id, item.quantity + 1)}
                         activeOpacity={0.7}
                       >
                         <FontAwesome name="plus" size={12} color={ACCENT} />
@@ -138,11 +142,11 @@ export default function CartScreen() {
                   </View>
                   <View style={styles.itemActions}>
                     <Text style={styles.itemTotal}>
-                      GHS {(item.medicine.price * item.quantity).toFixed(2)}
+                      GHS {(Number(item.pricePerUnit) * item.quantity).toFixed(2)}
                     </Text>
                     <TouchableOpacity
                       style={styles.removeButton}
-                      onPress={() => handleRemoveItem(item.medicine.id)}
+                      onPress={() => handleRemoveItem(item.id)}
                       activeOpacity={0.7}
                     >
                       <FontAwesome name="trash" size={14} color={DANGER} />

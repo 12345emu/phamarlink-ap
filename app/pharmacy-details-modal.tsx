@@ -5,6 +5,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCart } from '../context/CartContext';
 import MapView, { Marker } from 'react-native-maps';
+import { facilitiesService, Facility } from '../services/facilitiesService';
+import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -21,6 +23,22 @@ interface Medicine {
   image: string;
 }
 
+interface DatabaseMedicine {
+  id: number;
+  name: string;
+  generic_name?: string;
+  category: string;
+  prescription_required: boolean;
+  dosage_form?: string;
+  strength?: string;
+  description?: string;
+  manufacturer?: string;
+  stock_quantity: number;
+  price: number;
+  discount_price?: number;
+  is_available: boolean;
+}
+
 export default function PharmacyDetailsScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
@@ -28,22 +46,83 @@ export default function PharmacyDetailsScreen() {
   const [addedToCart, setAddedToCart] = useState<Set<number>>(new Set());
   const [loadingItem, setLoadingItem] = useState<number | null>(null);
   const [medicineSearch, setMedicineSearch] = useState('');
+  const [facility, setFacility] = useState<Facility | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [facilityMedicines, setFacilityMedicines] = useState<any>(null);
+  const [medicinesLoading, setMedicinesLoading] = useState(false);
+  const [facilityProfessionals, setFacilityProfessionals] = useState<HealthcareProfessional[]>([]);
+  const [professionalsLoading, setProfessionalsLoading] = useState(false);
 
+  // Fetch facility data, medicines, and professionals from API
+  useEffect(() => {
+    const fetchFacilityData = async () => {
+      try {
+        const facilityId = params.id as string;
+        if (facilityId) {
+          console.log('🔍 Fetching facility data for ID:', facilityId);
+          
+          // Fetch facility data
+          const facilityResponse = await facilitiesService.getFacilityById(facilityId);
+          if (facilityResponse.success && facilityResponse.data) {
+            console.log('✅ Facility data fetched:', facilityResponse.data);
+            setFacility(facilityResponse.data);
+          } else {
+            console.log('❌ Failed to fetch facility data:', facilityResponse.message);
+          }
+
+          // Fetch facility medicines
+          setMedicinesLoading(true);
+          const medicinesResponse = await facilitiesService.getFacilityMedicines(facilityId);
+          if (medicinesResponse.success && medicinesResponse.data) {
+            console.log('✅ Facility medicines fetched:', medicinesResponse.data);
+            setFacilityMedicines(medicinesResponse.data);
+          } else {
+            console.log('❌ Failed to fetch facility medicines:', medicinesResponse.message);
+          }
+
+          // Fetch facility professionals
+          setProfessionalsLoading(true);
+          const professionalsResponse = await professionalsService.getProfessionalsByFacility(facilityId, 10);
+          if (professionalsResponse.success && professionalsResponse.data) {
+            console.log('✅ Facility professionals fetched:', professionalsResponse.data);
+            setFacilityProfessionals(professionalsResponse.data);
+          } else {
+            console.log('❌ Failed to fetch facility professionals:', professionalsResponse.message);
+          }
+        } else {
+          console.log('❌ No facility ID provided in params');
+        }
+      } catch (error) {
+        console.error('Error fetching facility data:', error);
+      } finally {
+        setLoading(false);
+        setMedicinesLoading(false);
+        setProfessionalsLoading(false);
+      }
+    };
+
+    fetchFacilityData();
+  }, [params.id]);
+
+  // Fallback pharmacy data if API fails
   const pharmacy = {
-    name: params.pharmacyName as string || 'CityMed Pharmacy',
+    name: facility?.name || params.pharmacyName as string || 'CityMed Pharmacy',
     image: params.pharmacyImage as string || 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80',
-    rating: parseFloat(params.pharmacyRating as string) || 4.5,
+    rating: facility?.rating || parseFloat(params.pharmacyRating as string) || 4.5,
     distance: params.pharmacyDistance as string || '1,2 km',
-    address: params.pharmacyAddress as string || '456 Oak Ave, Accra',
-    isOpen: params.pharmacyOpen === 'true',
-    phone: '+233-555-0123',
-    email: 'info@citymedpharmacy.com',
+    address: facility?.address?.street || params.pharmacyAddress as string || '456 Pharmacy Street, Osu',
+    isOpen: facility?.isOpen || params.pharmacyOpen === 'true',
+    phone: facility?.phone || params.phone as string || '+233-555-0123',
+    email: facility?.email || 'info@citymedpharmacy.com',
     license: 'PHM-2024-001',
     pharmacist: 'Dr. Kwame Asante',
-    id: params.id as string || '1',
+    id: facility?.id || params.id as string || '1',
   };
 
-  const services = [
+  // Transform database services to display format
+  const getServicesFromDatabase = () => {
+    if (!facility?.services || facility.services.length === 0) {
+      return [
     {
       id: 1,
       name: "Prescription Filling",
@@ -81,6 +160,39 @@ export default function PharmacyDetailsScreen() {
       description: "Blood pressure, glucose testing",
     },
   ];
+    }
+
+    // Map service names to icons
+    const serviceIconMap: { [key: string]: string } = {
+      'Prescription Filling': 'medkit',
+      'Health Consultations': 'stethoscope',
+      'Delivery Service': 'truck',
+      'Insurance Accepted': 'credit-card',
+      'Vaccinations': 'syringe',
+      'Health Monitoring': 'heartbeat',
+      'Over-the-counter': 'pills',
+      'Emergency Care': 'ambulance',
+      'Surgery': 'scissors',
+      'Maternity': 'baby',
+      'Pediatrics': 'child',
+      'Cardiology': 'heartbeat',
+      'Neurology': 'brain',
+      'General Consultation': 'stethoscope',
+      'Specialized Care': 'user-md',
+      'Laboratory': 'flask',
+      'X-Ray': 'image',
+      'Ultrasound': 'image',
+    };
+
+    return facility.services.map((service, index) => ({
+      id: index + 1,
+      name: service,
+      icon: serviceIconMap[service] || 'medkit',
+      description: `${service} services available`,
+    }));
+  };
+
+  const services = getServicesFromDatabase();
 
   const medicineCategories = [
     {
@@ -125,35 +237,10 @@ export default function PharmacyDetailsScreen() {
     },
   ];
 
-  const pharmacists = [
-    {
-      id: 1,
-      name: "Dr. Kwame Asante",
-      specialty: "Clinical Pharmacist",
-      avatar: "https://randomuser.me/api/portraits/men/32.jpg",
-      available: true,
-      experience: "8 years",
-    },
-    {
-      id: 2,
-      name: "Pharm. Sarah Mensah",
-      specialty: "Community Pharmacist",
-      avatar: "https://randomuser.me/api/portraits/women/44.jpg",
-      available: true,
-      experience: "5 years",
-    },
-    {
-      id: 3,
-      name: "Pharm. Michael Osei",
-      specialty: "Consultant Pharmacist",
-      avatar: "https://randomuser.me/api/portraits/men/67.jpg",
-      available: false,
-      experience: "12 years",
-    },
-  ];
+
 
   const handleCall = () => {
-    const phoneNumber = pharmacy.phone;
+    const phoneNumber = facility?.phone || pharmacy.phone;
     if (phoneNumber) {
       Alert.alert(
         'Call Pharmacy',
@@ -175,6 +262,79 @@ export default function PharmacyDetailsScreen() {
       Alert.alert('Phone Number Unavailable', 'Phone number is not available for this pharmacy.');
     }
   };
+
+  const handleEmergencyCall = () => {
+    // Ghana emergency numbers
+    const emergencyNumbers = {
+      police: '191',
+      ambulance: '193',
+      fire: '192',
+      general: '112' // General emergency number
+    };
+
+    Alert.alert(
+      'Emergency Services',
+      'Which emergency service do you need?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Police (191)',
+          onPress: () => {
+            Alert.alert(
+              'Call Police',
+              'Are you sure you want to call the police emergency number (191)?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Call', onPress: () => Linking.openURL(`tel:${emergencyNumbers.police}`) }
+              ]
+            );
+          },
+        },
+        {
+          text: 'Ambulance (193)',
+          onPress: () => {
+            Alert.alert(
+              'Call Ambulance',
+              'Are you sure you want to call the ambulance emergency number (193)?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Call', onPress: () => Linking.openURL(`tel:${emergencyNumbers.ambulance}`) }
+              ]
+            );
+          },
+        },
+        {
+          text: 'Fire (192)',
+          onPress: () => {
+            Alert.alert(
+              'Call Fire Service',
+              'Are you sure you want to call the fire service emergency number (192)?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Call', onPress: () => Linking.openURL(`tel:${emergencyNumbers.fire}`) }
+              ]
+            );
+          },
+        },
+        {
+          text: 'General (112)',
+          onPress: () => {
+            Alert.alert(
+              'Call General Emergency',
+              'Are you sure you want to call the general emergency number (112)?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Call', onPress: () => Linking.openURL(`tel:${emergencyNumbers.general}`) }
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
   
   const handleDirections = () => {
     // Navigate to the pharmacy map modal with pharmacy data
@@ -182,12 +342,12 @@ export default function PharmacyDetailsScreen() {
       pathname: '/pharmacy-map-modal',
       params: {
         pharmacyName: pharmacy.name,
-        pharmacyAddress: pharmacy.address,
-        pharmacyPhone: pharmacy.phone,
+        pharmacyAddress: facility?.address?.street || pharmacy.address,
+        pharmacyPhone: facility?.phone || pharmacy.phone,
         pharmacyRating: pharmacy.rating.toString(),
         pharmacyDistance: pharmacy.distance,
-        latitude: '5.5600',
-        longitude: '-0.2057',
+        latitude: facility?.coordinates?.latitude?.toString() || '5.5650',
+        longitude: facility?.coordinates?.longitude?.toString() || '-0.2100',
       }
     });
   };
@@ -196,38 +356,54 @@ export default function PharmacyDetailsScreen() {
     router.push('/(tabs)/orders');
   };
 
-  const handleAddToCart = (medicine: any) => {
+  const handleAddToCart = async (medicine: any) => {
     setLoadingItem(medicine.id);
     
-    // Simulate loading
-    setTimeout(() => {
-      addToCart({
-        id: medicine.id,
-        name: medicine.name,
-        price: parseFloat(medicine.price.replace('GHS ', '')),
-        description: medicine.name,
-        prescription: medicine.prescription,
-        category: 'general',
-        image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80'
-      });
+    try {
+      // Get pharmacy ID from params or facility
+      const pharmacyId = parseInt(params.facilityId as string) || (facility?.id ? parseInt(facility.id.toString()) : 1);
+      const pricePerUnit = parseFloat(medicine.price.replace('GHS ', ''));
       
-      setAddedToCart(prev => new Set(prev).add(medicine.id));
+      // Use the new database-backed cart system
+      const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);
+      
+      if (success) {
+        setAddedToCart(prev => new Set(prev).add(medicine.id));
+        Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
+      } else {
+        Alert.alert('Error', 'Failed to add item to cart. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      Alert.alert('Error', 'Failed to add item to cart. Please try again.');
+    } finally {
       setLoadingItem(null);
-      
-      Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
-    }, 500);
+    }
   };
 
-  const handleChatWithPharmacist = (pharmacist: any) => {
-    if (pharmacist.available) {
-      router.push('/(tabs)/chat');
+  const handleChatWithPharmacist = (professional: any) => {
+    if (professional.is_available) {
+      // Navigate to chat page with professional information
+      router.push({
+        pathname: '/(tabs)/chat',
+        params: {
+          professionalId: professional.id.toString(),
+          professionalName: professional.full_name,
+          professionalRole: professional.specialty.toLowerCase().includes('pharmacist') ? 'pharmacist' : 'doctor',
+          facilityName: facility?.name || pharmacy.name,
+          professionalSpecialty: professional.specialty,
+          professionalAvatar: professionalsService.getProfessionalIcon(professional.specialty),
+          professionalRating: professional.rating.toString(),
+          professionalExperience: professional.experience_years.toString()
+        }
+      });
     } else {
-      Alert.alert('Pharmacist Unavailable', `${pharmacist.name} is currently not available for chat.`);
+      Alert.alert('Professional Unavailable', `${professional.full_name} is currently not available for chat.`);
     }
   };
 
   const handleEmail = () => {
-    const emailAddress = pharmacy.email;
+    const emailAddress = facility?.email || pharmacy.email;
     if (emailAddress) {
       Alert.alert(
         'Email Pharmacy',
@@ -262,23 +438,52 @@ export default function PharmacyDetailsScreen() {
           style: 'cancel',
         },
         {
-          text: 'Request Delivery',
+          text: 'Select Medicines',
           onPress: () => {
-            // Log the delivery request
-            console.log(`Delivery request submitted for ${pharmacy.name}`);
-            
-            Alert.alert(
-              'Delivery Request Submitted',
-              `Your delivery request has been submitted to ${pharmacy.name}. Their team will contact you shortly to confirm your order and delivery details.`,
+            // Navigate to checkout with delivery option
+            router.push({
+              pathname: '/(tabs)/checkout',
+              params: {
+                deliveryMode: 'true',
+                facilityId: params.facilityId as string,
+                facilityName: pharmacy.name
+              }
+            });
+          },
+        },
+        {
+          text: 'Quick Delivery',
+          onPress: () => {
+            // For quick delivery, show a form to collect delivery details
+            Alert.prompt(
+              'Quick Delivery Request',
+              'Please enter your delivery address:',
               [
                 {
-                  text: 'OK',
-                  onPress: () => {
-                    // Could navigate to delivery form or order page here
-                    console.log('User acknowledged delivery request');
+                  text: 'Cancel',
+                  style: 'cancel',
+                },
+                {
+                  text: 'Submit',
+                  onPress: (address) => {
+                    if (address && address.trim()) {
+                      // Submit quick delivery request
+                      submitDeliveryRequest({
+                        facilityId: params.facilityId as string,
+                        facilityName: pharmacy.name,
+                        deliveryAddress: address.trim(),
+                        deliveryType: 'quick',
+                        status: 'pending'
+                      });
+                    } else {
+                      Alert.alert('Error', 'Please enter a valid delivery address.');
+                    }
                   },
                 },
-              ]
+              ],
+              'plain-text',
+              '',
+              'Enter your full delivery address'
             );
           },
         },
@@ -286,21 +491,109 @@ export default function PharmacyDetailsScreen() {
     );
   };
 
+  const submitDeliveryRequest = (deliveryData: any) => {
+    // Simulate API call for delivery request
+    console.log('Submitting delivery request:', deliveryData);
+    
+    // Show loading state
+            Alert.alert(
+      'Processing...',
+      'Submitting your delivery request...',
+      [],
+      { cancelable: false }
+    );
+
+    // Simulate API delay
+    setTimeout(() => {
+      Alert.alert(
+        'Delivery Request Submitted!',
+        `Your delivery request has been submitted to ${pharmacy.name}.\n\nRequest ID: DR-${Date.now().toString().slice(-6)}\n\nTheir team will contact you within 30 minutes to confirm your order and delivery details.`,
+        [
+          {
+            text: 'View Request',
+                  onPress: () => {
+              // Could navigate to a delivery tracking page
+              console.log('Navigate to delivery tracking');
+            },
+          },
+          {
+            text: 'OK',
+            onPress: () => {
+              console.log('Delivery request acknowledged');
+          },
+        },
+      ]
+    );
+    }, 2000);
+  };
+
+  // Transform database medicines to display format
+  const getMedicineCategoriesFromDatabase = () => {
+    if (!facilityMedicines?.medicines_by_category) {
+      return medicineCategories; // Fallback to hardcoded data
+    }
+
+    const categories = Object.keys(facilityMedicines.medicines_by_category).map(categoryName => ({
+      id: categoryName.toLowerCase().replace(/\s+/g, '-'),
+      name: categoryName,
+      icon: getCategoryIcon(categoryName),
+      medicines: facilityMedicines.medicines_by_category[categoryName].map((medicine: DatabaseMedicine, index: number) => ({
+        id: medicine.id,
+        name: medicine.name,
+        price: `GHS ${medicine.price}`,
+        prescription: medicine.prescription_required,
+        strength: medicine.strength,
+        stock: medicine.stock_quantity,
+        description: medicine.description
+      }))
+    }));
+
+    return categories;
+  };
+
+  // Get icon for medicine category
+  const getCategoryIcon = (category: string): string => {
+    const iconMap: { [key: string]: string } = {
+      'Analgesic': 'medkit',
+      'Antibiotic': 'shield',
+      'NSAID': 'medkit',
+      'Vitamin': 'leaf',
+      'Supplement': 'leaf',
+      'First Aid': 'bandage',
+      'Pain Relief': 'medkit',
+      'Antibiotics': 'shield',
+      'Vitamins & Supplements': 'leaf',
+    };
+    return iconMap[category] || 'medkit';
+  };
+
   // Filter medicines based on search query
   const getFilteredMedicineCategories = () => {
+    const categories = getMedicineCategoriesFromDatabase();
+    
     if (!medicineSearch.trim()) {
-      return medicineCategories;
+      return categories;
     }
 
     const searchLower = medicineSearch.toLowerCase();
-    return medicineCategories.map(category => ({
+    return categories.map(category => ({
       ...category,
-      medicines: category.medicines.filter(medicine =>
+      medicines: category.medicines.filter((medicine: any) =>
         medicine.name.toLowerCase().includes(searchLower) ||
         category.name.toLowerCase().includes(searchLower)
       )
     })).filter(category => category.medicines.length > 0);
   };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading pharmacy details...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -318,6 +611,12 @@ export default function PharmacyDetailsScreen() {
           <View style={styles.pharmacyDetails}>
             <Text style={styles.pharmacyDetail}>License: {pharmacy.license}</Text>
             <Text style={styles.pharmacyDetail}>Pharmacist: {pharmacy.pharmacist}</Text>
+            {facility?.phone && (
+              <Text style={styles.pharmacyDetail}>Phone: {facility.phone}</Text>
+            )}
+            {facility?.email && (
+              <Text style={styles.pharmacyDetail}>Email: {facility.email}</Text>
+            )}
           </View>
         </View>
 
@@ -326,8 +625,8 @@ export default function PharmacyDetailsScreen() {
           <MapView
             style={styles.map}
             initialRegion={{
-              latitude: 5.5650,
-              longitude: -0.2100,
+              latitude: facility?.coordinates?.latitude || 5.5650,
+              longitude: facility?.coordinates?.longitude || -0.2100,
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
@@ -340,8 +639,8 @@ export default function PharmacyDetailsScreen() {
           >
             <Marker
               coordinate={{
-                latitude: 5.5650,
-                longitude: -0.2100,
+                latitude: facility?.coordinates?.latitude || 5.5650,
+                longitude: facility?.coordinates?.longitude || -0.2100,
               }}
               title={pharmacy.name}
               description="Pharmacy"
@@ -414,9 +713,63 @@ export default function PharmacyDetailsScreen() {
             </View>
         </View>
 
+        {/* Chat with Pharmacists Section */}
+        <View style={styles.professionalsSection}>
+          <Text style={styles.sectionTitle}>Chat with Pharmacists</Text>
+          {professionalsLoading && (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading professionals...</Text>
+            </View>
+          )}
+          
+          {!professionalsLoading && facilityProfessionals.length > 0 ? (
+            <View style={styles.professionalsList}>
+              {facilityProfessionals.map((professional) => (
+                <View key={professional.id} style={styles.professionalItem}>
+                  <View style={styles.professionalAvatar}>
+                    <FontAwesome 
+                      name={professionalsService.getProfessionalIcon(professional.specialty) as any} 
+                      size={24} 
+                      color={professionalsService.getProfessionalColor(professional.specialty)} 
+                    />
+                  </View>
+                  <View style={styles.professionalInfo}>
+                    <Text style={styles.professionalName}>{professional.full_name}</Text>
+                    <Text style={styles.professionalSpecialty}>{professional.specialty}</Text>
+                    <Text style={styles.professionalExperience}>{professional.experience_text}</Text>
+                    <View style={styles.professionalRating}>
+                      <FontAwesome name="star" size={12} color="#f39c12" />
+                      <Text style={styles.ratingText}>
+                        {professionalsService.formatRating(professional.rating)} ({professional.total_reviews} reviews)
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.chatButton}
+                    onPress={() => handleChatWithPharmacist(professional)}
+                    activeOpacity={0.7}
+                  >
+                    <FontAwesome name="comments" size={16} color="#fff" />
+                    <Text style={styles.chatButtonText}>Chat</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          ) : !professionalsLoading && (
+            <View style={styles.noProfessionalsContainer}>
+              <Text style={styles.noProfessionalsText}>No pharmacists available at this pharmacy.</Text>
+            </View>
+          )}
+        </View>
+
         {/* Medicine Categories */}
         <View style={styles.categoriesSection}>
           <Text style={styles.sectionTitle}>Medicine Categories</Text>
+          {medicinesLoading && (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading medicines...</Text>
+            </View>
+          )}
           
           {/* Search Bar */}
           <View style={styles.searchContainer}>
@@ -449,8 +802,33 @@ export default function PharmacyDetailsScreen() {
                 <Text style={styles.categoryName}>{category.name}</Text>
               </View>
               <View style={styles.medicinesList}>
-                {category.medicines.map((medicine) => (
-                  <View key={medicine.id} style={styles.medicineItem}>
+                {category.medicines.map((medicine: any) => (
+                  <TouchableOpacity 
+                    key={medicine.id} 
+                    style={styles.medicineItem}
+                    onPress={() => {
+                      router.push({
+                        pathname: '/medicine-details-modal',
+                        params: {
+                          medicineId: medicine.id.toString(),
+                          medicineName: medicine.name,
+                          genericName: medicine.generic_name || '',
+                          category: medicine.category,
+                          prescriptionRequired: medicine.prescription_required?.toString() || 'false',
+                          dosageForm: medicine.dosage_form || '',
+                          strength: medicine.strength || '',
+                          description: medicine.description || '',
+                          manufacturer: medicine.manufacturer || '',
+                          stockQuantity: medicine.stock_quantity?.toString() || '0',
+                          price: medicine.price?.toString() || '0',
+                          discountPrice: medicine.discount_price?.toString() || '',
+                          isAvailable: medicine.is_available?.toString() || 'true',
+                          medicineImage: medicine.image || ''
+                        }
+                      });
+                    }}
+                    activeOpacity={0.7}
+                  >
                   <View style={styles.medicineInfo}>
                     <Text style={styles.medicineName}>{medicine.name}</Text>
                       <Text style={styles.medicinePrice}>{medicine.price}</Text>
@@ -467,7 +845,10 @@ export default function PharmacyDetailsScreen() {
                         addedToCart.has(medicine.id) && styles.addedToCartButton,
                         loadingItem === medicine.id && styles.loadingButton
                       ]}
-                      onPress={() => handleAddToCart(medicine)}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleAddToCart(medicine);
+                      }}
                       activeOpacity={0.7}
                       disabled={loadingItem === medicine.id}
                     >
@@ -485,41 +866,17 @@ export default function PharmacyDetailsScreen() {
                         <Text style={styles.addToCartButtonText}>Add to Cart</Text>
                       )}
                     </TouchableOpacity>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             </View>
           ))}
         </View>
 
-        {/* Chat with Pharmacists Section */}
-        <View style={styles.pharmacistsSection}>
-          <Text style={styles.sectionTitle}>Chat with Pharmacists</Text>
-          <View style={styles.pharmacistsList}>
-            {pharmacists.map((pharmacist) => (
-              <TouchableOpacity 
-                key={pharmacist.id} 
-                style={styles.pharmacistItem}
-                onPress={() => handleChatWithPharmacist(pharmacist)}
-                activeOpacity={0.7}
-              >
-                <Image source={{ uri: pharmacist.avatar }} style={styles.pharmacistAvatar} />
-                <View style={styles.pharmacistInfo}>
-                  <Text style={styles.pharmacistName}>{pharmacist.name}</Text>
-                  <Text style={styles.pharmacistSpecialty}>{pharmacist.specialty}</Text>
-                  <Text style={styles.pharmacistExperience}>{pharmacist.experience} experience</Text>
-                </View>
-                <View style={styles.pharmacistStatus}>
-                  <View style={[styles.statusDot, { backgroundColor: pharmacist.available ? '#43e97b' : '#e74c3c' }]} />
-                  <Text style={styles.statusText}>{pharmacist.available ? 'Available' : 'Busy'}</Text>
-                </View>
-              </TouchableOpacity>
-              ))}
-            </View>
-        </View>
+
 
         {/* Emergency Contact Button */}
-        <TouchableOpacity style={styles.emergencyButton} onPress={handleCall}>
+        <TouchableOpacity style={styles.emergencyButton} onPress={handleEmergencyCall}>
           <FontAwesome name="phone" size={18} color="#fff" />
           <Text style={styles.emergencyButtonText}>Emergency Contact</Text>
         </TouchableOpacity>
@@ -845,64 +1202,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  pharmacistsSection: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  pharmacistsList: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  pharmacistItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  pharmacistAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
-  },
-  pharmacistInfo: {
-    flex: 1,
-  },
-  pharmacistName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 2,
-  },
-  pharmacistSpecialty: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 2,
-  },
-  pharmacistExperience: {
-    fontSize: 12,
-    color: '#7f8c8d',
-  },
-  pharmacistStatus: {
-    alignItems: 'center',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginBottom: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    color: '#7f8c8d',
-  },
+
   emergencyButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -923,5 +1223,97 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 12,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  professionalsSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  professionalsList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  professionalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  professionalAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f8f9fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  professionalInfo: {
+    flex: 1,
+  },
+  professionalName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 2,
+  },
+  professionalSpecialty: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  professionalExperience: {
+    fontSize: 12,
+    color: '#95a5a6',
+    marginBottom: 4,
+  },
+  professionalRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ratingText: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginLeft: 4,
+  },
+  chatButton: {
+    backgroundColor: ACCENT,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chatButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  noProfessionalsContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  noProfessionalsText: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
   },
 });

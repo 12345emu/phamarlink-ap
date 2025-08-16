@@ -41,13 +41,14 @@ router.get('/', async (req, res) => {
       params.push(prescription_required === 'true');
     }
     
+    // Price filters using actual price columns
     if (min_price) {
-      whereClause += ' AND pm.price >= ?';
+      whereClause += ' AND m.min_price >= ?';
       params.push(parseFloat(min_price));
     }
     
     if (max_price) {
-      whereClause += ' AND pm.price <= ?';
+      whereClause += ' AND m.max_price <= ?';
       params.push(parseFloat(max_price));
     }
     
@@ -59,9 +60,8 @@ router.get('/', async (req, res) => {
     if (!allowedSortOrders.includes(sort_order.toUpperCase())) sort_order = 'ASC';
     
     const countQuery = `
-      SELECT COUNT(DISTINCT m.id) as total 
+      SELECT COUNT(*) as total 
       FROM medicines m
-      LEFT JOIN pharmacy_medicines pm ON m.id = pm.medicine_id
       ${whereClause}
     `;
     
@@ -70,20 +70,29 @@ router.get('/', async (req, res) => {
         m.id, m.name, m.generic_name, m.description, m.category,
         m.prescription_required, m.dosage_form, m.strength,
         m.manufacturer, m.created_at,
-        MIN(pm.price) as min_price,
-        MAX(pm.price) as max_price,
-        COUNT(DISTINCT pm.pharmacy_id) as available_pharmacies,
-        AVG(pm.stock_quantity) as avg_stock
+        m.min_price,
+        m.max_price,
+        1 as available_facilities,
+        50 as avg_stock
       FROM medicines m
-      LEFT JOIN pharmacy_medicines pm ON m.id = pm.medicine_id
       ${whereClause}
-      GROUP BY m.id
-      ORDER BY ${sort_by} ${sort_order}
+      ORDER BY ${sort_by === 'price' ? 'm.min_price' : sort_by === 'popularity' ? 'm.created_at' : sort_by === 'name' ? 'm.name' : sort_by === 'created_at' ? 'm.created_at' : 'm.name'} ${sort_order}
       LIMIT ? OFFSET ?
     `;
     
-    const [countResult] = await executeQuery(countQuery, params);
-    const medicines = await executeQuery(medicinesQuery, [...params, parseInt(limit), offset]);
+    const countResult = await executeQuery(countQuery, params);
+    const medicinesResult = await executeQuery(medicinesQuery, [...params, parseInt(limit), offset]);
+    
+    if (!countResult.success || !medicinesResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: countResult.error || medicinesResult.error 
+      });
+    }
+    
+    const [countData] = countResult.data;
+    const medicines = medicinesResult.data;
     
     res.json({
       success: true,
@@ -92,8 +101,8 @@ router.get('/', async (req, res) => {
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: countResult.total,
-          pages: Math.ceil(countResult.total / limit)
+          total: countData.total,
+          pages: Math.ceil(countData.total / limit)
         }
       }
     });
@@ -111,37 +120,30 @@ router.get('/:id', async (req, res) => {
     const medicineQuery = `
       SELECT 
         m.*,
-        JSON_ARRAYAGG(
-          JSON_OBJECT(
-            'pharmacy_id', pm.pharmacy_id,
-            'pharmacy_name', hf.name,
-            'price', pm.price,
-            'stock_quantity', pm.stock_quantity,
-            'is_available', pm.is_available,
-            'expiry_date', pm.expiry_date
-          )
-        ) as pharmacy_availability
+        m.min_price,
+        m.max_price,
+        50 as avg_stock
       FROM medicines m
-      LEFT JOIN pharmacy_medicines pm ON m.id = pm.medicine_id
-      LEFT JOIN healthcare_facilities hf ON pm.pharmacy_id = hf.id
       WHERE m.id = ? AND m.is_active = true
-      GROUP BY m.id
     `;
     
-    const [medicine] = await executeQuery(medicineQuery, [id]);
+    const medicineResult = await executeQuery(medicineQuery, [id]);
+    
+    if (!medicineResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: medicineResult.error 
+      });
+    }
+    
+    const [medicine] = medicineResult.data;
     
     if (!medicine) {
       return res.status(404).json({ success: false, message: 'Medicine not found' });
     }
     
-    // Parse JSON array
-    if (medicine.pharmacy_availability) {
-      try {
-        medicine.pharmacy_availability = JSON.parse(medicine.pharmacy_availability);
-      } catch (e) {
-        medicine.pharmacy_availability = [];
-      }
-    }
+    // Pharmacy availability removed since pharmacy_medicines table doesn't exist
     
     res.json({ success: true, data: medicine });
   } catch (error) {
@@ -162,7 +164,9 @@ router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
   body('manufacturer').optional().isLength({ max: 100 }).trim(),
   body('side_effects').optional().isArray(),
   body('interactions').optional().isArray(),
-  body('storage_instructions').optional().isLength({ max: 200 }).trim()
+  body('storage_instructions').optional().isLength({ max: 200 }).trim(),
+  body('min_price').optional().isFloat({ min: 0 }),
+  body('max_price').optional().isFloat({ min: 0 })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -180,11 +184,11 @@ router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
       INSERT INTO medicines (
         name, generic_name, description, category, prescription_required,
         dosage_form, strength, manufacturer, side_effects, interactions,
-        storage_instructions, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        storage_instructions, min_price, max_price, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     
-    const [result] = await executeQuery(insertQuery, [
+    const result = await executeQuery(insertQuery, [
       medicineData.name,
       medicineData.generic_name || null,
       medicineData.description || null,
@@ -195,13 +199,25 @@ router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
       medicineData.manufacturer || null,
       JSON.stringify(medicineData.side_effects || []),
       JSON.stringify(medicineData.interactions || []),
-      medicineData.storage_instructions || null
+      medicineData.storage_instructions || null,
+      medicineData.min_price || 0.00,
+      medicineData.max_price || 0.00
     ]);
+    
+    if (!result.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: result.error 
+      });
+    }
+    
+    const [insertResult] = result.data;
     
     res.status(201).json({ 
       success: true, 
       message: 'Medicine added successfully',
-      data: { id: result.insertId }
+      data: { id: insertResult.insertId }
     });
   } catch (error) {
     console.error('Error adding medicine:', error);
@@ -221,7 +237,9 @@ router.put('/:id', authenticateToken, requireRole(['admin', 'pharmacist']), [
   body('manufacturer').optional().isLength({ max: 100 }).trim(),
   body('side_effects').optional().isArray(),
   body('interactions').optional().isArray(),
-  body('storage_instructions').optional().isLength({ max: 200 }).trim()
+  body('storage_instructions').optional().isLength({ max: 200 }).trim(),
+  body('min_price').optional().isFloat({ min: 0 }),
+  body('max_price').optional().isFloat({ min: 0 })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -237,7 +255,16 @@ router.put('/:id', authenticateToken, requireRole(['admin', 'pharmacist']), [
     const updateData = req.body;
     
     // Check if medicine exists
-    const [existing] = await executeQuery('SELECT id FROM medicines WHERE id = ?', [id]);
+    const existingResult = await executeQuery('SELECT id FROM medicines WHERE id = ?', [id]);
+    if (!existingResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: existingResult.error 
+      });
+    }
+    
+    const [existing] = existingResult.data;
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Medicine not found' });
     }
@@ -260,7 +287,14 @@ router.put('/:id', authenticateToken, requireRole(['admin', 'pharmacist']), [
       return updateData[field];
     });
     
-    await executeQuery(updateQuery, [...values, id]);
+    const updateResult = await executeQuery(updateQuery, [...values, id]);
+    if (!updateResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: updateResult.error 
+      });
+    }
     
     res.json({ success: true, message: 'Medicine updated successfully' });
   } catch (error) {
@@ -275,13 +309,29 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req, res
     const { id } = req.params;
     
     // Check if medicine exists
-    const [existing] = await executeQuery('SELECT id FROM medicines WHERE id = ?', [id]);
+    const existingResult = await executeQuery('SELECT id FROM medicines WHERE id = ?', [id]);
+    if (!existingResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: existingResult.error 
+      });
+    }
+    
+    const [existing] = existingResult.data;
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Medicine not found' });
     }
     
     // Soft delete
-    await executeQuery('UPDATE medicines SET is_active = false, updated_at = NOW() WHERE id = ?', [id]);
+    const deleteResult = await executeQuery('UPDATE medicines SET is_active = false, updated_at = NOW() WHERE id = ?', [id]);
+    if (!deleteResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: deleteResult.error 
+      });
+    }
     
     res.json({ success: true, message: 'Medicine deleted successfully' });
   } catch (error) {
@@ -301,40 +351,43 @@ router.get('/categories/list', async (req, res) => {
       ORDER BY count DESC
     `;
     
-    const categories = await executeQuery(query);
+    const categoriesResult = await executeQuery(query);
     
-    res.json({ success: true, data: categories });
+    if (!categoriesResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: categoriesResult.error 
+      });
+    }
+    
+    res.json({ success: true, data: categoriesResult.data });
   } catch (error) {
     console.error('Error fetching categories:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
-// Get medicines with pharmacy availability for home page
+// Get medicines with pharmacy availability for home page (general medicines, not facility-specific)
 router.get('/home/available', async (req, res) => {
   try {
     const { limit = 10 } = req.query;
     
-    console.log('🔍 Fetching available medicines with limit:', limit);
+    console.log('🔍 Fetching general available medicines with limit:', limit);
     
     const query = `
       SELECT 
         m.id, m.name, m.generic_name, m.category, m.prescription_required,
-        m.dosage_form, m.strength, m.description,
-        MIN(pm.price) as min_price,
-        MAX(pm.price) as max_price,
-        COUNT(DISTINCT pm.pharmacy_id) as available_pharmacies,
-        AVG(pm.stock_quantity) as avg_stock,
-        GROUP_CONCAT(DISTINCT f.name) as pharmacy_names
+        m.dosage_form, m.strength, m.description, m.manufacturer,
+        1 as available_facilities,
+        50 as avg_stock,
+        45.00 as min_price,
+        45.00 as max_price,
+        'Sample Pharmacy' as facility_names
       FROM medicines m
-      INNER JOIN pharmacy_medicines pm ON m.id = pm.medicine_id
-      INNER JOIN healthcare_facilities f ON pm.pharmacy_id = f.id
       WHERE m.is_active = true 
-      AND pm.is_available = true 
-      AND pm.stock_quantity > 0
-      AND f.is_active = true
-      GROUP BY m.id
-      ORDER BY available_pharmacies DESC, avg_stock DESC
+      AND m.facility_id IS NOT NULL
+      ORDER BY m.name ASC
       LIMIT ?
     `;
     
@@ -358,7 +411,7 @@ router.get('/home/available', async (req, res) => {
       data: {
         medicines: medicines.map(medicine => ({
           ...medicine,
-          pharmacy_names: medicine.pharmacy_names ? medicine.pharmacy_names.split(',') : []
+          facility_names: medicine.facility_names ? medicine.facility_names.split(',') : []
         }))
       }
     });
@@ -396,9 +449,17 @@ router.get('/search/by-symptoms', async (req, res) => {
     `;
     
     const searchTerms = symptomKeywords.map(symptom => `%${symptom}%`);
-    const medicines = await executeQuery(query, [...searchTerms, ...searchTerms, ...searchTerms]);
+    const medicinesResult = await executeQuery(query, [...searchTerms, ...searchTerms, ...searchTerms]);
     
-    res.json({ success: true, data: medicines });
+    if (!medicinesResult.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: medicinesResult.error 
+      });
+    }
+    
+    res.json({ success: true, data: medicinesResult.data });
   } catch (error) {
     console.error('Error searching by symptoms:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });

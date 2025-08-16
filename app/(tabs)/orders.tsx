@@ -10,25 +10,44 @@ import { useCart } from '../../context/CartContext';
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
 
-interface LocalOrder {
-  id: string;
-  date: string;
-  status: 'pending' | 'confirmed' | 'preparing' | 'out_for_delivery' | 'delivered' | 'cancelled';
-  total: number;
-  items: Array<{
-    medicine: {
+interface OrderItem {
   id: number;
-  name: string;
-  price: number;
-  image: string;
-    };
-    quantity: number;
-  }>;
-  pharmacy: string;
-  pharmacyPhone: string;
-  address: string;
-  estimatedDelivery?: string;
-  trackingNumber?: string;
+  order_id: number;
+  medicine_id: number;
+  pharmacy_medicine_id: number | null;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  created_at: string;
+  medicine_name: string;
+  generic_name: string;
+  dosage_form: string;
+  strength: string;
+  prescription_required: number;
+}
+
+interface Order {
+  id: number;
+  order_number: string;
+  patient_id: number;
+  pharmacy_id: number;
+  delivery_address: string;
+  payment_method: string;
+  total_amount: number;
+  tax_amount: number;
+  discount_amount: number;
+  final_amount: number;
+  payment_status: string;
+  order_status: string;
+  created_at: string;
+  updated_at: string;
+  items: OrderItem[];
+  pharmacy: {
+    id: number;
+    name: string;
+    address: string;
+    phone: string;
+  };
 }
 
 export default function OrdersScreen() {
@@ -36,73 +55,19 @@ export default function OrdersScreen() {
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'confirmed' | 'delivered'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'status' | 'total'>('date');
   const router = useRouter();
-  const { orders } = useOrders();
+  const { orders, loading, refreshOrders } = useOrders();
   const { addToCart } = useCart();
 
-  // Sample orders data
-  const sampleOrders: LocalOrder[] = [
-    {
-      id: "ORD-2024-001",
-      date: "2024-01-15",
-      status: "delivered",
-      total: 45.99,
-      items: [
-        { medicine: { id: 1, name: "Paracetamol 500mg", price: 10.99, image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" }, quantity: 2 },
-        { medicine: { id: 2, name: "Vitamin C 500mg", price: 12.00, image: "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80" }, quantity: 1 },
-        { medicine: { id: 3, name: "Ibuprofen 400mg", price: 13.00, image: "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
-      ],
-      pharmacy: "Alpha Pharmacy",
-      pharmacyPhone: "+233-555-0123",
-      address: "123 Main St, Accra",
-      estimatedDelivery: "2024-01-16",
-      trackingNumber: "TRK-123456789"
-    },
-    {
-      id: "ORD-2024-002",
-      date: "2024-01-14",
-      status: "out_for_delivery",
-      total: 28.50,
-      items: [
-        { medicine: { id: 4, name: "Amoxicillin 250mg", price: 25.00, image: "https://images.unsplash.com/photo-1505751172876-fa1923c5c528?auto=format&fit=crop&w=400&q=80" }, quantity: 1 },
-        { medicine: { id: 5, name: "Bandages", price: 3.50, image: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
-      ],
-      pharmacy: "MediCare Pharmacy",
-      pharmacyPhone: "+233-555-0456",
-      address: "456 Oak Ave, Accra",
-      estimatedDelivery: "2024-01-15",
-      trackingNumber: "TRK-987654321"
-    },
-    {
-      id: "ORD-2024-003",
-      date: "2024-01-13",
-      status: "confirmed",
-      total: 67.25,
-      items: [
-        { medicine: { id: 6, name: "Vitamin D3 1000IU", price: 20.00, image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80" }, quantity: 2 },
-        { medicine: { id: 7, name: "Iron Supplements", price: 18.00, image: "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80" }, quantity: 1 },
-        { medicine: { id: 8, name: "Pain Relief Gel", price: 11.25, image: "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
-      ],
-      pharmacy: "Green Cross Pharmacy",
-      pharmacyPhone: "+233-555-0789",
-      address: "789 Pine St, Accra",
-      estimatedDelivery: "2024-01-17"
-    },
-    {
-      id: "ORD-2024-004",
-      date: "2024-01-12",
-      status: "pending",
-      total: 15.99,
-      items: [
-        { medicine: { id: 9, name: "Aspirin 100mg", price: 8.00, image: "https://images.unsplash.com/photo-1505751172876-fa1923c5c528?auto=format&fit=crop&w=400&q=80" }, quantity: 1 },
-        { medicine: { id: 10, name: "Antiseptic Solution", price: 7.99, image: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80" }, quantity: 1 }
-      ],
-      pharmacy: "WellCare Pharmacy",
-      pharmacyPhone: "+233-555-0321",
-      address: "321 Elm St, Accra"
-    }
-  ];
+  // Refresh orders when component mounts
+  useEffect(() => {
+    refreshOrders();
+  }, []);
 
-  const allOrders: LocalOrder[] = [...sampleOrders];
+  // Debug: Log the first order to see its structure
+  if (orders.length > 0) {
+    console.log('First order structure:', Object.keys(orders[0]));
+    console.log('First order data:', orders[0]);
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -140,41 +105,32 @@ export default function OrdersScreen() {
     }
   };
 
-  const filteredOrders = allOrders
+  const filteredOrders = orders
     .filter(order => {
-      const matchesSearch = order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           order.pharmacy.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesFilter = activeFilter === 'all' || order.status === activeFilter;
+      const matchesSearch = (order.order_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           (order.pharmacy?.name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesFilter = activeFilter === 'all' || (order.order_status || '') === activeFilter;
       return matchesSearch && matchesFilter;
     })
     .sort((a, b) => {
       switch (sortBy) {
         case 'date':
-          return new Date(b.date).getTime() - new Date(a.date).getTime();
+          return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
         case 'status':
-          return a.status.localeCompare(b.status);
+          return (a.order_status || '').localeCompare(b.order_status || '');
         case 'total':
-          return b.total - a.total;
+          return (b.final_amount || 0) - (a.final_amount || 0);
         default:
           return 0;
       }
     });
 
-  const handleTrackOrder = (order: LocalOrder) => {
-    if (order.trackingNumber) {
-      router.push({
-        pathname: '/(tabs)/order-tracking',
-        params: {
-          orderId: order.id,
-          trackingNumber: order.trackingNumber
-        }
-      });
-    } else {
-      Alert.alert('Track Order', 'Tracking information not available yet.');
-    }
+  const handleTrackOrder = (order: Order) => {
+    // For now, show a placeholder since we don't have tracking implemented
+    Alert.alert('Track Order', 'Tracking feature will be available soon.');
   };
 
-  const handleReorder = (order: LocalOrder) => {
+  const handleReorder = (order: Order) => {
     Alert.alert(
       'Reorder',
       `Add all ${order.items.length} items from this order to cart?`,
@@ -186,7 +142,18 @@ export default function OrdersScreen() {
             order.items.forEach(item => {
               // Add each item to cart with its original quantity
               for (let i = 0; i < item.quantity; i++) {
-                addToCart(item.medicine);
+                addToCart({
+                  id: item.medicine_id,
+                  name: item.medicine_name,
+                  generic_name: item.generic_name,
+                  category: 'Unknown',
+                  prescription_required: item.prescription_required,
+                  dosage_form: item.dosage_form,
+                  strength: item.strength,
+                  description: '',
+                  manufacturer: 'Unknown',
+                  image: null
+                }, 1, item.unit_price);
               }
             });
             Alert.alert(
@@ -203,32 +170,45 @@ export default function OrdersScreen() {
     );
   };
 
-  const handleContactPharmacy = (order: LocalOrder) => {
-    const phoneNumber = order.pharmacyPhone;
+  const handleContactPharmacy = (order: Order) => {
+    const phoneNumber = order.pharmacy?.phone || '';
     
     Alert.alert(
       'Contact Pharmacy',
-      `How would you like to contact ${order.pharmacy}?`,
+      `How would you like to contact ${order.pharmacy?.name || 'the pharmacy'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
           text: 'Call', 
           onPress: () => {
-            Linking.openURL(`tel:${phoneNumber}`);
+            if (phoneNumber) {
+              Linking.openURL(`tel:${phoneNumber}`);
+            } else {
+              Alert.alert('Contact', 'Phone number not available.');
+            }
           }
         },
         { 
           text: 'Send Email', 
           onPress: () => {
-            const email = `${order.pharmacy.toLowerCase().replace(/\s+/g, '')}@pharmalink.com`;
+            const pharmacyName = order.pharmacy?.name || 'pharmacy';
+            const email = `${pharmacyName.toLowerCase().replace(/\s+/g, '')}@pharmalink.com`;
             const subject = 'Inquiry about my order';
-            const body = `Hello, I have a question about my recent order (${order.id}).`;
+            const body = `Hello, I have a question about my recent order (${order.order_number}).`;
             Linking.openURL(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
           }
         }
       ]
     );
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading orders...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -337,65 +317,59 @@ export default function OrdersScreen() {
         ) : (
           filteredOrders.map((order) => (
           <View key={order.id} style={styles.orderCard}>
-              <View style={styles.orderHeader}>
-                <View style={styles.orderInfo}>
-                  <Text style={styles.orderId}>{order.id}</Text>
-                  <Text style={styles.orderDate}>{new Date(order.date).toLocaleDateString()}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}>
-                  <FontAwesome name={getStatusIcon(order.status) as any} size={12} color="#fff" />
-                  <Text style={styles.statusText}>{getStatusText(order.status)}</Text>
-                </View>
+                              <View style={styles.orderHeader}>
+                  <View style={styles.orderInfo}>
+                    <Text style={styles.orderId}>{order.order_number || 'Unknown'}</Text>
+                    <Text style={styles.orderDate}>{order.created_at ? new Date(order.created_at).toLocaleDateString() : 'Unknown'}</Text>
                   </View>
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.order_status || 'pending') }]}>
+                    <FontAwesome name={getStatusIcon(order.order_status || 'pending') as any} size={12} color="#fff" />
+                    <Text style={styles.statusText}>{getStatusText(order.order_status || 'pending')}</Text>
+                  </View>
+                    </View>
 
               <View style={styles.pharmacyInfo}>
                 <FontAwesome name="medkit" size={14} color={ACCENT} />
-                <Text style={styles.pharmacyName}>{order.pharmacy}</Text>
+                <Text style={styles.pharmacyName}>{order.pharmacy?.name || 'Unknown Pharmacy'}</Text>
               </View>
 
               <View style={styles.itemsSection}>
                 <Text style={styles.itemsTitle}>Items:</Text>
                 {order.items.map((item, index) => (
                   <View key={index} style={styles.itemRow}>
-                    <Image source={{ uri: item.medicine.image }} style={styles.itemImage} />
+                    <Image 
+                      source={{ uri: 'https://via.placeholder.com/40x40/3498db/ffffff?text=M' }} 
+                      style={styles.itemImage} 
+                    />
                     <View style={styles.itemInfo}>
-                      <Text style={styles.itemName}>{item.medicine.name}</Text>
-                      <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
+                      <Text style={styles.itemName}>{item.medicine_name || 'Unknown Medicine'}</Text>
+                      <Text style={styles.itemQuantity}>Qty: {item.quantity || 0}</Text>
                     </View>
-                    <Text style={styles.itemPrice}>GHS {item.medicine.price.toFixed(2)}</Text>
+                    <Text style={styles.itemPrice}>GHS {item.unit_price ? Number(item.unit_price).toFixed(2) : '0.00'}</Text>
                   </View>
                 ))}
               </View>
 
               <View style={styles.orderFooter}>
                 <View style={styles.orderDetails}>
-                  <Text style={styles.deliveryAddress}>{order.address}</Text>
-                  {order.estimatedDelivery && (
-                  <Text style={styles.estimatedDelivery}>
-                      Est. Delivery: {new Date(order.estimatedDelivery).toLocaleDateString()}
-                  </Text>
-                )}
-                  {order.trackingNumber && (
-                    <Text style={styles.trackingNumber}>Track: {order.trackingNumber}</Text>
-                  )}
+                  <Text style={styles.deliveryAddress}>{order.delivery_address || 'No address specified'}</Text>
+                  <Text style={styles.paymentMethod}>Payment: {order.payment_method || 'Unknown'}</Text>
                 </View>
                 <View style={styles.orderTotal}>
                   <Text style={styles.totalLabel}>Total:</Text>
-                  <Text style={styles.totalAmount}>GHS {order.total.toFixed(2)}</Text>
+                  <Text style={styles.totalAmount}>GHS {Number(order.final_amount || 0).toFixed(2)}</Text>
                 </View>
               </View>
 
               <View style={styles.orderActions}>
-                {order.trackingNumber && (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => handleTrackOrder(order)}
-                    activeOpacity={0.7}
-                  >
-                    <FontAwesome name="map-marker" size={14} color={ACCENT} />
-                    <Text style={styles.actionButtonText}>Track</Text>
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => handleTrackOrder(order)}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome name="map-marker" size={14} color={ACCENT} />
+                  <Text style={styles.actionButtonText}>Track</Text>
               </TouchableOpacity>
-                )}
 
         <TouchableOpacity
                   style={styles.actionButton}
@@ -427,6 +401,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
   },
   searchSection: {
     paddingTop: 20,
@@ -632,15 +616,10 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginBottom: 2,
   },
-  estimatedDelivery: {
+  paymentMethod: {
     fontSize: 12,
     color: '#7f8c8d',
     marginBottom: 2,
-  },
-  trackingNumber: {
-    fontSize: 12,
-    color: ACCENT,
-    fontWeight: '500',
   },
   orderTotal: {
     alignItems: 'flex-end',

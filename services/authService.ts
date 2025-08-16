@@ -1,6 +1,7 @@
 import { apiClient, ApiResponse } from './apiClient';
 import { API_ENDPOINTS } from '../constants/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { constructProfileImageUrl } from '../utils/imageUtils';
 
 // Types
 export interface User {
@@ -64,16 +65,34 @@ class AuthService {
   // User login
   async login(credentials: LoginCredentials): Promise<ApiResponse<AuthResponse>> {
     try {
+      console.log('🔍 AuthService - Starting login for:', credentials.email);
       const response = await apiClient.post<AuthResponse>(API_ENDPOINTS.AUTH.LOGIN, credentials);
       
+      console.log('🔍 AuthService - API response:', {
+        success: response.success,
+        hasData: !!response.data,
+        message: response.message
+      });
+      
       if (response.success && response.data) {
+        console.log('🔍 AuthService - Login successful, storing auth data...');
+        console.log('🔍 AuthService - Token preview:', response.data.token ? `${response.data.token.substring(0, 20)}...` : 'No token');
+        console.log('🔍 AuthService - User data:', {
+          id: response.data.user.id,
+          email: response.data.user.email,
+          role: response.data.user.role
+        });
+        
         // Store tokens and user data
         await this.storeAuthData(response.data);
+        console.log('🔍 AuthService - Auth data stored successfully');
+      } else {
+        console.error('❌ AuthService - Login failed:', response.message);
       }
       
       return response;
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ AuthService - Login error:', error);
       return {
         success: false,
         message: 'Login failed. Please try again.',
@@ -117,10 +136,91 @@ class AuthService {
     }
   }
 
+  // Upload profile image
+  async uploadProfileImage(imageUri: string): Promise<ApiResponse<{ profileImage: string }>> {
+    try {
+      console.log('🔍 AuthService - Uploading profile image...');
+      
+      // Create form data
+      const formData = new FormData();
+      formData.append('profileImage', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: 'profile-image.jpg'
+      } as any);
+      
+      const response = await apiClient.post<{ profileImage: string }>(
+        API_ENDPOINTS.AUTH.UPLOAD_PROFILE_IMAGE,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      
+      console.log('🔍 AuthService - Upload response:', {
+        success: response.success,
+        hasData: !!response.data,
+        message: response.message
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('❌ AuthService - Upload profile image error:', error);
+      return {
+        success: false,
+        message: 'Failed to upload profile image',
+        error: 'Upload Error',
+      };
+    }
+  }
+
+  // Update patient profile
+  async updatePatientProfile(profileData: {
+    emergency_contact?: string;
+    insurance_provider?: string;
+    insurance_number?: string;
+    blood_type?: string;
+    allergies?: string;
+    medical_history?: string;
+  }): Promise<ApiResponse<{ patientProfile: any }>> {
+    try {
+      console.log('🔍 AuthService - Updating patient profile...');
+      
+      const response = await apiClient.put<{ patientProfile: any }>(
+        API_ENDPOINTS.AUTH.UPDATE_PATIENT_PROFILE,
+        profileData
+      );
+      
+      console.log('🔍 AuthService - Patient profile update response:', {
+        success: response.success,
+        hasData: !!response.data,
+        message: response.message
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('❌ AuthService - Update patient profile error:', error);
+      return {
+        success: false,
+        message: 'Failed to update patient profile',
+        error: 'Patient Profile Update Error',
+      };
+    }
+  }
+
   // Update user profile
   async updateProfile(profileData: Partial<User>): Promise<ApiResponse<User>> {
     try {
-      return await apiClient.put<User>(API_ENDPOINTS.AUTH.PROFILE, profileData);
+      console.log('🔍 AuthService - Updating profile with data:', profileData);
+      const response = await apiClient.put<User>(API_ENDPOINTS.AUTH.PROFILE, profileData);
+      console.log('🔍 AuthService - Profile update response:', {
+        success: response.success,
+        hasData: !!response.data,
+        message: response.message
+      });
+      return response;
     } catch (error) {
       console.error('Update profile error:', error);
       return {
@@ -204,13 +304,38 @@ class AuthService {
   // Store authentication data
   private async storeAuthData(authData: AuthResponse): Promise<void> {
     try {
+      console.log('🔍 AuthService - Storing auth data in AsyncStorage...');
+      console.log('🔍 AuthService - Token to store:', authData.token ? `${authData.token.substring(0, 20)}...` : 'No token');
+      console.log('🔍 AuthService - Refresh token to store:', authData.refreshToken ? `${authData.refreshToken.substring(0, 20)}...` : 'No refresh token');
+      console.log('🔍 AuthService - User data to store:', {
+        id: authData.user.id,
+        email: authData.user.email,
+        role: authData.user.role
+      });
+      
+      // Construct full URL for profile image if it exists
+      const userDataToStore = { ...authData.user };
+      if (userDataToStore.profileImage) {
+        userDataToStore.profileImage = constructProfileImageUrl(userDataToStore.profileImage);
+        console.log('🔍 AuthService - Constructed full profile image URL:', userDataToStore.profileImage);
+      }
+      
       await AsyncStorage.multiSet([
         ['userToken', authData.token],
         ['refreshToken', authData.refreshToken],
-        ['userData', JSON.stringify(authData.user)],
+        ['userData', JSON.stringify(userDataToStore)],
       ]);
+      
+      console.log('🔍 AuthService - Auth data stored successfully in AsyncStorage');
+      
+      // Verify storage
+      const storedToken = await AsyncStorage.getItem('userToken');
+      const storedUserData = await AsyncStorage.getItem('userData');
+      console.log('🔍 AuthService - Verification - Stored token:', storedToken ? `${storedToken.substring(0, 20)}...` : 'No token found');
+      console.log('🔍 AuthService - Verification - Stored user data:', storedUserData ? 'exists' : 'not found');
+      
     } catch (error) {
-      console.error('Store auth data error:', error);
+      console.error('❌ AuthService - Store auth data error:', error);
       throw error;
     }
   }

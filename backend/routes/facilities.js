@@ -168,7 +168,7 @@ router.get('/nearby', [
     } = req.query;
 
     let whereConditions = ['is_active = TRUE'];
-    let queryParams = [parseFloat(latitude), parseFloat(longitude), parseFloat(latitude), parseFloat(radius)];
+    let queryParams = [];
 
     // Filter by facility type
     if (type) {
@@ -193,7 +193,8 @@ router.get('/nearby', [
       LIMIT ?
     `;
 
-    queryParams.push(parseInt(limit));
+    // Add parameters in the correct order: latitude, longitude, latitude (for sin), radius, limit
+    queryParams.push(parseFloat(latitude), parseFloat(longitude), parseFloat(latitude), parseFloat(radius), parseInt(limit));
     
     const nearbyResult = await executeQuery(nearbyQuery, queryParams);
 
@@ -218,6 +219,106 @@ router.get('/nearby', [
 
   } catch (error) {
     console.error('❌ Get nearby facilities error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Get facility medicines (for pharmacies)
+router.get('/:id/medicines', async (req, res) => {
+  try {
+    const facilityId = req.params.id;
+
+    // Check if facility exists and is a pharmacy
+    const facilityQuery = `
+      SELECT id, name, facility_type 
+      FROM healthcare_facilities 
+      WHERE id = ? AND is_active = TRUE
+    `;
+    
+    const facilityResult = await executeQuery(facilityQuery, [facilityId]);
+
+    if (!facilityResult.success || facilityResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found'
+      });
+    }
+
+    const facility = facilityResult.data[0];
+
+    // Check if facility can have medicines (pharmacies, hospitals, clinics)
+    if (!['pharmacy', 'hospital', 'clinic'].includes(facility.facility_type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This facility does not sell medicines'
+      });
+    }
+
+    // Get medicines for this facility
+    const medicinesQuery = `
+      SELECT 
+        m.id, m.name, m.generic_name, m.category, m.prescription_required,
+        m.dosage_form, m.strength, m.description, m.manufacturer,
+        COALESCE(pm.stock_quantity, 50) as stock_quantity,
+        COALESCE(pm.price, 45.00) as price,
+        pm.discount_price,
+        COALESCE(pm.is_available, TRUE) as is_available
+      FROM medicines m
+      LEFT JOIN pharmacy_medicines pm ON m.id = pm.medicine_id AND pm.facility_id = m.facility_id
+      WHERE m.facility_id = ? AND m.is_active = TRUE
+      ORDER BY m.category, m.name
+    `;
+    
+    const medicinesResult = await executeQuery(medicinesQuery, [facilityId]);
+
+    if (!medicinesResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch medicines'
+      });
+    }
+
+    // Group medicines by category
+    const medicinesByCategory = {};
+    medicinesResult.data.forEach(medicine => {
+      if (!medicinesByCategory[medicine.category]) {
+        medicinesByCategory[medicine.category] = [];
+      }
+      medicinesByCategory[medicine.category].push({
+        id: medicine.id,
+        name: medicine.name,
+        generic_name: medicine.generic_name,
+        category: medicine.category,
+        prescription_required: medicine.prescription_required === 1,
+        dosage_form: medicine.dosage_form,
+        strength: medicine.strength,
+        description: medicine.description,
+        manufacturer: medicine.manufacturer,
+        stock_quantity: medicine.stock_quantity,
+        price: parseFloat(medicine.price),
+        discount_price: medicine.discount_price ? parseFloat(medicine.discount_price) : null,
+        is_available: medicine.is_available === 1
+      });
+    });
+
+    res.json({
+      success: true,
+      data: {
+        facility: {
+          id: facility.id,
+          name: facility.name,
+          type: facility.facility_type
+        },
+        medicines_by_category: medicinesByCategory,
+        total_medicines: medicinesResult.data.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get facility medicines error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -268,16 +369,19 @@ router.get('/:id', async (req, res) => {
       facility.reviews = reviewsResult.data;
     }
 
-    // If it's a pharmacy, get available medicines
-    if (facility.facility_type === 'pharmacy') {
+    // If it's a facility that can have medicines, get available medicines
+    if (['pharmacy', 'hospital', 'clinic'].includes(facility.facility_type)) {
       const medicinesQuery = `
         SELECT 
           m.id, m.name, m.generic_name, m.brand_name, m.description,
           m.category, m.prescription_required, m.dosage_form, m.strength,
-          pm.stock_quantity, pm.price, pm.discount_price, pm.is_available
-        FROM pharmacy_medicines pm
-        JOIN medicines m ON pm.medicine_id = m.id
-        WHERE pm.pharmacy_id = ? AND pm.is_available = TRUE AND m.is_active = TRUE
+          COALESCE(pm.stock_quantity, 50) as stock_quantity,
+          COALESCE(pm.price, 45.00) as price,
+          pm.discount_price,
+          COALESCE(pm.is_available, TRUE) as is_available
+        FROM medicines m
+        LEFT JOIN pharmacy_medicines pm ON m.id = pm.medicine_id AND pm.facility_id = m.facility_id
+        WHERE m.facility_id = ? AND m.is_active = TRUE
         ORDER BY m.name ASC
       `;
       

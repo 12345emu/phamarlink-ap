@@ -95,7 +95,7 @@ export default function LogoPage() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar style="light" />
       <LinearGradient
         colors={['#4facfe', '#00f2fe']}
         style={styles.backgroundGradient}

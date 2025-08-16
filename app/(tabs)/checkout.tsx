@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Dimensions, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -30,13 +30,23 @@ export default function CheckoutScreen() {
   const [selectedPayment, setSelectedPayment] = useState(paymentMethods[0].id);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [isDeliveryMode, setIsDeliveryMode] = useState(false);
+  const [facilityName, setFacilityName] = useState('');
 
-  const total = cart.reduce((sum, item) => sum + item.medicine.price * item.quantity, 0);
+  // Check if we're in delivery mode
+  useEffect(() => {
+    if (params.deliveryMode === 'true') {
+      setIsDeliveryMode(true);
+      setFacilityName(params.facilityName as string || 'Pharmacy');
+    }
+  }, [params.deliveryMode, params.facilityName]);
+
+  const total = cart.reduce((sum, item) => sum + item.pricePerUnit * item.quantity, 0);
   const deliveryFee = 5.00;
   const tax = total * 0.05; // 5% tax
   const grandTotal = total + deliveryFee + tax;
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (cart.length === 0) {
       Alert.alert('Empty Cart', 'Please add items to your cart before placing an order.');
       return;
@@ -44,31 +54,84 @@ export default function CheckoutScreen() {
     
     setPlacingOrder(true);
     
-    // Simulate order processing
-    setTimeout(() => {
-    addOrder({
-      items: cart,
-      address,
-      paymentMethod: selectedPayment,
-        total: grandTotal,
-    });
-    clearCart();
-      setPlacingOrder(false);
+    try {
+      // Get the pharmacy ID from the first cart item (assuming all items are from the same pharmacy)
+      const pharmacyId = cart[0]?.pharmacy?.id || 1;
+      
+      // Transform cart items to order items format
+      const orderItems = cart.map(item => ({
+        medicineId: item.medicine.id,
+        quantity: item.quantity,
+        unitPrice: item.pricePerUnit,
+        totalPrice: item.pricePerUnit * item.quantity
+      }));
+
+      // Map payment method ID to backend expected value
+      const getPaymentMethod = (paymentId: string) => {
+        switch (paymentId) {
+          case 'cash':
+            return 'cash';
+          case 'mobile':
+            return 'mobile_money';
+          case 'card1':
+          case 'card2':
+            return 'card';
+          default:
+            return 'cash';
+        }
+      };
+
+      // Create order data
+      const orderData = {
+        pharmacyId,
+        items: orderItems,
+        deliveryAddress: address,
+        paymentMethod: getPaymentMethod(selectedPayment),
+        totalAmount: total,
+        taxAmount: tax,
+        discountAmount: 0, // No discount for now
+        finalAmount: grandTotal,
+        deliveryInstructions: ''
+      };
+
+      // Create the order
+      const success = await addOrder(orderData);
+      
+      if (success) {
+        // Clear cart after successful order creation
+        await clearCart();
+        
+        Alert.alert(
+          'Order Placed Successfully!',
+          'Your order has been placed and is being processed.',
+          [
+            {
+              text: 'View Orders',
+              onPress: () => router.replace('/(tabs)/orders'),
+            },
+            {
+              text: 'Continue Shopping',
+              onPress: () => router.push('/(tabs)/index' as any),
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Order Failed',
+          'Failed to place your order. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error placing order:', error);
       Alert.alert(
-        'Order Placed Successfully!',
-        'Your order has been placed and is being processed.',
-        [
-          {
-            text: 'View Orders',
-            onPress: () => router.replace('/(tabs)/orders'),
-          },
-                     {
-             text: 'Continue Shopping',
-             onPress: () => router.push('/(tabs)/index' as any),
-           }
-        ]
+        'Order Failed',
+        'An error occurred while placing your order. Please try again.',
+        [{ text: 'OK' }]
       );
-    }, 2000);
+    } finally {
+      setPlacingOrder(false);
+    }
   };
 
   const handleBackPress = () => {
@@ -127,8 +190,30 @@ export default function CheckoutScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
+      
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+          <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {isDeliveryMode ? `Delivery from ${facilityName}` : 'Checkout'}
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      
+      {/* Delivery Mode Indicator */}
+      {isDeliveryMode && (
+        <View style={styles.deliveryModeIndicator}>
+          <FontAwesome name="truck" size={16} color="#fff" />
+          <Text style={styles.deliveryModeText}>
+            Delivery Mode - {facilityName} will deliver your order
+          </Text>
+        </View>
+      )}
+      
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={false}>
 
 
           {/* Order Summary */}
@@ -148,14 +233,18 @@ export default function CheckoutScreen() {
               </View>
             ) : (
               cart.map((item, idx) => (
-                <View key={item.medicine.id || idx} style={styles.orderItem}>
-                <Image source={{ uri: item.medicine.image }} style={styles.orderItemImage} />
+                <View key={item.id || idx} style={styles.orderItem}>
+                <Image 
+                  source={{ uri: item.medicine.image || 'https://via.placeholder.com/50x50?text=Medicine' }} 
+                  style={styles.orderItemImage}
+                  defaultSource={require('../../assets/images/icon.png')}
+                />
                   <View style={styles.orderItemInfo}>
                   <Text style={styles.orderItemName}>{item.medicine.name}</Text>
                     <Text style={styles.orderItemQuantity}>Quantity: {item.quantity}</Text>
                   </View>
                   <View style={styles.orderItemPrice}>
-                    <Text style={styles.priceText}>GHS {(item.medicine.price * item.quantity).toFixed(2)}</Text>
+                    <Text style={styles.priceText}>GHS {(item.pricePerUnit * item.quantity).toFixed(2)}</Text>
                   </View>
                 </View>
               ))
@@ -285,6 +374,45 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingTop: 50,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  headerSpacer: {
+    width: 36,
+  },
+  deliveryModeIndicator: {
+    backgroundColor: ACCENT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginHorizontal: 20,
+    marginTop: 8,
+    borderRadius: 12,
+  },
+  deliveryModeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 
   section: {
@@ -468,18 +596,20 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 80, // Account for tab bar height
     left: 0,
     right: 0,
     backgroundColor: '#fff',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    paddingBottom: 32,
+    paddingBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#ecf0f1',
   },
   placeOrderButton: {
     borderRadius: 16,

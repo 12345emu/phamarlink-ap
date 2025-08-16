@@ -109,10 +109,87 @@ class FacilitiesService {
     }
   }
 
+  // Get facility medicines (for pharmacies)
+  async getFacilityMedicines(facilityId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await apiClient.get<any>(API_ENDPOINTS.FACILITIES.GET_MEDICINES(facilityId));
+      
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data
+        };
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('Get facility medicines error:', error);
+      return {
+        success: false,
+        message: 'Failed to fetch facility medicines. Please try again.',
+        error: 'Facility Medicines Error',
+      };
+    }
+  }
+
   // Get facility by ID
   async getFacilityById(id: string): Promise<ApiResponse<Facility>> {
     try {
-      return await apiClient.get<Facility>(API_ENDPOINTS.FACILITIES.GET_BY_ID(id));
+      const response = await apiClient.get<any>(API_ENDPOINTS.FACILITIES.GET_BY_ID(id));
+      
+      if (response.success && response.data) {
+        const facility = response.data;
+        
+        // Transform backend data to match frontend Facility interface
+        const transformedFacility: Facility = {
+          id: facility.id.toString(),
+          name: facility.name,
+          type: facility.facility_type,
+          description: facility.description || '',
+          address: {
+            street: facility.address || '',
+            city: facility.city || '',
+            state: facility.state || '',
+            zipCode: '',
+            country: facility.country || 'Ghana',
+          },
+          coordinates: {
+            latitude: parseFloat(facility.latitude),
+            longitude: parseFloat(facility.longitude),
+          },
+          phone: facility.phone || '',
+          email: facility.email || '',
+          website: facility.website || '',
+          services: facility.services ? facility.services.split(',').map((s: string) => s.trim()) : [],
+          specialties: [],
+          rating: parseFloat(facility.rating) || 0,
+          reviewCount: parseInt(facility.total_reviews) || 0,
+          isOpen: true, // Default to true since we don't have this data from backend
+          distance: 0,
+          images: [],
+          amenities: [],
+          insuranceAccepted: [],
+          emergencyServices: false,
+          createdAt: facility.created_at || new Date().toISOString(),
+          updatedAt: facility.updated_at || new Date().toISOString(),
+          operatingHours: {
+            monday: { open: '08:00', close: '18:00', isOpen: true },
+            tuesday: { open: '08:00', close: '18:00', isOpen: true },
+            wednesday: { open: '08:00', close: '18:00', isOpen: true },
+            thursday: { open: '08:00', close: '18:00', isOpen: true },
+            friday: { open: '08:00', close: '18:00', isOpen: true },
+            saturday: { open: '09:00', close: '17:00', isOpen: true },
+            sunday: { open: '09:00', close: '17:00', isOpen: true },
+          },
+        };
+        
+        return {
+          success: true,
+          data: transformedFacility,
+        };
+      }
+      
+      return response;
     } catch (error) {
       console.error('Get facility by ID error:', error);
       return {

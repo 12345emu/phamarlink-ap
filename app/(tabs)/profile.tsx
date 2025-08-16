@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, View, Text, Modal, TextInput, KeyboardAvoidingView, Platform, Linking, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, View, Text, Modal, TextInput, KeyboardAvoidingView, Platform, Linking, Image, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,7 +8,9 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useProfile } from '../../context/ProfileContext';
 import { useAuth } from '../../context/AuthContext';
-import ProfileImage from '@/components/ProfileImage';
+import { authService, User } from '../../services/authService';
+import ProfileImage from '../../components/ProfileImage';
+import { constructProfileImageUrl } from '../../utils/imageUtils';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
@@ -16,6 +18,8 @@ const BACKGROUND = '#f8f9fa';
 const DANGER = '#e74c3c';
 
 interface UserProfile {
+  firstName: string;
+  lastName: string;
   name: string;
   email: string;
   phone: string;
@@ -24,6 +28,9 @@ interface UserProfile {
   emergencyContact: string;
   insuranceProvider: string;
   insuranceNumber: string;
+  bloodType: string;
+  allergies: string;
+  medicalHistory: string;
 }
 
 interface EditField {
@@ -43,6 +50,8 @@ export default function ProfileScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingField, setEditingField] = useState<EditField | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [rateModalVisible, setRateModalVisible] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
@@ -51,9 +60,11 @@ export default function ProfileScreen() {
   const [isUpdatingImage, setIsUpdatingImage] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+  const [userData, setUserData] = useState<User | null>(null);
   const router = useRouter();
   const { profileImage, updateProfileImage } = useProfile();
-  const { logout: authLogout } = useAuth();
+  const { logout: authLogout, user: authUser } = useAuth();
 
   const formatDateForDisplay = (date: Date): string => {
     return date.toLocaleDateString('en-US', {
@@ -64,15 +75,73 @@ export default function ProfileScreen() {
   };
 
   const [userProfile, setUserProfile] = useState<UserProfile>({
-    name: "John Doe",
-    email: "john.doe@email.com",
-    phone: "+233 24 123 4567",
-    address: "123 Main St, Accra, Ghana",
-    dateOfBirth: "January 15, 1990",
-    emergencyContact: "+233 20 987 6543",
-    insuranceProvider: "National Health Insurance",
-    insuranceNumber: "NHIS123456789"
+    firstName: "Loading...",
+    lastName: "Loading...",
+    name: "Loading...",
+    email: "Loading...",
+    phone: "Loading...",
+    address: "Loading...",
+    dateOfBirth: "Loading...",
+    emergencyContact: "Loading...",
+    insuranceProvider: "Loading...",
+    insuranceNumber: "Loading...",
+    bloodType: "Loading...",
+    allergies: "Loading...",
+    medicalHistory: "Loading..."
   });
+
+  // Fetch user profile data from API
+  useEffect(() => {
+    fetchUserProfile();
+  }, []);
+
+  const fetchUserProfile = async () => {
+    try {
+      setLoading(true);
+      const response = await authService.getProfile();
+      
+      if (response.success && response.data) {
+        setUserData(response.data);
+        
+        // Update profile image if available
+        if (response.data.profileImage) {
+          const fullImageUrl = constructProfileImageUrl(response.data.profileImage);
+          updateProfileImage(fullImageUrl);
+        }
+        
+        // Transform API data to match UserProfile interface
+        const profileData: UserProfile = {
+          firstName: response.data.firstName || 'Not specified',
+          lastName: response.data.lastName || 'Not specified',
+          name: `${response.data.firstName || ''} ${response.data.lastName || ''}`.trim() || 'Not specified',
+          email: response.data.email || 'Not specified',
+          phone: response.data.phone || 'Not specified',
+          address: (response.data as any).patientProfile?.address || 'Not specified',
+          dateOfBirth: response.data.dateOfBirth ? formatDateForDisplay(new Date(response.data.dateOfBirth)) : 'Not specified',
+          emergencyContact: (response.data as any).patientProfile?.emergency_contact || 'Not specified',
+          insuranceProvider: (response.data as any).patientProfile?.insurance_provider || 'Not specified',
+          insuranceNumber: (response.data as any).patientProfile?.insurance_number || 'Not specified',
+          bloodType: (response.data as any).patientProfile?.blood_type || 'Not specified',
+          allergies: (response.data as any).patientProfile?.allergies || 'Not specified',
+          medicalHistory: (response.data as any).patientProfile?.medical_history || 'Not specified'
+        };
+        
+        setUserProfile(profileData);
+      } else {
+        console.error('Failed to fetch profile:', response.message);
+        Alert.alert('Error', 'Failed to load profile data. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      Alert.alert('Error', 'Failed to load profile data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefreshProfile = () => {
+    fetchUserProfile();
+  };
 
   const handleRateApp = () => {
     setSelectedRating(0);
@@ -139,11 +208,25 @@ export default function ProfileScreen() {
       if (!result.canceled && result.assets && result.assets[0]) {
         const imageUri = result.assets[0].uri;
         
-        // Simulate API call to upload image
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Upload image to API
+        const response = await authService.uploadProfileImage(imageUri);
         
-        updateProfileImage(imageUri);
-        Alert.alert('Success', 'Profile picture updated successfully!');
+        if (response.success && response.data) {
+          // Update local profile image with the server URL
+          updateProfileImage(response.data.profileImage);
+          
+          // Update user data with new profile image
+          if (userData) {
+            setUserData({
+              ...userData,
+              profileImage: response.data.profileImage
+            });
+          }
+          
+          Alert.alert('Success', 'Profile picture updated successfully!');
+        } else {
+          Alert.alert('Error', response.message || 'Failed to upload profile picture. Please try again.');
+        }
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to update profile picture. Please try again.');
@@ -229,7 +312,10 @@ export default function ProfileScreen() {
       items: [
         { icon: "phone", label: "Emergency Contact", value: userProfile.emergencyContact, editable: true, key: 'emergencyContact' as keyof UserProfile },
         { icon: "shield", label: "Insurance Provider", value: userProfile.insuranceProvider, editable: true, key: 'insuranceProvider' as keyof UserProfile },
-        { icon: "credit-card", label: "Insurance Number", value: userProfile.insuranceNumber, editable: true, key: 'insuranceNumber' as keyof UserProfile }
+        { icon: "credit-card", label: "Insurance Number", value: userProfile.insuranceNumber, editable: true, key: 'insuranceNumber' as keyof UserProfile },
+        { icon: "tint", label: "Blood Type", value: userProfile.bloodType, editable: true, key: 'bloodType' as keyof UserProfile },
+        { icon: "exclamation-triangle", label: "Allergies", value: userProfile.allergies, editable: true, key: 'allergies' as keyof UserProfile },
+        { icon: "file-medical", label: "Medical History", value: userProfile.medicalHistory, editable: true, key: 'medicalHistory' as keyof UserProfile }
       ]
     }
   ];
@@ -314,6 +400,25 @@ export default function ProfileScreen() {
       return;
     }
 
+    // Special handling for name field
+    if (item.key === 'name') {
+      const editField: EditField = {
+        label: item.label,
+        key: item.key,
+        value: item.value,
+        placeholder: `Enter your ${item.label.toLowerCase()}`,
+        keyboardType: 'default',
+        multiline: false
+      };
+      
+      setEditingField(editField);
+      // Set the current first and last name values
+      setEditFirstName(userProfile.firstName !== 'Not specified' ? userProfile.firstName : '');
+      setEditLastName(userProfile.lastName !== 'Not specified' ? userProfile.lastName : '');
+      setEditModalVisible(true);
+      return;
+    }
+
     const editField: EditField = {
       label: item.label,
       key: item.key,
@@ -333,7 +438,18 @@ export default function ProfileScreen() {
 
 
   const handleSaveEdit = async () => {
-    if (!editingField || !editValue.trim()) {
+    if (!editingField) {
+      Alert.alert('Error', 'No field selected for editing');
+      return;
+    }
+
+    // Special validation for name field
+    if (editingField.key === 'name') {
+      if (!editFirstName.trim() || !editLastName.trim()) {
+        Alert.alert('Error', 'Please enter both first name and last name');
+        return;
+      }
+    } else if (!editValue.trim()) {
       Alert.alert('Error', 'Please enter a valid value');
       return;
     }
@@ -352,21 +468,115 @@ export default function ProfileScreen() {
     setIsSaving(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Prepare update data based on field type
+      let updateData: any = {};
       
-      // Update the profile
-      setUserProfile(prev => ({
-        ...prev,
-        [editingField.key]: editValue.trim()
-      }));
+      switch (editingField.key) {
+        case 'name':
+          // Handle name field with separate first and last name
+          updateData.firstName = editFirstName.trim();
+          updateData.lastName = editLastName.trim();
+          break;
+        case 'email':
+          updateData.email = editValue.trim();
+          break;
+        case 'phone':
+          updateData.phone = editValue.trim();
+          break;
+        case 'address':
+          // For now, we'll store address as a simple string
+          // In a real app, you might want to parse this into address object
+          updateData.address = editValue.trim();
+          break;
+        case 'dateOfBirth':
+          // Convert display format back to ISO format
+          const dateParts = editValue.trim().split(' ');
+          if (dateParts.length >= 3) {
+            const monthName = dateParts[0];
+            const day = parseInt(dateParts[1].replace(',', ''));
+            const year = parseInt(dateParts[2]);
+            const monthIndex = new Date(`${monthName} 1, 2000`).getMonth();
+            const date = new Date(year, monthIndex, day);
+            updateData.dateOfBirth = date.toISOString().split('T')[0];
+          }
+          break;
+        case 'emergencyContact':
+        case 'insuranceProvider':
+        case 'insuranceNumber':
+        case 'bloodType':
+        case 'allergies':
+        case 'medicalHistory':
+          // These are patient profile fields, handle them separately
+          const patientProfileData: any = {};
+          
+          switch (editingField.key) {
+            case 'emergencyContact':
+              patientProfileData.emergency_contact = editValue.trim();
+              break;
+            case 'insuranceProvider':
+              patientProfileData.insurance_provider = editValue.trim();
+              break;
+            case 'insuranceNumber':
+              patientProfileData.insurance_number = editValue.trim();
+              break;
+            case 'bloodType':
+              patientProfileData.blood_type = editValue.trim();
+              break;
+            case 'allergies':
+              patientProfileData.allergies = editValue.trim();
+              break;
+            case 'medicalHistory':
+              patientProfileData.medical_history = editValue.trim();
+              break;
+          }
+          
+          // Call the API to update patient profile
+          const patientResponse = await authService.updatePatientProfile(patientProfileData);
+          
+          if (patientResponse.success && patientResponse.data) {
+            // Update local profile state
+            setUserProfile(prev => ({
+              ...prev,
+              [editingField.key]: editValue.trim()
+            }));
+            
+            // Refresh profile data from server to ensure consistency
+            await fetchUserProfile();
+            
+            setEditModalVisible(false);
+            setEditingField(null);
+            setEditValue('');
+            
+            Alert.alert('Success', `${editingField.label} updated successfully!`);
+          } else {
+            Alert.alert('Error', patientResponse.message || 'Failed to update patient profile. Please try again.');
+          }
+          setIsSaving(false);
+          return;
+        default:
+          updateData[editingField.key] = editValue.trim();
+      }
 
-      setEditModalVisible(false);
-      setEditingField(null);
-      setEditValue('');
+      // Call the API to update profile
+      const response = await authService.updateProfile(updateData);
       
-      Alert.alert('Success', `${editingField.label} updated successfully!`);
+      if (response.success && response.data) {
+        // Update local user data
+        setUserData(response.data);
+        
+        // Refresh profile data from server to ensure consistency
+        await fetchUserProfile();
+        
+        setEditModalVisible(false);
+        setEditingField(null);
+        setEditValue('');
+        
+        Alert.alert('Success', `${editingField.label} updated successfully!`);
+      } else {
+        Alert.alert('Error', response.message || 'Failed to update profile. Please try again.');
+      }
     } catch (error) {
+      console.error('Error updating profile:', error);
       Alert.alert('Error', 'Failed to update profile. Please try again.');
     } finally {
       setIsSaving(false);
@@ -531,11 +741,37 @@ export default function ProfileScreen() {
     </View>
   );
 
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="dark" />
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Profile</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={ACCENT} />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
       
-
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Profile</Text>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity onPress={handleRefreshProfile} style={styles.refreshButton}>
+            <FontAwesome name="refresh" size={16} color={ACCENT} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleRateApp} style={styles.rateButton}>
+            <FontAwesome name="star" size={16} color={ACCENT} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <ScrollView 
         style={styles.content} 
@@ -701,22 +937,52 @@ export default function ProfileScreen() {
             </View>
             
             <View style={styles.modalContent}>
-              <Text style={styles.fieldLabel}>{editingField?.label}</Text>
-              <TextInput
-                style={[
-                  styles.editInput,
-                  editingField?.multiline && styles.multilineInput
-                ]}
-                value={editValue}
-                onChangeText={setEditValue}
-                placeholder={editingField?.placeholder}
-                keyboardType={editingField?.keyboardType || 'default'}
-                multiline={editingField?.multiline}
-                numberOfLines={editingField?.multiline ? 3 : 1}
-                autoFocus={true}
-                returnKeyType="done"
-                onSubmitEditing={handleSaveEdit}
-              />
+              {editingField?.key === 'name' ? (
+                // Special layout for name editing with two fields
+                <>
+                  <Text style={styles.fieldLabel}>First Name</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editFirstName}
+                    onChangeText={setEditFirstName}
+                    placeholder="Enter your first name"
+                    keyboardType="default"
+                    autoFocus={true}
+                    returnKeyType="next"
+                  />
+                  
+                  <Text style={[styles.fieldLabel, { marginTop: 15 }]}>Last Name</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editLastName}
+                    onChangeText={setEditLastName}
+                    placeholder="Enter your last name"
+                    keyboardType="default"
+                    returnKeyType="done"
+                    onSubmitEditing={handleSaveEdit}
+                  />
+                </>
+              ) : (
+                // Regular single field layout
+                <>
+                  <Text style={styles.fieldLabel}>{editingField?.label}</Text>
+                  <TextInput
+                    style={[
+                      styles.editInput,
+                      editingField?.multiline && styles.multilineInput
+                    ]}
+                    value={editValue}
+                    onChangeText={setEditValue}
+                    placeholder={editingField?.placeholder}
+                    keyboardType={editingField?.keyboardType || 'default'}
+                    multiline={editingField?.multiline}
+                    numberOfLines={editingField?.multiline ? 3 : 1}
+                    autoFocus={true}
+                    returnKeyType="done"
+                    onSubmitEditing={handleSaveEdit}
+                  />
+                </>
+              )}
             </View>
             
             <View style={styles.modalFooter}>
@@ -737,7 +1003,7 @@ export default function ProfileScreen() {
                 disabled={isSaving}
               >
                 {isSaving ? (
-                  <View style={styles.loadingContainer}>
+                  <View style={styles.inlineLoadingContainer}>
                     <FontAwesome name="spinner" size={16} color="white" />
                     <Text style={styles.saveButtonText}>Saving...</Text>
                   </View>
@@ -834,7 +1100,7 @@ export default function ProfileScreen() {
                   disabled={selectedRating === 0 || isSubmittingRating}
                 >
                   {isSubmittingRating ? (
-                    <View style={styles.loadingContainer}>
+                    <View style={styles.inlineLoadingContainer}>
                       <FontAwesome name="spinner" size={16} color="white" />
                       <Text style={styles.saveButtonText}>Submitting...</Text>
                     </View>
@@ -902,16 +1168,37 @@ export default function ProfileScreen() {
                   
                   <TouchableOpacity
                     style={styles.saveButton}
-                    onPress={() => {
-                      const formattedDate = formatDateForDisplay(selectedDate);
-                      
-                      setUserProfile(prev => ({
-                        ...prev,
-                        dateOfBirth: formattedDate
-                      }));
-                      
-                      setShowDatePicker(false);
-                      Alert.alert('Success', 'Date of birth updated successfully!');
+                    onPress={async () => {
+                      try {
+                        const formattedDate = formatDateForDisplay(selectedDate);
+                        
+                        // Convert date to ISO format for API
+                        const isoDate = selectedDate.toISOString().split('T')[0];
+                        
+                        // Call API to update date of birth
+                        const updateData = {
+                          dateOfBirth: isoDate
+                        };
+                        
+                        console.log('🔍 Frontend - Sending date update:', updateData);
+                        const response = await authService.updateProfile(updateData);
+                        
+                        if (response.success && response.data) {
+                          // Update local user data
+                          setUserData(response.data);
+                          
+                          // Refresh profile data from server to ensure consistency
+                          await fetchUserProfile();
+                          
+                          setShowDatePicker(false);
+                          Alert.alert('Success', 'Date of birth updated successfully!');
+                        } else {
+                          Alert.alert('Error', response.message || 'Failed to update date of birth. Please try again.');
+                        }
+                      } catch (error) {
+                        console.error('Error updating date of birth:', error);
+                        Alert.alert('Error', 'Failed to update date of birth. Please try again.');
+                      }
                     }}
                   >
                     <Text style={styles.saveButtonText}>Confirm</Text>
@@ -949,6 +1236,42 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: '#2c3e50',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rateButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   editButton: {
     width: 40,
@@ -1276,7 +1599,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'white',
   },
-  loadingContainer: {
+  inlineLoadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },

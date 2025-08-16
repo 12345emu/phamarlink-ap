@@ -1,24 +1,42 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { appointmentsService } from '../services/appointmentsService';
+import { useAuth } from './AuthContext';
 
 export interface Appointment {
-  id: string;
-  hospitalName: string;
-  doctorName: string;
-  specialty: string;
-  date: string;
-  time: string;
-  status: 'upcoming' | 'completed' | 'cancelled';
+  id: number;
+  user_id: number;
+  facility_id: number;
+  appointment_date: string;
+  appointment_time: string;
+  appointment_type: string;
+  reason: string;
+  symptoms: string[];
+  preferred_doctor?: number;
   notes?: string;
+  status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'rescheduled' | 'no_show';
+  created_at: string;
+  updated_at: string;
+  facility_name?: string;
+  doctor_name?: string;
+  facility_phone?: string;
+  facility_email?: string;
+  // Additional fields for display
+  hospitalName?: string;
+  doctorName?: string;
+  specialty?: string;
   hospitalImage?: string;
-  createdAt: Date;
 }
 
 interface AppointmentsContextType {
   appointments: Appointment[];
-  addAppointment: (appointment: Omit<Appointment, 'id' | 'createdAt'>) => void;
-  updateAppointmentStatus: (id: string, status: Appointment['status']) => void;
-  cancelAppointment: (id: string) => void;
-  rescheduleAppointment: (id: string, newDate: string, newTime: string) => void;
+  loading: boolean;
+  error: string | null;
+  fetchAppointments: () => Promise<void>;
+  addAppointment: (appointment: any) => Promise<void>;
+  updateAppointmentStatus: (id: number, status: Appointment['status']) => Promise<void>;
+  cancelAppointment: (id: number) => Promise<void>;
+  rescheduleAppointment: (id: number, newDate: string, newTime: string) => Promise<void>;
+  refreshAppointments: () => Promise<void>;
 }
 
 const AppointmentsContext = createContext<AppointmentsContextType | undefined>(undefined);
@@ -37,46 +55,146 @@ interface AppointmentsProviderProps {
 
 export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ children }) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { user, isAuthenticated } = useAuth();
 
-  const addAppointment = (appointmentData: Omit<Appointment, 'id' | 'createdAt'>) => {
-    const newAppointment: Appointment = {
-      ...appointmentData,
-      id: `APT-${Date.now()}`,
-      createdAt: new Date(),
-    };
-    setAppointments(prev => [newAppointment, ...prev]);
+  // Fetch appointments from API
+  const fetchAppointments = async () => {
+    if (!isAuthenticated || !user) {
+      console.log('User not authenticated, skipping appointments fetch');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      console.log('🔍 Fetching appointments for user:', user.id);
+      
+      const response = await appointmentsService.getAppointments();
+      
+      console.log('✅ Appointments fetched successfully:', response.appointments.length);
+      
+      // Transform the data to include display fields
+      const transformedAppointments = response.appointments.map((apt: any) => ({
+        ...apt,
+        hospitalName: apt.facility_name || 'Unknown Facility',
+        doctorName: apt.doctor_name || 'General Consultation',
+        specialty: apt.appointment_type || 'General',
+        hospitalImage: 'https://via.placeholder.com/50x50/3498db/ffffff?text=H', // Default image
+      }));
+      
+      setAppointments(transformedAppointments);
+    } catch (error: any) {
+      console.error('❌ Error fetching appointments:', error);
+      setError(error.message || 'Failed to fetch appointments');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateAppointmentStatus = (id: string, status: Appointment['status']) => {
-    setAppointments(prev => 
-      prev.map(appointment => 
-        appointment.id === id 
-          ? { ...appointment, status } 
-          : appointment
-      )
-    );
+  // Add new appointment
+  const addAppointment = async (appointmentData: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await appointmentsService.createAppointment(appointmentData);
+      
+      console.log('✅ Appointment created successfully:', response);
+      // Refresh the appointments list
+      await fetchAppointments();
+    } catch (error: any) {
+      console.error('❌ Error creating appointment:', error);
+      setError(error.message || 'Failed to create appointment');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const cancelAppointment = (id: string) => {
-    updateAppointmentStatus(id, 'cancelled');
+  // Update appointment status
+  const updateAppointmentStatus = async (id: number, status: Appointment['status']) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      await appointmentsService.updateAppointmentStatus(id, status);
+      
+      console.log('✅ Appointment status updated successfully');
+      // Refresh the appointments list
+      await fetchAppointments();
+    } catch (error: any) {
+      console.error('❌ Error updating appointment status:', error);
+      setError(error.message || 'Failed to update appointment status');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const rescheduleAppointment = (id: string, newDate: string, newTime: string) => {
-    setAppointments(prev => 
-      prev.map(appointment => 
-        appointment.id === id 
-          ? { ...appointment, date: newDate, time: newTime } 
-          : appointment
-      )
-    );
+  // Cancel appointment
+  const cancelAppointment = async (id: number) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      await appointmentsService.cancelAppointment(id);
+      
+      console.log('✅ Appointment cancelled successfully');
+      // Refresh the appointments list
+      await fetchAppointments();
+    } catch (error: any) {
+      console.error('❌ Error cancelling appointment:', error);
+      setError(error.message || 'Failed to cancel appointment');
+      // Re-throw the error so the calling function can handle it
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   };
+
+  // Reschedule appointment
+  const rescheduleAppointment = async (id: number, newDate: string, newTime: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      await appointmentsService.rescheduleAppointment(id, newDate, newTime);
+      
+      console.log('✅ Appointment rescheduled successfully');
+      // Refresh the appointments list
+      await fetchAppointments();
+    } catch (error: any) {
+      console.error('❌ Error rescheduling appointment:', error);
+      setError(error.message || 'Failed to reschedule appointment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Refresh appointments
+  const refreshAppointments = async () => {
+    await fetchAppointments();
+  };
+
+  // Fetch appointments when user changes
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      fetchAppointments();
+    } else {
+      setAppointments([]);
+    }
+  }, [isAuthenticated, user]);
 
   const value: AppointmentsContextType = {
     appointments,
+    loading,
+    error,
+    fetchAppointments,
     addAppointment,
     updateAppointmentStatus,
     cancelAppointment,
     rescheduleAppointment,
+    refreshAppointments,
   };
 
   return (

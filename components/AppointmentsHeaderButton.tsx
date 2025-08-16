@@ -4,16 +4,20 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAppointments } from '../context/AppointmentsContext';
 import { useRouter } from 'expo-router';
 
+/**
+ * AppointmentsHeaderButton - Shows a calendar icon with a badge displaying the number of confirmed appointments
+ * The badge appears in the top-right corner of the header and shows the count of confirmed appointments
+ */
 export default function AppointmentsHeaderButton() {
   const { appointments } = useAppointments();
   const router = useRouter();
 
-  // Count upcoming appointments
-  const upcomingAppointments = appointments.filter(apt => apt.status === 'upcoming');
+  // Count confirmed appointments
+  const confirmedAppointments = appointments.filter(apt => apt.status === 'confirmed');
   
-  // Check for appointments due within 24 hours
-  const dueSoonAppointments = upcomingAppointments.filter(apt => {
-    const appointmentDate = new Date(apt.date);
+  // Check for confirmed appointments due within 24 hours
+  const dueSoonAppointments = confirmedAppointments.filter(apt => {
+    const appointmentDate = new Date(apt.appointment_date);
     const now = new Date();
     const timeDiff = appointmentDate.getTime() - now.getTime();
     const hoursDiff = timeDiff / (1000 * 3600);
@@ -21,7 +25,12 @@ export default function AppointmentsHeaderButton() {
   });
 
   const hasNotifications = dueSoonAppointments.length > 0;
-  const appointmentCount = upcomingAppointments.length;
+  const appointmentCount = confirmedAppointments.length;
+  
+  // Debug logging
+  console.log('📅 AppointmentsHeaderButton - Total appointments:', appointments.length);
+  console.log('✅ Confirmed appointments:', confirmedAppointments.length);
+  console.log('🔔 Due soon appointments:', dueSoonAppointments.length);
 
   const handlePress = () => {
     // Navigate to appointments page
@@ -33,13 +42,15 @@ export default function AppointmentsHeaderButton() {
       style={styles.container} 
       onPress={handlePress}
       activeOpacity={0.7}
+      accessibilityLabel={`Appointments. ${appointmentCount} confirmed appointments`}
+      accessibilityHint="Tap to view your appointments"
     >
       <FontAwesome name="calendar" size={20} color="#3498db" />
       
-      {/* Badge for appointment count */}
+      {/* Badge for confirmed appointment count */}
       {appointmentCount > 0 && (
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>{appointmentCount}</Text>
+          <Text style={styles.badgeText}>{appointmentCount > 99 ? '99+' : appointmentCount}</Text>
         </View>
       )}
       
@@ -64,21 +75,29 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    top: -8,
+    right: -8,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#e74c3c',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
     paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   badgeText: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   notificationDot: {
     position: 'absolute',

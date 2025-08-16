@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService, User, LoginCredentials, SignupData } from '../services/authService';
+import { useProfile } from './ProfileContext';
+import { constructProfileImageUrl } from '../utils/imageUtils';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -30,6 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [firstTimeUser, setFirstTimeUser] = useState(true);
+  const { updateProfileImage, clearProfileImage } = useProfile();
 
   useEffect(() => {
     // Check if user is already logged in
@@ -50,9 +53,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (token && userData && firstTimeFlag === 'false') {
         // User is authenticated and has been marked as not first time
         console.log('AuthContext - User is authenticated and returning');
+        const parsedUserData = JSON.parse(userData);
         setIsAuthenticated(true);
-        setUser(JSON.parse(userData));
+        setUser(parsedUserData);
         setFirstTimeUser(false);
+        
+        // Load profile image if available
+        if (parsedUserData.profileImage) {
+          console.log('🔍 AuthContext - Loading profile image from stored data:', parsedUserData.profileImage);
+          // Construct full URL for profile image
+          const fullImageUrl = constructProfileImageUrl(parsedUserData.profileImage);
+          console.log('🔍 AuthContext - Constructed full URL from stored data:', fullImageUrl);
+          updateProfileImage(fullImageUrl);
+        } else {
+          console.log('🔍 AuthContext - No profile image in stored user data');
+        }
       } else {
         // User is new or hasn't completed onboarding
         console.log('AuthContext - User is first time or new');
@@ -72,22 +87,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setLoading(true);
+      console.log('🔍 AuthContext - Starting login for:', email);
       
       // Use the auth service for real API call
       const credentials: LoginCredentials = { email, password };
       const response = await authService.login(credentials);
       
+      console.log('🔍 AuthContext - Login response:', {
+        success: response.success,
+        hasData: !!response.data,
+        message: response.message
+      });
+      
       if (response.success && response.data) {
+        console.log('🔍 AuthContext - Login successful, storing data...');
+        console.log('🔍 AuthContext - User data:', {
+          id: response.data.user.id,
+          email: response.data.user.email,
+          role: response.data.user.role
+        });
+        console.log('🔍 AuthContext - Token preview:', response.data.token ? `${response.data.token.substring(0, 20)}...` : 'No token');
+        
         setIsAuthenticated(true);
         setUser(response.data.user);
         setFirstTimeUser(false); // User is not new after successful login
+        
+        // Debug: Log the entire user object to see what fields are available
+        console.log('🔍 AuthContext - Full user object from login:', response.data.user);
+        console.log('🔍 AuthContext - User object keys:', Object.keys(response.data.user));
+        console.log('🔍 AuthContext - profileImage field value:', response.data.user.profileImage);
+        console.log('🔍 AuthContext - profile_image field value:', (response.data.user as any).profile_image);
+        
+        // Load profile image if available
+        if (response.data.user.profileImage) {
+          console.log('🔍 AuthContext - Loading profile image on login:', response.data.user.profileImage);
+          // Construct full URL for profile image
+          const fullImageUrl = constructProfileImageUrl(response.data.user.profileImage);
+          console.log('🔍 AuthContext - Constructed full URL:', fullImageUrl);
+          updateProfileImage(fullImageUrl);
+        } else if ((response.data.user as any).profile_image) {
+          // Fallback: check for snake_case field name
+          console.log('🔍 AuthContext - Found profile_image (snake_case):', (response.data.user as any).profile_image);
+          const fullImageUrl = constructProfileImageUrl((response.data.user as any).profile_image);
+          console.log('🔍 AuthContext - Constructed full URL from snake_case:', fullImageUrl);
+          updateProfileImage(fullImageUrl);
+        } else {
+          console.log('🔍 AuthContext - No profile image in login response (checked both camelCase and snake_case)');
+        }
+        
         return true;
       } else {
-        console.error('Login failed:', response.message);
+        console.error('❌ AuthContext - Login failed:', response.message);
         return false;
       }
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ AuthContext - Login error:', error);
       return false;
     } finally {
       setLoading(false);
@@ -129,12 +183,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAuthenticated(false);
       setUser(null);
       setFirstTimeUser(true); // Reset to first time user after logout
+      
+      // Clear profile image from context and storage
+      clearProfileImage();
     } catch (error) {
       console.error('Logout error:', error);
       // Even if API call fails, clear local state
       setIsAuthenticated(false);
       setUser(null);
       setFirstTimeUser(true);
+      
+      // Clear profile image even on error
+      clearProfileImage();
     } finally {
       setLoading(false);
     }
@@ -156,6 +216,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAuthenticated(false);
       setUser(null);
       setFirstTimeUser(true);
+      
+      // Clear profile image from context and storage
+      clearProfileImage();
     } catch (error) {
       console.error('Error clearing all data:', error);
     }

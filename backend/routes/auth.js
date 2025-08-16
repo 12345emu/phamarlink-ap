@@ -1,11 +1,49 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const { executeQuery } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/profile-images');
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const userId = req.user.id;
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    cb(null, `profile-${userId}-${timestamp}${ext}`);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Accept only image files
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 // Generate JWT token
 const generateToken = (userId) => {
@@ -134,7 +172,7 @@ router.post('/login', [
     // Find user by email
     const userQuery = `
       SELECT id, email, password_hash, user_type, first_name, last_name, phone, 
-             date_of_birth, is_active, email_verified, created_at
+             date_of_birth, profile_image, is_active, email_verified, created_at
       FROM users WHERE email = ?
     `;
     const userResult = await executeQuery(userQuery, [email]);
@@ -172,11 +210,36 @@ router.post('/login', [
     // Remove password from response
     delete user.password_hash;
 
+    // Transform field names to match frontend expectations
+    const transformedUser = {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      phone: user.phone,
+      dateOfBirth: user.date_of_birth,
+      role: user.user_type,
+      profileImage: user.profile_image,
+      isActive: user.is_active,
+      emailVerified: user.email_verified,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at
+    };
+
+    // Debug logging for profile image
+    console.log('🔍 Backend - User profile_image from database:', user.profile_image);
+    console.log('🔍 Backend - Transformed profileImage:', transformedUser.profileImage);
+    console.log('🔍 Backend - Full transformed user object:', {
+      id: transformedUser.id,
+      email: transformedUser.email,
+      profileImage: transformedUser.profileImage
+    });
+
     res.json({
       success: true,
       message: 'Login successful',
       data: {
-        user,
+        user: transformedUser,
         token,
         refreshToken
       }
@@ -213,19 +276,35 @@ router.get('/profile', authenticateToken, async (req, res) => {
 
     const user = userResult.data[0];
 
+    // Transform field names to match frontend expectations
+    const transformedUser = {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      phone: user.phone,
+      dateOfBirth: user.date_of_birth,
+      role: user.user_type,
+      profileImage: user.profile_image,
+      isActive: user.is_active,
+      emailVerified: user.email_verified,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at
+    };
+
     // Get patient profile if user is a patient
     if (user.user_type === 'patient') {
       const profileQuery = 'SELECT * FROM patient_profiles WHERE user_id = ?';
       const profileResult = await executeQuery(profileQuery, [userId]);
       
       if (profileResult.success && profileResult.data.length > 0) {
-        user.patientProfile = profileResult.data[0];
+        transformedUser.patientProfile = profileResult.data[0];
       }
     }
 
     res.json({
       success: true,
-      data: user
+      data: transformedUser
     });
 
   } catch (error) {
@@ -241,8 +320,15 @@ router.get('/profile', authenticateToken, async (req, res) => {
 router.put('/profile', authenticateToken, [
   body('firstName').optional().trim().isLength({ min: 2 }),
   body('lastName').optional().trim().isLength({ min: 2 }),
-  body('phone').optional().isMobilePhone(),
-  body('dateOfBirth').optional().isISO8601()
+  body('phone').optional().custom((value) => {
+    if (!value) return true; // Allow empty values since it's optional
+    const phoneRegex = /^[\+]?[0-9\s\-\(\)]{10,}$/;
+    if (!phoneRegex.test(value)) {
+      throw new Error('Phone number must be at least 10 digits and can include +, spaces, hyphens, and parentheses');
+    }
+    return true;
+  }),
+  body('address').optional().isString()
 ], async (req, res) => {
   try {
     // Check validation errors
@@ -256,37 +342,337 @@ router.put('/profile', authenticateToken, [
     }
 
     const userId = req.user.id;
-    const { firstName, lastName, phone, dateOfBirth } = req.body;
+    const { firstName, lastName, phone, dateOfBirth, address } = req.body;
 
-    // Update user
-    const updateQuery = `
-      UPDATE users 
-      SET first_name = COALESCE(?, first_name),
-          last_name = COALESCE(?, last_name),
-          phone = COALESCE(?, phone),
-          date_of_birth = COALESCE(?, date_of_birth),
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `;
+    // Debug logging for date of birth
+    console.log('🔍 Backend - Update profile request:', {
+      userId,
+      firstName,
+      lastName,
+      phone,
+      dateOfBirth,
+      address
+    });
+
+    // Verify user exists before update
+    const checkUserQuery = 'SELECT id FROM users WHERE id = ?';
+    const checkUserResult = await executeQuery(checkUserQuery, [userId]);
     
-    const updateResult = await executeQuery(updateQuery, [
-      firstName, lastName, phone, dateOfBirth, userId
-    ]);
+    if (!checkUserResult.success) {
+      console.error('❌ Backend - Check user query failed:', checkUserResult.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Database error checking user'
+      });
+    }
+    
+    if (checkUserResult.data.length === 0) {
+      console.error('❌ Backend - User not found:', userId);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    console.log('🔍 Backend - User found:', checkUserResult.data[0]);
+
+    // Update user - simplified query
+    let updateQuery = 'UPDATE users SET updated_at = CURRENT_TIMESTAMP';
+    let params = [];
+    
+    if (firstName) {
+      updateQuery += ', first_name = ?';
+      params.push(firstName);
+    }
+    if (lastName) {
+      updateQuery += ', last_name = ?';
+      params.push(lastName);
+    }
+    if (phone) {
+      updateQuery += ', phone = ?';
+      params.push(phone);
+    }
+    if (dateOfBirth) {
+      updateQuery += ', date_of_birth = ?';
+      params.push(dateOfBirth);
+    }
+    // Note: address is handled separately in patient_profiles table
+    
+    updateQuery += ' WHERE id = ?';
+    params.push(userId);
+    
+    console.log('🔍 Backend - Update query:', updateQuery);
+    console.log('🔍 Backend - Update params:', params);
+    
+    const updateResult = await executeQuery(updateQuery, params);
+
+    console.log('🔍 Backend - Update query result:', {
+      success: updateResult.success,
+      affectedRows: updateResult.data?.affectedRows,
+      dateOfBirth: dateOfBirth
+    });
+
+    if (!updateResult.success) {
+      console.error('❌ Backend - Update query failed:', updateResult.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update profile',
+        error: updateResult.error
+      });
+    }
+
+    // Handle address update in patient_profiles table
+    if (address) {
+      console.log('🔍 Backend - Updating address in patient_profiles table');
+      
+      // Check if patient profile exists
+      const profileExistsQuery = 'SELECT id FROM patient_profiles WHERE user_id = ?';
+      const profileExistsResult = await executeQuery(profileExistsQuery, [userId]);
+      
+      let addressUpdateResult;
+      if (profileExistsResult.success && profileExistsResult.data.length > 0) {
+        // Update existing profile
+        const addressUpdateQuery = 'UPDATE patient_profiles SET address = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?';
+        addressUpdateResult = await executeQuery(addressUpdateQuery, [address, userId]);
+      } else {
+        // Create new profile with address
+        const addressInsertQuery = 'INSERT INTO patient_profiles (user_id, address) VALUES (?, ?)';
+        addressUpdateResult = await executeQuery(addressInsertQuery, [userId, address]);
+      }
+      
+      if (!addressUpdateResult.success) {
+        console.error('❌ Backend - Address update failed:', addressUpdateResult.error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to update address',
+          error: addressUpdateResult.error
+        });
+      }
+      
+      console.log('✅ Backend - Address updated successfully');
+    }
+
+    // Get updated user data
+    const getUserQuery = `
+      SELECT id, email, user_type, first_name, last_name, phone, 
+             date_of_birth, profile_image, is_active, email_verified, created_at
+      FROM users WHERE id = ?
+    `;
+    const getUserResult = await executeQuery(getUserQuery, [userId]);
+
+    if (!getUserResult.success || getUserResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found after update'
+      });
+    }
+
+    const user = getUserResult.data[0];
+
+    // Transform field names to match frontend expectations
+    const transformedUser = {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      phone: user.phone,
+      dateOfBirth: user.date_of_birth,
+      role: user.user_type,
+      profileImage: user.profile_image,
+      isActive: user.is_active,
+      emailVerified: user.email_verified,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at
+    };
+
+    // Get patient profile if user is a patient (especially if address was updated)
+    if (user.user_type === 'patient') {
+      const profileQuery = 'SELECT * FROM patient_profiles WHERE user_id = ?';
+      const profileResult = await executeQuery(profileQuery, [userId]);
+      
+      if (profileResult.success && profileResult.data.length > 0) {
+        transformedUser.patientProfile = profileResult.data[0];
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: transformedUser
+    });
+
+  } catch (error) {
+    console.error('❌ Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Upload profile image
+router.post('/upload-profile-image', authenticateToken, upload.single('profileImage'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No image file provided'
+      });
+    }
+
+    const userId = req.user.id;
+    const imagePath = req.file.path;
+    const imageUrl = `/uploads/profile-images/${req.file.filename}`;
+
+    // Update user's profile image in database
+    const updateQuery = 'UPDATE users SET profile_image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+    const updateResult = await executeQuery(updateQuery, [imageUrl, userId]);
 
     if (!updateResult.success) {
       return res.status(500).json({
         success: false,
-        message: 'Failed to update profile'
+        message: 'Failed to update profile image'
       });
     }
 
     res.json({
       success: true,
-      message: 'Profile updated successfully'
+      message: 'Profile image uploaded successfully',
+      data: {
+        profileImage: imageUrl
+      }
     });
 
   } catch (error) {
-    console.error('❌ Update profile error:', error);
+    console.error('❌ Upload profile image error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Update patient profile
+router.put('/patient-profile', authenticateToken, [
+  body('emergency_contact').optional().isString(),
+  body('insurance_provider').optional().isString(),
+  body('insurance_number').optional().isString(),
+  body('blood_type').optional().isString(),
+  body('allergies').optional().isString(),
+  body('medical_history').optional().isString()
+], async (req, res) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const userId = req.user.id;
+    const { emergency_contact, insurance_provider, insurance_number, blood_type, allergies, medical_history } = req.body;
+
+    // Check if user is a patient
+    const userQuery = 'SELECT user_type FROM users WHERE id = ?';
+    const userResult = await executeQuery(userQuery, [userId]);
+
+    if (!userResult.success || userResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (userResult.data[0].user_type !== 'patient') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only patients can update patient profile'
+      });
+    }
+
+    // Check if patient profile exists
+    const profileExistsQuery = 'SELECT id FROM patient_profiles WHERE user_id = ?';
+    const profileExistsResult = await executeQuery(profileExistsQuery, [userId]);
+
+    let updateResult;
+    if (profileExistsResult.success && profileExistsResult.data.length > 0) {
+      // Update existing profile - simplified query
+      let updateQuery = 'UPDATE patient_profiles SET updated_at = CURRENT_TIMESTAMP';
+      let params = [];
+      
+      if (emergency_contact !== undefined) {
+        updateQuery += ', emergency_contact = ?';
+        params.push(emergency_contact);
+      }
+      if (insurance_provider !== undefined) {
+        updateQuery += ', insurance_provider = ?';
+        params.push(insurance_provider);
+      }
+      if (insurance_number !== undefined) {
+        updateQuery += ', insurance_number = ?';
+        params.push(insurance_number);
+      }
+      if (blood_type !== undefined) {
+        updateQuery += ', blood_type = ?';
+        params.push(blood_type);
+      }
+      if (allergies !== undefined) {
+        updateQuery += ', allergies = ?';
+        params.push(allergies);
+      }
+      if (medical_history !== undefined) {
+        updateQuery += ', medical_history = ?';
+        params.push(medical_history);
+      }
+      
+      updateQuery += ' WHERE user_id = ?';
+      params.push(userId);
+      
+      console.log('🔍 Backend - Patient profile update query:', updateQuery);
+      console.log('🔍 Backend - Patient profile update params:', params);
+      
+      updateResult = await executeQuery(updateQuery, params);
+    } else {
+      // Create new profile
+      const insertQuery = `
+        INSERT INTO patient_profiles (user_id, emergency_contact, insurance_provider, insurance_number, blood_type, allergies, medical_history)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `;
+      updateResult = await executeQuery(insertQuery, [
+        userId, emergency_contact, insurance_provider, insurance_number, 
+        blood_type, allergies, medical_history
+      ]);
+    }
+
+    if (!updateResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update patient profile'
+      });
+    }
+
+    // Get updated patient profile data
+    const getProfileQuery = 'SELECT * FROM patient_profiles WHERE user_id = ?';
+    const getProfileResult = await executeQuery(getProfileQuery, [userId]);
+
+    let updatedProfile = null;
+    if (getProfileResult.success && getProfileResult.data.length > 0) {
+      updatedProfile = getProfileResult.data[0];
+    }
+
+    res.json({
+      success: true,
+      message: 'Patient profile updated successfully',
+      data: {
+        patientProfile: updatedProfile
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update patient profile error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'

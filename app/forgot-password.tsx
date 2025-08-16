@@ -85,7 +85,7 @@ export default function ForgotPasswordScreen() {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar barStyle="light-content" />
+      <StatusBar style="light" />
       
       {/* Background Gradient */}
       <LinearGradient

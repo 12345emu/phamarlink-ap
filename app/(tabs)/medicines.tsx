@@ -1,30 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, ActivityIndicator } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useCart } from '../../context/CartContext';
+import { medicinesService, Medicine as MedicineType } from '../../services/medicinesService';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
 const DANGER = '#e74c3c';
 
-interface Medicine {
-  id: number;
-  name: string;
-  description: string;
-  price: number;
-  image: string;
-  category: string;
-  dosage: string;
-  manufacturer: string;
-  prescription: boolean;
-  inStock: boolean;
-  rating: number;
-  reviews: number;
-}
+// Using MedicineType from the service instead of local interface
 
 export default function MedicinesScreen() {
   const router = useRouter();
@@ -34,187 +22,196 @@ export default function MedicinesScreen() {
   const [sortBy, setSortBy] = useState<'name' | 'price' | 'rating'>('name');
   const [showPrescriptionOnly, setShowPrescriptionOnly] = useState(false);
   const [showInStockOnly, setShowInStockOnly] = useState(false);
+  const [medicines, setMedicines] = useState<MedicineType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<string[]>([]);
 
-  // Sample medicines data
-  const medicines: Medicine[] = [
-    {
-      id: 1,
-      name: "Paracetamol 500mg",
-      description: "Pain reliever and fever reducer",
-      price: 10.99,
-      image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80",
-      category: "Pain Relief",
-      dosage: "1-2 tablets every 4-6 hours",
-      manufacturer: "PharmaCorp",
-      prescription: false,
-      inStock: true,
-      rating: 4.5,
-      reviews: 128
-    },
-    {
-      id: 2,
-      name: "Amoxicillin 250mg",
-      description: "Antibiotic for bacterial infections",
-      price: 25.00,
-      image: "https://images.unsplash.com/photo-1505751172876-fa1923c5c528?auto=format&fit=crop&w=400&q=80",
-      category: "Antibiotics",
-      dosage: "1 capsule 3 times daily",
-      manufacturer: "MediPharm",
-      prescription: true,
-      inStock: true,
-      rating: 4.2,
-      reviews: 89
-    },
-    {
-      id: 3,
-      name: "Vitamin C 500mg",
-      description: "Immune system support and antioxidant",
-      price: 12.00,
-      image: "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80",
-      category: "Vitamins",
-      dosage: "1 tablet daily",
-      manufacturer: "HealthPlus",
-      prescription: false,
-      inStock: true,
-      rating: 4.7,
-      reviews: 156
-    },
-    {
-      id: 4,
-      name: "Ibuprofen 400mg",
-      description: "Anti-inflammatory pain reliever",
-      price: 13.00,
-      image: "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=400&q=80",
-      category: "Pain Relief",
-      dosage: "1-2 tablets every 6-8 hours",
-      manufacturer: "PainFree Inc",
-      prescription: false,
-      inStock: true,
-      rating: 4.3,
-      reviews: 94
-    },
-    {
-      id: 5,
-      name: "Omeprazole 20mg",
-      description: "Acid reflux and stomach ulcer treatment",
-      price: 18.50,
-      image: "https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80",
-      category: "Digestive Health",
-      dosage: "1 capsule daily before breakfast",
-      manufacturer: "DigestCare",
-      prescription: true,
-      inStock: false,
-      rating: 4.1,
-      reviews: 67
-    },
-    {
-      id: 6,
-      name: "Vitamin D3 1000IU",
-      description: "Bone health and immune support",
-      price: 20.00,
-      image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80",
-      category: "Vitamins",
-      dosage: "1 tablet daily",
-      manufacturer: "SunHealth",
-      prescription: false,
-      inStock: true,
-      rating: 4.6,
-      reviews: 112
-    },
-    {
-      id: 7,
-      name: "Cetirizine 10mg",
-      description: "Allergy relief and antihistamine",
-      price: 8.99,
-      image: "https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=400&q=80",
-      category: "Allergy",
-      dosage: "1 tablet daily",
-      manufacturer: "AllerCare",
-      prescription: false,
-      inStock: true,
-      rating: 4.4,
-      reviews: 78
-    },
-    {
-      id: 8,
-      name: "Metformin 500mg",
-      description: "Diabetes management medication",
-      price: 15.75,
-      image: "https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=400&q=80",
-      category: "Diabetes",
-      dosage: "1 tablet twice daily with meals",
-      manufacturer: "DiabeCare",
-      prescription: true,
-      inStock: true,
-      rating: 4.0,
-      reviews: 45
+  // Fetch medicines from API
+  const fetchMedicines = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await medicinesService.getMedicines({
+        search: searchQuery || undefined,
+        category: activeCategory === 'all' ? undefined : activeCategory,
+        prescription_required: showPrescriptionOnly || undefined,
+        sort_by: sortBy === 'price' ? 'price' : sortBy === 'rating' ? 'popularity' : 'name',
+        sort_order: 'ASC',
+        limit: 50
+      });
+
+      if (response.success && response.data) {
+        setMedicines(response.data);
+        console.log('✅ Medicines fetched successfully:', response.data.length);
+      } else {
+        setError(response.message || 'Failed to fetch medicines');
+        console.error('❌ Failed to fetch medicines:', response.message);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching medicines:', error);
+      setError('Failed to fetch medicines');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const categories = ['all', 'Pain Relief', 'Antibiotics', 'Vitamins', 'Digestive Health', 'Allergy', 'Diabetes'];
+  // Fetch categories
+  const fetchCategories = async () => {
+    try {
+      const response = await medicinesService.getCategories();
+      if (response.success && response.data) {
+        const categoryNames = response.data.map(cat => cat.category);
+        setCategories(['all', ...categoryNames]);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching categories:', error);
+    }
+  };
+
+  // Load data on component mount
+  useEffect(() => {
+    fetchCategories();
+    fetchMedicines();
+  }, []);
+
+  // Refetch when filters change
+  useEffect(() => {
+    fetchMedicines();
+  }, [searchQuery, activeCategory, sortBy, showPrescriptionOnly, showInStockOnly]);
 
   // Filter and sort medicines
   const filteredMedicines = medicines
     .filter(medicine => {
-      const matchesSearch = medicine.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           medicine.description.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = activeCategory === 'all' || medicine.category === activeCategory;
-      const matchesPrescription = !showPrescriptionOnly || medicine.prescription;
-      const matchesStock = !showInStockOnly || medicine.inStock;
+      const matchesSearch = (medicine.name && medicine.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                           (medicine.description && medicine.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesCategory = activeCategory === 'all' || (medicine.category && medicine.category === activeCategory);
+      const matchesPrescription = !showPrescriptionOnly || medicine.prescription_required;
+      const matchesStock = !showInStockOnly || (medicine.avg_stock && medicine.avg_stock > 0);
       
       return matchesSearch && matchesCategory && matchesPrescription && matchesStock;
     })
     .sort((a, b) => {
       switch (sortBy) {
         case 'price':
-          return a.price - b.price;
+          return (a.min_price || 0) - (b.min_price || 0);
         case 'rating':
-          return b.rating - a.rating;
+          // Since we don't have rating in the API, sort by creation date (newest first)
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         case 'name':
         default:
           return a.name.localeCompare(b.name);
       }
     });
 
-  const handleAddToCart = (medicine: Medicine) => {
-    if (!medicine.inStock) {
+  const handleAddToCart = async (medicine: MedicineType) => {
+    const isInStock = medicine.avg_stock && medicine.avg_stock > 0;
+    if (!isInStock) {
       Alert.alert('Out of Stock', 'This medicine is currently out of stock.');
       return;
     }
     
-    addToCart(medicine);
-    Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
-  };
-
-  const handleMedicinePress = (medicine: Medicine) => {
-    Alert.alert(
-      medicine.name,
-      `${medicine.description}\n\nDosage: ${medicine.dosage}\nManufacturer: ${medicine.manufacturer}\nPrice: GHS ${medicine.price.toFixed(2)}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Add to Cart', 
-          onPress: () => handleAddToCart(medicine),
-          style: medicine.inStock ? 'default' : 'disabled'
-        }
-      ]
-    );
-  };
-
-  const renderStars = (rating: number) => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <FontAwesome
-          key={i}
-          name={i <= rating ? 'star' : 'star-o'}
-          size={12}
-          color={i <= rating ? '#f39c12' : '#bdc3c7'}
-        />
-      );
+    try {
+      // For medicines page, we'll use the first available pharmacy
+      // This allows users to add medicines directly from the medicines page
+      const pharmacyId = 1; // Default pharmacy ID
+      const pricePerUnit = Number(medicine.min_price) || 0;
+      
+      const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);
+      
+      if (success) {
+        Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
+      } else {
+        Alert.alert('Error', 'Failed to add item to cart. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      Alert.alert('Error', 'Failed to add item to cart. Please try again.');
     }
-    return stars;
   };
+
+  const handleMedicinePress = (medicine: MedicineType) => {
+    // Navigate to medicine details modal
+    router.push({
+      pathname: '/medicine-details-modal',
+      params: {
+        medicineId: medicine.id.toString(),
+        medicineName: medicine.name,
+        genericName: medicine.generic_name || '',
+        category: medicine.category,
+        prescriptionRequired: medicine.prescription_required.toString(),
+        dosageForm: medicine.dosage_form || '',
+        strength: medicine.strength || '',
+        description: medicine.description || '',
+        manufacturer: medicine.manufacturer || '',
+        stockQuantity: (medicine.avg_stock ?? 0).toString(),
+        price: (medicine.min_price ?? 0).toString(),
+        isAvailable: ((medicine.avg_stock ?? 0) > 0).toString(),
+        medicineImage: '' // API doesn't provide images
+      }
+    });
+  };
+
+
+
+  // Show loading state
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="dark" />
+        <View style={styles.searchSection}>
+          <View style={styles.searchContainer}>
+            <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search medicines..."
+              placeholderTextColor="#95a5a6"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={ACCENT} />
+          <Text style={{ marginTop: 16, fontSize: 16, color: '#666' }}>Loading medicines...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="dark" />
+        <View style={styles.searchSection}>
+          <View style={styles.searchContainer}>
+            <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search medicines..."
+              placeholderTextColor="#95a5a6"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}>
+          <FontAwesome name="exclamation-triangle" size={48} color={DANGER} />
+          <Text style={{ marginTop: 16, fontSize: 18, color: DANGER, fontWeight: '600', textAlign: 'center' }}>
+            {error}
+          </Text>
+          <TouchableOpacity 
+            style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: ACCENT, borderRadius: 8 }}
+            onPress={fetchMedicines}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -286,63 +283,65 @@ export default function MedicinesScreen() {
             <Text style={styles.emptyStateText}>Try adjusting your search or filters</Text>
           </View>
         ) : (
-          filteredMedicines.map(medicine => (
-            <TouchableOpacity
-              key={medicine.id}
-              style={styles.medicineCard}
-              onPress={() => handleMedicinePress(medicine)}
-              activeOpacity={0.7}
-            >
-              <Image source={{ uri: medicine.image }} style={styles.medicineImage} />
-              <View style={styles.medicineInfo}>
-                <View style={styles.medicineHeader}>
-                  <Text style={styles.medicineName}>{medicine.name}</Text>
-                  {medicine.prescription && (
-                    <View style={styles.prescriptionBadge}>
-                      <FontAwesome name="prescription" size={10} color="#fff" />
-                      <Text style={styles.prescriptionText}>Rx</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.medicineDescription}>{medicine.description}</Text>
-                <Text style={styles.medicineCategory}>{medicine.category}</Text>
-                
-                <View style={styles.ratingContainer}>
-                  <View style={styles.stars}>
-                    {renderStars(medicine.rating)}
-                  </View>
-                  <Text style={styles.reviewCount}>({medicine.reviews})</Text>
-                </View>
-
-                <View style={styles.medicineFooter}>
-                  <Text style={styles.medicinePrice}>GHS {medicine.price.toFixed(2)}</Text>
-                  <View style={styles.stockStatus}>
-                    {medicine.inStock ? (
-                      <Text style={styles.inStockText}>In Stock</Text>
-                    ) : (
-                      <Text style={styles.outOfStockText}>Out of Stock</Text>
-                    )}
-                  </View>
-                </View>
-              </View>
-
+          filteredMedicines.map(medicine => {
+            const isInStock = medicine.avg_stock && medicine.avg_stock > 0;
+            const priceText = medicinesService.formatPriceRange(medicine.min_price, medicine.max_price);
+            const categoryIcon = medicinesService.getMedicineIcon(medicine.category || 'default');
+            const categoryColor = medicinesService.getMedicineColor(medicine.category || 'default');
+            
+            return (
               <TouchableOpacity
-                style={[
-                  styles.addToCartButton,
-                  !medicine.inStock && styles.addToCartButtonDisabled
-                ]}
-                onPress={() => handleAddToCart(medicine)}
-                disabled={!medicine.inStock}
+                key={medicine.id}
+                style={styles.medicineCard}
+                onPress={() => handleMedicinePress(medicine)}
                 activeOpacity={0.7}
               >
-                <FontAwesome 
-                  name="plus" 
-                  size={16} 
-                  color={medicine.inStock ? "#fff" : "#95a5a6"} 
-                />
+                <View style={[styles.medicineImage, { backgroundColor: categoryColor + '20' }]}>
+                  <FontAwesome name={categoryIcon as any} size={32} color={categoryColor} />
+                </View>
+                <View style={styles.medicineInfo}>
+                  <View style={styles.medicineHeader}>
+                    <Text style={styles.medicineName}>{medicine.name || 'Unknown Medicine'}</Text>
+                    {medicine.prescription_required && (
+                      <View style={styles.prescriptionBadge}>
+                        <FontAwesome name="medkit" size={10} color="#fff" />
+                        <Text style={styles.prescriptionText}>Rx</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.medicineDescription}>{medicine.description || 'No description available'}</Text>
+                  <Text style={styles.medicineCategory}>{medicine.category || 'Uncategorized'}</Text>
+                  
+                  <View style={styles.medicineFooter}>
+                    <Text style={styles.medicinePrice}>{priceText}</Text>
+                    <View style={styles.stockStatus}>
+                      {isInStock ? (
+                        <Text style={styles.inStockText}>In Stock</Text>
+                      ) : (
+                        <Text style={styles.outOfStockText}>Out of Stock</Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.addToCartButton,
+                    !isInStock && styles.addToCartButtonDisabled
+                  ]}
+                  onPress={() => handleAddToCart(medicine)}
+                  disabled={!isInStock}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome 
+                    name="plus" 
+                    size={16} 
+                    color={isInStock ? "#fff" : "#95a5a6"} 
+                  />
+                </TouchableOpacity>
               </TouchableOpacity>
-            </TouchableOpacity>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -468,6 +467,8 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 12,
     marginRight: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   medicineInfo: {
     flex: 1,

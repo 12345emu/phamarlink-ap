@@ -375,22 +375,40 @@ export default function HomeScreen(props: any) {
                   key={facility.id} 
                 style={styles.nearbyItem}
                 onPress={() => {
-                    if (facility.type === 'hospital') {
+                  const addressString = `${facility.address.street}, ${facility.address.city}, ${facility.address.state}`;
+                  const distanceString = facility.distance ? `${facility.distance.toFixed(1)} km` : 'N/A';
+                  const imageUrl = facility.images && facility.images.length > 0 ? facility.images[0] : '';
+                  
+                  if (facility.type === 'hospital' || facility.type === 'clinic') {
                     router.push({
                       pathname: '/hospital-details-modal',
                       params: {
+                          id: facility.id.toString(),
                           hospitalName: facility.name,
-                          hospitalDistance: formatDistance(facility.distance || 0),
-                          hospitalOpen: facility.isOpen.toString()
+                          hospitalAddress: addressString,
+                          hospitalDistance: distanceString,
+                          hospitalRating: facility.rating.toString(),
+                          hospitalOpen: facility.isOpen.toString(),
+                          phone: facility.phone,
+                          hospitalImage: imageUrl,
+                          latitude: facility.coordinates.latitude.toString(),
+                          longitude: facility.coordinates.longitude.toString(),
                       }
                     });
                   } else {
                     router.push({
                       pathname: '/pharmacy-details-modal',
                       params: {
+                          id: facility.id.toString(),
                           pharmacyName: facility.name,
-                          pharmacyDistance: formatDistance(facility.distance || 0),
-                          pharmacyOpen: facility.isOpen.toString()
+                          pharmacyAddress: addressString,
+                          pharmacyDistance: distanceString,
+                          pharmacyRating: facility.rating.toString(),
+                          pharmacyOpen: facility.isOpen.toString(),
+                          phone: facility.phone,
+                          pharmacyImage: imageUrl,
+                          latitude: facility.coordinates.latitude.toString(),
+                          longitude: facility.coordinates.longitude.toString(),
                       }
                     });
                   }
@@ -490,12 +508,12 @@ export default function HomeScreen(props: any) {
             ) : (
               filteredMedicines.slice(0, 5).map((medicine, index) => (
                 <View key={medicine.id} style={styles.orderItem}>
-                  <View style={styles.orderLeft}>
-                    <View style={[styles.orderIcon, { backgroundColor: medicinesService.getMedicineColor(medicine.category) + '20' }]}>
-                      <FontAwesome name={medicinesService.getMedicineIcon(medicine.category) as FontAwesomeIconName} size={18} color={medicinesService.getMedicineColor(medicine.category)} />
+                <View style={styles.orderLeft}>
+                    <View style={[styles.orderIcon, { backgroundColor: medicinesService.getMedicineColor(medicine.category || 'default') + '20' }]}>
+                      <FontAwesome name={medicinesService.getMedicineIcon(medicine.category || 'default') as FontAwesomeIconName} size={18} color={medicinesService.getMedicineColor(medicine.category || 'default')} />
                     </View>
-                    <View style={styles.orderInfo}>
-                      <Text style={styles.orderName}>{medicine.name}</Text>
+                  <View style={styles.orderInfo}>
+                      <Text style={styles.orderName}>{medicine.name || 'Unknown Medicine'}</Text>
                       <Text style={styles.orderPrice}>
                         {medicinesService.formatPriceRange(medicine.min_price, medicine.max_price)}
                         {medicine.prescription_required && (
@@ -503,20 +521,30 @@ export default function HomeScreen(props: any) {
                         )}
                       </Text>
                       <Text style={{ fontSize: 12, color: '#7f8c8d' }}>
-                        {medicine.category} • {medicine.available_pharmacies || 0} pharmacies
+                        {medicine.category || 'General'} • {medicine.available_facilities || 0} facilities
                       </Text>
-                    </View>
                   </View>
-                  <TouchableOpacity 
-                    style={styles.orderButton} 
-                    activeOpacity={0.7}
-                    onPress={() => {
+                </View>
+                <TouchableOpacity 
+                  style={styles.orderButton} 
+                  activeOpacity={0.7}
+                  onPress={() => {
                       router.push({
-                        pathname: '/pharmacy-details-modal',
+                        pathname: '/medicine-details-modal',
                         params: {
-                          pharmacyName: medicine.pharmacy_names?.[0] || 'Available Pharmacies',
+                          medicineId: medicine.id.toString(),
                           medicineName: medicine.name,
-                          medicineCategory: medicine.category
+                          genericName: medicine.generic_name || '',
+                          category: medicine.category,
+                          prescriptionRequired: medicine.prescription_required.toString(),
+                          dosageForm: medicine.dosage_form || '',
+                          strength: medicine.strength || '',
+                          description: medicine.description || '',
+                          manufacturer: medicine.manufacturer || '',
+                          stockQuantity: (medicine.avg_stock ?? 0).toString(),
+                          price: (medicine.min_price ?? 0).toString(),
+                          isAvailable: ((medicine.avg_stock ?? 0) > 0).toString(),
+                          medicineImage: '' // API doesn't provide images
                         }
                       });
                     }}
@@ -551,13 +579,13 @@ export default function HomeScreen(props: any) {
               filteredProfessionals.slice(0, 3).map((professional, index) => (
                 <View key={professional.id} style={styles.orderItem}>
                   <View style={styles.orderLeft}>
-                    <View style={[styles.orderIcon, { backgroundColor: professionalsService.getProfessionalColor(professional.specialty) + '20' }]}>
-                      <FontAwesome name={professionalsService.getProfessionalIcon(professional.specialty) as FontAwesomeIconName} size={18} color={professionalsService.getProfessionalColor(professional.specialty)} />
+                    <View style={[styles.orderIcon, { backgroundColor: professionalsService.getProfessionalColor(professional.specialty || 'default') + '20' }]}>
+                      <FontAwesome name={professionalsService.getProfessionalIcon(professional.specialty || 'default') as FontAwesomeIconName} size={18} color={professionalsService.getProfessionalColor(professional.specialty || 'default')} />
                     </View>
                     <View style={styles.orderInfo}>
-                      <Text style={styles.orderName}>{professional.full_name}</Text>
+                      <Text style={styles.orderName}>{professional.full_name || 'Unknown Professional'}</Text>
                       <Text style={styles.orderPrice}>
-                        {professional.specialty} • {professional.experience_text}
+                        {professional.specialty || 'General'} • {professional.experience_text || 'No experience listed'}
                       </Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                         <FontAwesome name="star" size={12} color="#f39c12" />
@@ -573,25 +601,29 @@ export default function HomeScreen(props: any) {
                     onPress={() => {
                       if (professional.is_available) {
                         router.push({
-                          pathname: '/hospital-details-modal',
+                          pathname: '/appointment-booking-modal',
                           params: {
-                            hospitalName: 'Available Hospitals',
+                            professionalId: professional.id.toString(),
                             professionalName: professional.full_name,
-                            professionalSpecialty: professional.specialty
+                            professionalSpecialty: professional.specialty,
+                            professionalRating: professional.rating?.toString() || '0',
+                            professionalExperience: professional.experience_text,
+                            facilityId: professional.facility_id?.toString() || '',
+                            facilityName: professional.facility_name || 'General Practice'
                           }
                         });
                       }
                     }}
-                  >
+                >
                     <Text style={styles.orderButtonText}>
                       {professional.is_available ? 'Book Now' : 'Unavailable'}
                     </Text>
-                  </TouchableOpacity>
-                </View>
-              ))
+                </TouchableOpacity>
+              </View>
+            ))
             )}
           </View>
-        </View>
+            </View>
 
         {/* Chat with Professional Section */}
         <View style={styles.section}>
@@ -608,16 +640,28 @@ export default function HomeScreen(props: any) {
               </View>
             ) : (
               filteredProfessionals.slice(0, 3).map((professional, index) => (
-                <TouchableOpacity 
+              <TouchableOpacity 
                   key={professional.id} 
                   style={[
                     styles.chatItem, 
                     !professional.is_available && styles.chatItemUnavailable,
                     index === filteredProfessionals.slice(0, 3).length - 1 && { borderBottomWidth: 0 }
                   ]}
-                  onPress={() => professional.is_available ? router.push('/(tabs)/chat') : null}
+                  onPress={() => professional.is_available ? router.push({
+                    pathname: '/(tabs)/chat',
+                    params: {
+                      professionalId: professional.id.toString(),
+                      professionalName: professional.full_name,
+                      professionalRole: professional.specialty.toLowerCase().includes('pharmacist') ? 'pharmacist' : 'doctor',
+                      facilityName: professional.facility_name || 'General Practice',
+                      professionalSpecialty: professional.specialty,
+                      professionalAvatar: professionalsService.getProfessionalIcon(professional.specialty),
+                      professionalRating: professional.rating.toString(),
+                      professionalExperience: professional.experience_years.toString()
+                    }
+                  }) : null}
                   activeOpacity={professional.is_available ? 0.7 : 1}
-                >
+              >
                   <View style={styles.chatItemContent}>
                     <View style={styles.chatAvatarContainer}>
                       <Image 
@@ -648,7 +692,7 @@ export default function HomeScreen(props: any) {
                       />
                     </View>
                   </View>
-                </TouchableOpacity>
+          </TouchableOpacity>
               ))
             )}
           </View>

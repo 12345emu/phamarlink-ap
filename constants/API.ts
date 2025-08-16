@@ -21,6 +21,8 @@ export const API_ENDPOINTS = {
     SIGNUP: '/auth/signup',
     LOGIN: '/auth/login',
     PROFILE: '/auth/profile',
+    UPLOAD_PROFILE_IMAGE: '/auth/upload-profile-image',
+    UPDATE_PATIENT_PROFILE: '/auth/patient-profile',
     CHANGE_PASSWORD: '/auth/change-password',
     REFRESH_TOKEN: '/auth/refresh-token',
     LOGOUT: '/auth/logout',
@@ -38,6 +40,7 @@ export const API_ENDPOINTS = {
   PROFESSIONALS: {
     LIST: '/professionals',
     GET_BY_ID: (id: string) => `/professionals/${id}`,
+    GET_BY_FACILITY: (facilityId: string) => `/professionals/facility/${facilityId}`,
     UPDATE: (id: string) => `/professionals/${id}`,
     DEACTIVATE: (id: string) => `/professionals/${id}/deactivate`,
   },
@@ -46,6 +49,7 @@ export const API_ENDPOINTS = {
   FACILITIES: {
     LIST: '/facilities',
     GET_BY_ID: (id: string) => `/facilities/${id}`,
+    GET_MEDICINES: (id: string) => `/facilities/${id}/medicines`,
     SEARCH_NEARBY: '/facilities/nearby',
     ADD_REVIEW: (id: string) => `/facilities/${id}/reviews`,
   },
@@ -67,8 +71,10 @@ export const API_ENDPOINTS = {
     GET_BY_ID: (id: string) => `/appointments/${id}`,
     CREATE: '/appointments',
     UPDATE_STATUS: (id: string) => `/appointments/${id}/status`,
+    RESCHEDULE: (id: string) => `/appointments/${id}/reschedule`,
     CANCEL: (id: string) => `/appointments/${id}/cancel`,
     AVAILABLE_SLOTS: '/appointments/available-slots',
+    FACILITY_SLOTS: (facilityId: string) => `/appointments/facility/${facilityId}/slots`,
   },
   
   // Orders
@@ -124,6 +130,15 @@ export const API_ENDPOINTS = {
     VALIDATE_DATA: '/utils/validate',
     VALIDATE_FILE: '/utils/validate-file',
     GENERATE_ID: '/utils/generate-id',
+  },
+  
+  // Cart
+  CART: {
+    GET: '/cart',
+    ADD: '/cart/add',
+    UPDATE: (itemId: string) => `/cart/update/${itemId}`,
+    REMOVE: (itemId: string) => `/cart/remove/${itemId}`,
+    CLEAR: '/cart/clear',
   },
 };
 

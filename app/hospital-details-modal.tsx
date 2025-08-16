@@ -1,10 +1,12 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated, View, Text, Linking } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { Marker } from 'react-native-maps';
 import { useAppointments } from '../context/AppointmentsContext';
+import { facilitiesService, Facility } from '../services/facilitiesService';
+import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
 
 const { width } = Dimensions.get('window');
 
@@ -17,19 +19,88 @@ export default function HospitalDetailsScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const { addAppointment } = useAppointments();
+  const [facility, setFacility] = useState<Facility | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [facilityProfessionals, setFacilityProfessionals] = useState<HealthcareProfessional[]>([]);
+  const [professionalsLoading, setProfessionalsLoading] = useState(false);
 
-  const hospital = {
-    name: params.hospitalName as string || 'Holy Family Hospital',
+  // Fetch facility data and professionals from API
+  useEffect(() => {
+    const fetchFacilityData = async () => {
+      try {
+        const facilityId = params.id as string;
+        if (facilityId) {
+          console.log('🔍 Fetching hospital data for ID:', facilityId);
+          
+          // Fetch facility data
+          const response = await facilitiesService.getFacilityById(facilityId);
+          if (response.success && response.data) {
+            console.log('✅ Hospital data fetched:', response.data);
+            setFacility(response.data);
+          } else {
+            console.log('❌ Failed to fetch hospital data:', response.message);
+          }
+
+          // Fetch facility professionals
+          setProfessionalsLoading(true);
+          const professionalsResponse = await professionalsService.getProfessionalsByFacility(facilityId, 10);
+          if (professionalsResponse.success && professionalsResponse.data) {
+            console.log('✅ Hospital professionals fetched:', professionalsResponse.data);
+            setFacilityProfessionals(professionalsResponse.data);
+          } else {
+            console.log('❌ Failed to fetch hospital professionals:', professionalsResponse.message);
+          }
+        } else {
+          console.log('❌ No hospital ID provided in params');
+        }
+      } catch (error) {
+        console.error('Error fetching facility data:', error);
+      } finally {
+        setLoading(false);
+        setProfessionalsLoading(false);
+      }
+    };
+
+    fetchFacilityData();
+  }, [params.id]);
+
+  // Fallback facility data if API fails
+  const facilityData = {
+    name: facility?.name || params.hospitalName as string || 'Holy Family Hospital',
     image: params.hospitalImage as string || 'https://images.unsplash.com/photo-1504439468489-c8920d796a29?auto=format&fit=crop&w=400&q=80',
-    rating: parseFloat(params.hospitalRating as string) || 4.5,
+    rating: facility?.rating || parseFloat(params.hospitalRating as string) || 4.5,
     distance: params.hospitalDistance as string || '2,1 km',
-    address: params.hospitalAddress as string || '123 Main St, Accra',
-    isOpen: params.hospitalOpen === 'true',
-    phone: '+233-555-0123',
-    email: 'info@holyfamilyhospital.com',
+    address: facility?.address?.street || params.hospitalAddress as string || '123 Hospital Road, Adabraka',
+    isOpen: facility?.isOpen || params.hospitalOpen === 'true',
+    phone: facility?.phone || params.phone as string || '+233-555-0123',
+    email: facility?.email || 'info@holyfamilyhospital.com',
+    type: facility?.type || 'hospital'
   };
 
-  const services = [
+  // Get facility type display name
+  const getFacilityTypeDisplayName = (type: string) => {
+    switch (type) {
+      case 'clinic': return 'Clinic';
+      case 'hospital': return 'Hospital';
+      case 'pharmacy': return 'Pharmacy';
+      default: return 'Healthcare Facility';
+    }
+  };
+
+  // Get facility icon
+  const getFacilityIcon = (type: string) => {
+    switch (type) {
+      case 'clinic': return 'stethoscope';
+      case 'hospital': return 'hospital-o';
+      case 'pharmacy': return 'medkit';
+      default: return 'hospital-o';
+    }
+  };
+
+  // Transform database services to display format
+  const getServicesFromDatabase = () => {
+    if (!facility?.services || facility.services.length === 0) {
+      return [
     {
       id: 1,
       name: "Emergency Care",
@@ -67,6 +138,41 @@ export default function HospitalDetailsScreen() {
       description: "X-ray and imaging services",
     },
   ];
+    }
+
+    // Map service names to icons
+    const serviceIconMap: { [key: string]: string } = {
+      'Emergency Care': 'ambulance',
+      'General Medicine': 'stethoscope',
+      'Surgery': 'scissors',
+      'Pediatrics': 'child',
+      'Cardiology': 'heartbeat',
+      'Radiology': 'image',
+      'Maternity': 'baby',
+      'Neurology': 'brain',
+      'General Consultation': 'stethoscope',
+      'Specialized Care': 'user-md',
+      'Laboratory': 'flask',
+      'X-Ray': 'image',
+      'Ultrasound': 'image',
+      'Prescription Filling': 'medkit',
+      'Health Consultations': 'stethoscope',
+      'Delivery Service': 'truck',
+      'Insurance Accepted': 'credit-card',
+      'Vaccinations': 'syringe',
+      'Health Monitoring': 'heartbeat',
+      'Over-the-counter': 'pills',
+    };
+
+    return facility.services.map((service, index) => ({
+      id: index + 1,
+      name: service,
+      icon: serviceIconMap[service] || 'medkit',
+      description: `${service} services available`,
+    }));
+  };
+
+  const services = getServicesFromDatabase();
 
   const doctors = [
     {
@@ -93,11 +199,11 @@ export default function HospitalDetailsScreen() {
   ];
 
   const handleCall = () => {
-    const phoneNumber = hospital.phone;
+    const phoneNumber = facility?.phone || facilityData.phone;
     if (phoneNumber) {
       Alert.alert(
-        'Call Hospital',
-        `Would you like to call ${hospital.name} at ${phoneNumber}?`,
+        `Call ${getFacilityTypeDisplayName(facilityData.type)}`,
+        `Would you like to call ${facilityData.name} at ${phoneNumber}?`,
         [
           {
             text: 'Cancel',
@@ -112,7 +218,7 @@ export default function HospitalDetailsScreen() {
         ]
       );
     } else {
-      Alert.alert('Phone Number Unavailable', 'Phone number is not available for this hospital.');
+      Alert.alert('Phone Number Unavailable', `Phone number is not available for this ${getFacilityTypeDisplayName(facilityData.type).toLowerCase()}.`);
     }
   };
 
@@ -121,13 +227,13 @@ export default function HospitalDetailsScreen() {
     router.push({
       pathname: '/hospital-map-modal',
       params: {
-        hospitalName: hospital.name,
-        hospitalAddress: hospital.address,
-        hospitalPhone: hospital.phone,
-        hospitalRating: hospital.rating.toString(),
-        hospitalDistance: hospital.distance,
-        latitude: '5.6037',
-        longitude: '-0.1870',
+        hospitalName: facilityData.name,
+        hospitalAddress: facility?.address?.street || facilityData.address,
+        hospitalPhone: facility?.phone || facilityData.phone,
+        hospitalRating: facilityData.rating.toString(),
+        hospitalDistance: facilityData.distance,
+        latitude: facility?.coordinates?.latitude?.toString() || '5.5600',
+        longitude: facility?.coordinates?.longitude?.toString() || '-0.2057',
       }
     });
   };
@@ -152,7 +258,7 @@ export default function HospitalDetailsScreen() {
         {
           text: 'Call Hospital',
           onPress: () => {
-            const phoneNumber = hospital.phone;
+            const phoneNumber = facility?.phone || facilityData.phone;
             if (phoneNumber) {
               Linking.openURL(`tel:${phoneNumber}`).catch((err) => {
                 Alert.alert('Error', 'Could not make the call. Please try again.');
@@ -166,123 +272,46 @@ export default function HospitalDetailsScreen() {
     );
   };
 
-  const handleChatWithDoctor = (doctor: any) => {
-    if (doctor.available) {
-      router.push('/(tabs)/chat');
+  const handleChatWithDoctor = (professional: any) => {
+    if (professional.is_available) {
+      // Navigate to chat page with professional information
+      router.push({
+        pathname: '/(tabs)/chat',
+        params: {
+          professionalId: professional.id.toString(),
+          professionalName: professional.full_name,
+          professionalRole: professional.specialty.toLowerCase().includes('pharmacist') ? 'pharmacist' : 'doctor',
+          facilityName: facility?.name || facilityData.name,
+          professionalSpecialty: professional.specialty,
+          professionalAvatar: professionalsService.getProfessionalIcon(professional.specialty),
+          professionalRating: professional.rating.toString(),
+          professionalExperience: professional.experience_years.toString()
+        }
+      });
     } else {
-      Alert.alert('Doctor Unavailable', `${doctor.name} is currently not available for chat.`);
+      Alert.alert('Doctor Unavailable', `${professional.full_name} is currently not available for chat.`);
     }
   };
 
   const handleBookAppointment = () => {
-    // Show available doctors and specialties
-    Alert.alert(
-      'Book Appointment',
-      'Select a specialty to book an appointment:',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'General Medicine',
-          onPress: () => showAvailableSlots('General Medicine', 'Dr. Kwame Asante'),
-        },
-        {
-          text: 'Pediatrics',
-          onPress: () => showAvailableSlots('Pediatrics', 'Dr. Sarah Mensah'),
-        },
-        {
-          text: 'Cardiology',
-          onPress: () => showAvailableSlots('Cardiology', 'Dr. Michael Osei'),
-        },
-      ]
-    );
-  };
-
-  const showAvailableSlots = (specialty: string, doctorName: string) => {
-    const availableSlots = [
-      { time: '9:00 AM', date: 'Tomorrow', available: true },
-      { time: '10:30 AM', date: 'Tomorrow', available: true },
-      { time: '2:00 PM', date: 'Tomorrow', available: true },
-      { time: '9:00 AM', date: 'Day After Tomorrow', available: true },
-      { time: '11:00 AM', date: 'Day After Tomorrow', available: true },
-      { time: '3:30 PM', date: 'Day After Tomorrow', available: true },
-    ];
-
-    const slotOptions = availableSlots.map(slot => ({
-      text: `${slot.time} - ${slot.date}`,
-      onPress: () => confirmAppointment(specialty, doctorName, slot.time, slot.date),
-    }));
-
-    Alert.alert(
-      `Available Slots - ${specialty}`,
-      `Select a time slot with ${doctorName}:`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        ...slotOptions,
-      ]
-    );
-  };
-
-  const confirmAppointment = (specialty: string, doctorName: string, time: string, date: string) => {
-    Alert.alert(
-      'Confirm Appointment',
-      `Appointment Details:\n\nSpecialty: ${specialty}\nDoctor: ${doctorName}\nDate: ${date}\nTime: ${time}\n\nWould you like to confirm this appointment?`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Confirm Appointment',
-          onPress: () => {
-            // Add the appointment to the context
-            addAppointment({
-              hospitalName: hospital.name,
-              doctorName,
-              specialty,
-              date,
-              time,
-              status: 'upcoming',
-              hospitalImage: hospital.image,
-            });
-            
-            // Log the confirmed appointment
-            console.log(`Appointment confirmed: ${specialty} with ${doctorName} on ${date} at ${time}`);
-            
-            Alert.alert(
-              'Appointment Confirmed!',
-              `Your appointment has been successfully booked!\n\nSpecialty: ${specialty}\nDoctor: ${doctorName}\nDate: ${date}\nTime: ${time}\n\nYou will receive a confirmation email shortly.`,
-              [
-                {
-                  text: 'View My Appointments',
-                  onPress: () => {
-                    // Navigate to appointments page
-                    console.log('User wants to view appointments');
-                    router.push('/(tabs)/appointments');
-                  },
-                },
-                {
-                  text: 'OK',
-                  onPress: () => {
-                    console.log('User acknowledged appointment confirmation');
-                  },
-                },
-              ]
-            );
-          },
-        },
-      ]
-    );
+    // Navigate to the appointment booking page
+    router.push({
+      pathname: '/appointment-booking-modal',
+      params: {
+        facilityId: params.id as string,
+        facilityName: facilityData.name,
+        facilityType: getFacilityTypeDisplayName(facilityData.type),
+        facilityImage: facilityData.image,
+      }
+    });
   };
 
   const handleEmail = () => {
-    const emailAddress = hospital.email;
+    const emailAddress = facility?.email || facilityData.email;
     if (emailAddress) {
       Alert.alert(
-        'Email Hospital',
-        `Would you like to send an email to ${hospital.name} at ${emailAddress}?`,
+        `Email ${getFacilityTypeDisplayName(facilityData.type)}`,
+        `Would you like to send an email to ${facilityData.name} at ${emailAddress}?`,
         [
           {
             text: 'Cancel',
@@ -292,16 +321,26 @@ export default function HospitalDetailsScreen() {
             text: 'Send Email',
             onPress: () => {
               const subject = encodeURIComponent('Inquiry from PharmaLink App');
-              const body = encodeURIComponent(`Hello ${hospital.name},\n\nI would like to inquire about your services and book an appointment.\n\nBest regards,\nPharmaLink User`);
+              const body = encodeURIComponent(`Hello ${facilityData.name},\n\nI would like to inquire about your services and book an appointment.\n\nBest regards,\nPharmaLink User`);
               Linking.openURL(`mailto:${emailAddress}?subject=${subject}&body=${body}`);
             },
           },
         ]
       );
     } else {
-      Alert.alert('Email Unavailable', 'Email address is not available for this hospital.');
+      Alert.alert('Email Unavailable', `Email address is not available for this ${getFacilityTypeDisplayName(facilityData.type).toLowerCase()}.`);
     }
   };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading facility details...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -309,13 +348,23 @@ export default function HospitalDetailsScreen() {
         {/* Header with Logo and Name */}
         <View style={styles.headerContainer}>
           <View style={styles.logoContainer}>
-            <FontAwesome name="hospital-o" size={40} color="#fff" />
+            <FontAwesome name={getFacilityIcon(facilityData.type)} size={40} color="#fff" />
           </View>
-              <Text style={styles.hospitalName}>{hospital.name}</Text>
+              <Text style={styles.hospitalName}>{facilityData.name}</Text>
           <View style={styles.locationInfo}>
             <FontAwesome name="map-marker" size={14} color="#e74c3c" />
-            <Text style={styles.locationText}>Hospital • {hospital.distance}</Text>
+            <Text style={styles.locationText}>{getFacilityTypeDisplayName(facilityData.type)} • {facilityData.distance}</Text>
           </View>
+          {(facility?.phone || facility?.email) && (
+            <View style={styles.contactInfo}>
+              {facility?.phone && (
+                <Text style={styles.contactDetail}>📞 {facility.phone}</Text>
+              )}
+              {facility?.email && (
+                <Text style={styles.contactDetail}>✉️ {facility.email}</Text>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Map Section */}
@@ -323,8 +372,8 @@ export default function HospitalDetailsScreen() {
           <MapView
             style={styles.map}
             initialRegion={{
-              latitude: 5.5600,
-              longitude: -0.2057,
+              latitude: facility?.coordinates?.latitude || 5.5600,
+              longitude: facility?.coordinates?.longitude || -0.2057,
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
@@ -337,11 +386,11 @@ export default function HospitalDetailsScreen() {
           >
             <Marker
               coordinate={{
-                latitude: 5.5600,
-                longitude: -0.2057,
+                latitude: facility?.coordinates?.latitude || 5.5600,
+                longitude: facility?.coordinates?.longitude || -0.2057,
               }}
-              title={hospital.name}
-              description="Hospital"
+              title={facilityData.name}
+              description={getFacilityTypeDisplayName(facilityData.type)}
               pinColor="#e74c3c"
             />
           </MapView>
@@ -412,28 +461,52 @@ export default function HospitalDetailsScreen() {
         </View>
 
         {/* Chat with Doctors Section */}
-        <View style={styles.doctorsSection}>
+        <View style={styles.professionalsSection}>
           <Text style={styles.sectionTitle}>Chat with Doctors</Text>
-          <View style={styles.doctorsList}>
-            {doctors.map((doctor) => (
+          {professionalsLoading && (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading professionals...</Text>
+            </View>
+          )}
+          
+          {!professionalsLoading && facilityProfessionals.length > 0 ? (
+            <View style={styles.professionalsList}>
+              {facilityProfessionals.map((professional) => (
+                <View key={professional.id} style={styles.professionalItem}>
+                  <View style={styles.professionalAvatar}>
+                    <FontAwesome 
+                      name={professionalsService.getProfessionalIcon(professional.specialty) as any} 
+                      size={24} 
+                      color={professionalsService.getProfessionalColor(professional.specialty)} 
+                    />
+                  </View>
+                  <View style={styles.professionalInfo}>
+                    <Text style={styles.professionalName}>{professional.full_name}</Text>
+                    <Text style={styles.professionalSpecialty}>{professional.specialty}</Text>
+                    <Text style={styles.professionalExperience}>{professional.experience_text}</Text>
+                    <View style={styles.professionalRating}>
+                      <FontAwesome name="star" size={12} color="#f39c12" />
+                      <Text style={styles.ratingText}>
+                        {professionalsService.formatRating(professional.rating)} ({professional.total_reviews} reviews)
+                      </Text>
+                    </View>
+                  </View>
               <TouchableOpacity 
-                key={doctor.id} 
-                style={styles.doctorItem}
-                onPress={() => handleChatWithDoctor(doctor)}
+                    style={styles.chatButton}
+                    onPress={() => handleChatWithDoctor(professional)}
                 activeOpacity={0.7}
               >
-                <Image source={{ uri: doctor.avatar }} style={styles.doctorAvatar} />
-                <View style={styles.doctorInfo}>
-                  <Text style={styles.doctorName}>{doctor.name}</Text>
-                  <Text style={styles.doctorSpecialty}>{doctor.specialty}</Text>
+                    <FontAwesome name="comments" size={16} color="#fff" />
+                    <Text style={styles.chatButtonText}>Chat</Text>
+                  </TouchableOpacity>
                 </View>
-                <View style={styles.doctorStatus}>
-                  <View style={[styles.statusDot, { backgroundColor: doctor.available ? '#43e97b' : '#e74c3c' }]} />
-                  <Text style={styles.statusText}>{doctor.available ? 'Available' : 'Busy'}</Text>
-                </View>
-              </TouchableOpacity>
             ))}
             </View>
+          ) : !professionalsLoading && (
+            <View style={styles.noProfessionalsContainer}>
+              <Text style={styles.noProfessionalsText}>No doctors available at this {getFacilityTypeDisplayName(facilityData.type).toLowerCase()}.</Text>
+            </View>
+          )}
         </View>
 
         {/* Emergency Contact Button */}
@@ -692,5 +765,112 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 12,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  contactInfo: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  contactDetail: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  professionalsSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  professionalsList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  professionalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  professionalAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f8f9fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  professionalInfo: {
+    flex: 1,
+  },
+  professionalName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 2,
+  },
+  professionalSpecialty: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  professionalExperience: {
+    fontSize: 12,
+    color: '#95a5a6',
+    marginBottom: 4,
+  },
+  professionalRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ratingText: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginLeft: 4,
+  },
+  chatButton: {
+    backgroundColor: ACCENT,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chatButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  noProfessionalsContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  noProfessionalsText: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
   },
 }); 

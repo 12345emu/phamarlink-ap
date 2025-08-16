@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, TextInput, Dimensions, StatusBar, Alert, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, TextInput, Dimensions, Alert, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -68,12 +69,16 @@ export default function SignupScreen() {
     setIsLoading(true);
     
     try {
+      const [firstName, ...lastNameParts] = fullName.split(' ');
+      const lastName = lastNameParts.join(' ') || '';
+      
       const userData = {
-        fullName,
+        firstName,
+        lastName,
         email,
         phone,
         password,
-        selectedUserType
+        role: selectedUserType as 'patient' | 'doctor' | 'pharmacist'
       };
       
       const success = await signup(userData);
@@ -94,7 +99,7 @@ export default function SignupScreen() {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar barStyle="light-content" />
+      <StatusBar style="light" />
       
       {/* Background Gradient */}
       <LinearGradient
