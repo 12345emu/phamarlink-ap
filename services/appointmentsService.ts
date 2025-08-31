@@ -202,19 +202,12 @@ class AppointmentsService {
    */
   async cancelAppointment(id: number): Promise<void> {
     try {
-      console.log('🔍 Cancelling appointment with ID:', id);
       const response = await apiClient.patch<{ success: boolean; message: string }>(API_ENDPOINTS.APPOINTMENTS.CANCEL(id.toString()));
       
-      console.log('📡 Cancel appointment response:', response);
-      
       if (!response.success) {
-        console.error('❌ Appointment cancellation failed:', response.message);
         throw new Error(response.message || 'Failed to cancel appointment');
       }
-      
-      console.log('✅ Appointment cancelled successfully');
     } catch (error) {
-      console.error('❌ Error cancelling appointment:', error);
       throw error;
     }
   }

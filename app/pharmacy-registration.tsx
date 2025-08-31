@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import { pharmacyService, PharmacyRegistrationData } from '../services/pharmacyService';
+import { useAuth } from '../context/AuthContext';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
 const BACKGROUND = '#f8f9fa';
 const DANGER = '#e74c3c';
+
+// Google Maps API Key (same as hospital registration)
+const GOOGLE_MAPS_API_KEY = 'AIzaSyBsCGBtOteigRK5_Uld_yKuUyoEjCKGWyg';
 
 interface PharmacyRegistration {
   pharmacyName: string;
@@ -31,13 +37,15 @@ interface PharmacyRegistration {
   acceptsInsurance: boolean;
   hasDelivery: boolean;
   hasConsultation: boolean;
+  userId?: string;
+  images: string[]; // Array of image URIs
 }
 
 export default function PharmacyRegistrationScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
-  const [showCoordinates, setShowCoordinates] = useState(false);
   const [formData, setFormData] = useState<PharmacyRegistration>({
     pharmacyName: '',
     ownerName: '',
@@ -58,10 +66,11 @@ export default function PharmacyRegistrationScreen() {
     acceptsInsurance: false,
     hasDelivery: false,
     hasConsultation: false,
+    images: [],
   });
   
   // Debug logging
-  console.log('PharmacyRegistrationScreen render - showCoordinates:', showCoordinates, 'latitude:', formData.latitude, 'longitude:', formData.longitude);
+  console.log('PharmacyRegistrationScreen render - latitude:', formData.latitude, 'longitude:', formData.longitude);
   
   // Monitor formData changes
   useEffect(() => {
@@ -78,7 +87,9 @@ export default function PharmacyRegistrationScreen() {
     'Compounding',
     'Emergency Services',
     'Home Delivery',
-    'Online Prescriptions'
+    'Online Prescriptions',
+    'Staff Consultation',
+    '24/7 Emergency Services'
   ];
 
   const toggleService = (service: string) => {
@@ -90,33 +101,242 @@ export default function PharmacyRegistrationScreen() {
     }));
   };
 
+  // Google Maps API function to get precise location
+  const getLocationFromGoogleMaps = async (latitude: number, longitude: number) => {
+    try {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+      );
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.results.length > 0) {
+        const result = data.results[0];
+        const addressComponents = result.address_components;
+        
+        let streetNumber = '';
+        let route = '';
+        let locality = '';
+        let administrativeArea = '';
+        let country = '';
+        let postalCode = '';
+        
+        addressComponents.forEach((component: any) => {
+          const types = component.types;
+          if (types.includes('street_number')) {
+            streetNumber = component.long_name;
+          } else if (types.includes('route')) {
+            route = component.long_name;
+          } else if (types.includes('locality')) {
+            locality = component.long_name;
+          } else if (types.includes('administrative_area_level_1')) {
+            administrativeArea = component.long_name;
+          } else if (types.includes('country')) {
+            country = component.long_name;
+          } else if (types.includes('postal_code')) {
+            postalCode = component.long_name;
+          }
+        });
+        
+        return {
+          address: streetNumber && route ? `${streetNumber} ${route}` : route || result.formatted_address,
+          city: locality,
+          region: administrativeArea,
+          postalCode,
+          country,
+          formattedAddress: result.formatted_address
+        };
+      }
+    } catch (error) {
+      console.error('❌ Google Maps API error:', error);
+    }
+    return null;
+  };
+
   const getCurrentLocation = async () => {
     setIsGettingLocation(true);
     try {
-      // For testing - simulate location without actual GPS
       console.log('getCurrentLocation called (pharmacy)');
       
-      // Simulate a delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Request location permissions
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to get your current location.');
+        return;
+      }
+
+      // Enable location services for better accuracy
+      const isEnabled = await Location.hasServicesEnabledAsync();
+      if (!isEnabled) {
+        Alert.alert(
+          'Location Services Disabled', 
+          'Please enable location services in your device settings for accurate location detection.'
+        );
+        return;
+      }
+
+      // Get current position with maximum accuracy
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
+        timeInterval: 10000, // 10 seconds timeout
+        distanceInterval: 1, // Update every 1 meter
+      });
+
+      console.log('🔍 Location obtained:', {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        accuracy: location.coords.accuracy,
+        altitude: location.coords.altitude,
+        heading: location.coords.heading,
+        speed: location.coords.speed
+      });
       
-      // Set test coordinates
+      // Validate location accuracy
+      if (location.coords.accuracy && location.coords.accuracy > 50) {
+        console.warn('Location accuracy is low:', location.coords.accuracy, 'meters');
+        Alert.alert(
+          'Low Accuracy Warning', 
+          'Your location accuracy is low. Please ensure you have a clear view of the sky and try again for better results.'
+        );
+      }
+
+      // Try Google Maps API first for more accurate location
+      let googleLocationData = null;
+      if (GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY.length > 20) {
+        console.log('🔍 Trying Google Maps API for precise location...');
+        googleLocationData = await getLocationFromGoogleMaps(
+          location.coords.latitude,
+          location.coords.longitude
+        );
+        console.log('🔍 Google Maps location data:', googleLocationData);
+      }
+
+      // Fallback to Expo Location reverse geocoding
+      let addressResponse;
+      try {
+        addressResponse = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        console.log('🔍 Expo Location address response:', addressResponse);
+        console.log('🔍 Address response length:', addressResponse.length);
+      } catch (geocodeError) {
+        console.log('❌ Reverse geocoding failed:', geocodeError);
+        addressResponse = [];
+      }
+
+      // Extract address components with Google Maps priority
+      let finalAddress = '';
+      let finalCity = '';
+      let finalRegion = '';
+      let finalPostalCode = '';
+      
+      // Use Google Maps data if available (more accurate)
+      if (googleLocationData) {
+        finalAddress = googleLocationData.address;
+        finalCity = googleLocationData.city;
+        finalRegion = googleLocationData.region;
+        finalPostalCode = googleLocationData.postalCode;
+        console.log('🔍 Using Google Maps location data');
+      } else {
+        // Fallback to Expo Location data
+        const addressInfo = addressResponse[0] || {};
+        console.log('🔍 Raw Expo Location address data:', addressInfo);
+        
+        // Try different property names for address components
+        finalAddress = (addressInfo as any).street || (addressInfo as any).name || (addressInfo as any).thoroughfare || '';
+        finalCity = (addressInfo as any).city || (addressInfo as any).subregion || (addressInfo as any).locality || '';
+        finalRegion = (addressInfo as any).region || (addressInfo as any).administrativeArea || '';
+        
+        // Try multiple property names for postal code
+        finalPostalCode = (addressInfo as any).postalCode || 
+                         (addressInfo as any).postal || 
+                         (addressInfo as any).postcode || 
+                         (addressInfo as any).zipCode || 
+                         (addressInfo as any).zip || 
+                         '';
+        
+        console.log('🔍 Using Expo Location data');
+      }
+
+      // If no address data from geocoding, create a basic address from coordinates
+      if (!finalAddress) {
+        finalAddress = `Location at ${location.coords.latitude.toFixed(6)}, ${location.coords.longitude.toFixed(6)}`;
+      }
+
+      if (!finalCity) {
+        finalCity = 'Unknown City';
+      }
+
+      if (!finalRegion) {
+        finalRegion = 'Unknown Region';
+      }
+
+      // Handle postal code with fallback
+      if (!finalPostalCode) {
+        // Default Ghana postal code
+        finalPostalCode = '00233';
+        console.log('🔍 Using default Ghana postal code:', finalPostalCode);
+      }
+
+      // Debug: Show what we extracted
+      console.log('Final address components:', {
+        finalAddress,
+        finalCity,
+        finalRegion,
+        postalCode: finalPostalCode
+      });
+
+      // Update form data with real location (high precision coordinates)
       setFormData(prev => {
         const newData = {
           ...prev,
-          latitude: '5.5600',
-          longitude: '-0.2057',
-          address: '456 Test Avenue',
-          city: 'Accra',
-          region: 'Greater Accra',
-          postalCode: '00233',
+          latitude: location.coords.latitude.toFixed(8), // 8 decimal places for maximum precision
+          longitude: location.coords.longitude.toFixed(8), // 8 decimal places for maximum precision
+          address: finalAddress,
+          city: finalCity,
+          region: finalRegion,
+          postalCode: finalPostalCode,
         };
-        console.log('Updated formData with coordinates:', newData.latitude, newData.longitude);
+        console.log('Updated formData with high-precision coordinates and address:', {
+          latitude: newData.latitude,
+          longitude: newData.longitude,
+          accuracy: location.coords.accuracy,
+          address: newData.address,
+          city: newData.city,
+          region: newData.region,
+          postalCode: newData.postalCode
+        });
         return newData;
       });
       
-      setShowCoordinates(true);
-      console.log('Setting showCoordinates to true with test coordinates (pharmacy)');
-      Alert.alert('Location Updated', 'Test location has been set successfully!');
+      // Force a small delay to ensure form updates
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      console.log('Location updated successfully with real coordinates (pharmacy)');
+      
+      // Success alert with accuracy information
+      const accuracyText = location.coords.accuracy ? 
+        `\nAccuracy: ±${Math.round(location.coords.accuracy)} meters` : 
+        '\nAccuracy: High precision';
+      
+      // Add location quality indicator
+      let qualityIndicator = '';
+      if (location.coords.accuracy) {
+        if (location.coords.accuracy <= 5) {
+          qualityIndicator = '\n✅ Location Quality: Excellent';
+        } else if (location.coords.accuracy <= 20) {
+          qualityIndicator = '\n✅ Location Quality: Good';
+        } else if (location.coords.accuracy <= 100) {
+          qualityIndicator = '\n⚠️ Location Quality: Fair';
+        } else {
+          qualityIndicator = '\n⚠️ Location Quality: Poor - Consider moving to a better location';
+        }
+      }
+      
+      Alert.alert(
+        'Location Updated Successfully!', 
+        `Your exact current location has been captured!\n\nAddress: ${finalAddress}\nCity: ${finalCity}\nRegion: ${finalRegion}\nPostal Code: ${finalPostalCode}${accuracyText}\n\nCoordinates: ${location.coords.latitude.toFixed(8)}, ${location.coords.longitude.toFixed(8)}${qualityIndicator}`
+      );
       
     } catch (error) {
       console.log('Error in getCurrentLocation (pharmacy):', error);
@@ -124,6 +344,43 @@ export default function PharmacyRegistrationScreen() {
     } finally {
       setIsGettingLocation(false);
     }
+  };
+
+  const pickImage = async () => {
+    try {
+      // Request permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant camera roll permissions to upload images.');
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newImages = result.assets.map(asset => asset.uri);
+        setFormData(prev => ({
+          ...prev,
+          images: [...prev.images, ...newImages].slice(0, 5) // Limit to 5 images
+        }));
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }));
   };
 
   const handleSubmit = async () => {
@@ -144,38 +401,90 @@ export default function PharmacyRegistrationScreen() {
       Alert.alert('Error', 'Please enter phone number');
       return;
     }
+    
+    // Validate phone number format (Ghana format)
+    const phoneRegex = /^(\+233|0)[0-9]{9}$/;
+    if (!phoneRegex.test(formData.phone.trim())) {
+      Alert.alert('Error', 'Please enter a valid Ghana phone number (e.g., +233501234567 or 0501234567)');
+      return;
+    }
     if (!formData.address.trim()) {
       Alert.alert('Error', 'Please enter address');
+      return;
+    }
+    if (formData.address.trim().length < 5) {
+      Alert.alert('Error', 'Address must be at least 5 characters long');
       return;
     }
     if (!formData.city.trim()) {
       Alert.alert('Error', 'Please enter city');
       return;
     }
-    // Coordinates are optional - only validate if user wants to use current location
-    // If they're empty, that's fine for manual address entry
     if (!formData.licenseNumber.trim()) {
       Alert.alert('Error', 'Please enter license number');
       return;
+    }
+    
+    // Validate emergency contact format if provided
+    if (formData.emergencyContact && formData.emergencyContact.trim()) {
+      const emergencyPhoneRegex = /^(\+233|0)[0-9]{9}$/;
+      if (!emergencyPhoneRegex.test(formData.emergencyContact.trim())) {
+        Alert.alert('Error', 'Please enter a valid Ghana emergency contact number (e.g., +233501234567 or 0501234567)');
+        return;
+      }
     }
 
     setIsSubmitting(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('🔍 Submitting pharmacy registration...');
       
-      Alert.alert(
-        'Registration Successful!',
-        'Your pharmacy registration has been submitted successfully. We will review your application and contact you within 3-5 business days.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.back()
-          }
-        ]
-      );
+      // Prepare data for API
+      const registrationData: PharmacyRegistrationData = {
+        pharmacyName: formData.pharmacyName,
+        ownerName: formData.ownerName,
+        email: formData.email,
+        phone: formData.phone,
+        address: formData.address,
+        city: formData.city,
+        region: formData.region || undefined,
+        postalCode: formData.postalCode || undefined,
+        latitude: formData.latitude || undefined,
+        longitude: formData.longitude || undefined,
+        licenseNumber: formData.licenseNumber,
+        registrationNumber: formData.registrationNumber || undefined,
+        services: formData.services.length > 0 ? formData.services : undefined,
+        operatingHours: formData.operatingHours || undefined,
+        emergencyContact: formData.emergencyContact || undefined,
+        description: formData.description || undefined,
+        acceptsInsurance: formData.acceptsInsurance,
+        hasDelivery: formData.hasDelivery,
+        hasConsultation: formData.hasConsultation,
+        userId: user ? user.id : undefined,
+        images: formData.images.length > 0 ? formData.images : undefined,
+      };
+
+      console.log('🔍 Registration data being sent:', registrationData);
+      
+      // Call the API
+      const response = await pharmacyService.registerPharmacy(registrationData);
+      
+      if (response.success) {
+        Alert.alert(
+          'Registration Successful!',
+          response.message || 'Your pharmacy registration has been submitted successfully. We will review your application and contact you within 3-5 business days.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Registration Failed', response.message || 'Failed to submit registration. Please try again.');
+      }
     } catch (error) {
+      console.error('❌ Registration error:', error);
       Alert.alert('Error', 'Failed to submit registration. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -285,6 +594,8 @@ export default function PharmacyRegistrationScreen() {
             </Text>
           </TouchableOpacity>
           
+
+          
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Address *</Text>
             <TextInput
@@ -328,33 +639,34 @@ export default function PharmacyRegistrationScreen() {
             />
           </View>
 
-          {showCoordinates && (
-            <View style={styles.coordinatesContainer}>
-              <Text style={styles.coordinatesNote}>
-                Coordinates help with Google Maps integration. You can edit these values if needed.
-              </Text>
-              <View style={styles.coordinateInput}>
-                <Text style={styles.label}>Latitude</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.latitude}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, latitude: text }))}
-                  placeholder="e.g., 5.5600"
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.coordinateInput}>
-                <Text style={styles.label}>Longitude</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.longitude}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, longitude: text }))}
-                  placeholder="e.g., -0.2057"
-                  keyboardType="numeric"
-                />
-              </View>
+          <View style={styles.coordinatesContainer}>
+            <Text style={styles.coordinatesNote}>
+              Coordinates help with Google Maps integration. You can edit these values if needed.
+            </Text>
+            <Text style={[styles.coordinatesNote, { fontSize: 12, color: '#7f8c8d', marginTop: 5 }]}>
+              💡 For International Maritime Pharmacy, approximate coordinates: 5.6037, -0.0169
+            </Text>
+            <View style={styles.coordinateInput}>
+              <Text style={styles.label}>Latitude</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.latitude}
+                onChangeText={(text) => setFormData(prev => ({ ...prev, latitude: text }))}
+                placeholder="e.g., 5.5600"
+                keyboardType="numeric"
+              />
             </View>
-          )}
+            <View style={styles.coordinateInput}>
+              <Text style={styles.label}>Longitude</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.longitude}
+                onChangeText={(text) => setFormData(prev => ({ ...prev, longitude: text }))}
+                placeholder="e.g., -0.2057"
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -472,6 +784,43 @@ export default function PharmacyRegistrationScreen() {
               numberOfLines={4}
             />
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Pharmacy Images</Text>
+          <Text style={styles.sectionSubtitle}>
+            Upload photos of your pharmacy (up to 5 images). This helps customers identify your location.
+          </Text>
+          
+          <TouchableOpacity
+            style={styles.imageUploadButton}
+            onPress={pickImage}
+            disabled={formData.images.length >= 5}
+          >
+            <FontAwesome name="camera" size={24} color={ACCENT} />
+            <Text style={styles.imageUploadButtonText}>
+              {formData.images.length >= 5 ? 'Maximum images reached' : 'Add Photos'}
+            </Text>
+            <Text style={styles.imageUploadButtonSubtext}>
+              {formData.images.length}/5 images
+            </Text>
+          </TouchableOpacity>
+
+          {formData.images.length > 0 && (
+            <View style={styles.imagesContainer}>
+              {formData.images.map((imageUri, index) => (
+                <View key={index} style={styles.imageContainer}>
+                  <Image source={{ uri: imageUri }} style={styles.uploadedImage} />
+                  <TouchableOpacity
+                    style={styles.removeImageButton}
+                    onPress={() => removeImage(index)}
+                  >
+                    <FontAwesome name="times" size={16} color="white" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Submit Button */}
@@ -692,5 +1041,62 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginBottom: 12,
     fontStyle: 'italic',
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  imageUploadButton: {
+    borderWidth: 2,
+    borderColor: ACCENT,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8f9fa',
+    marginBottom: 16,
+  },
+  imageUploadButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ACCENT,
+    marginTop: 8,
+  },
+  imageUploadButtonSubtext: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 4,
+  },
+  imagesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  imageContainer: {
+    position: 'relative',
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  uploadedImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: DANGER,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 }); 

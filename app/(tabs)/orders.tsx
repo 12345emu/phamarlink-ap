@@ -1,67 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, Linking } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, Linking, RefreshControl } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useOrders } from '../../context/OrdersContext';
 import { useCart } from '../../context/CartContext';
+import { trackingService, OrderTracking } from '../../services/trackingService';
+import { Order, OrderItem } from '../../services/orderService';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
-
-interface OrderItem {
-  id: number;
-  order_id: number;
-  medicine_id: number;
-  pharmacy_medicine_id: number | null;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  created_at: string;
-  medicine_name: string;
-  generic_name: string;
-  dosage_form: string;
-  strength: string;
-  prescription_required: number;
-}
-
-interface Order {
-  id: number;
-  order_number: string;
-  patient_id: number;
-  pharmacy_id: number;
-  delivery_address: string;
-  payment_method: string;
-  total_amount: number;
-  tax_amount: number;
-  discount_amount: number;
-  final_amount: number;
-  payment_status: string;
-  order_status: string;
-  created_at: string;
-  updated_at: string;
-  items: OrderItem[];
-  pharmacy: {
-    id: number;
-    name: string;
-    address: string;
-    phone: string;
-  };
-}
 
 export default function OrdersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'confirmed' | 'delivered'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'status' | 'total'>('date');
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
   const { orders, loading, refreshOrders } = useOrders();
   const { addToCart } = useCart();
 
-  // Refresh orders when component mounts
+  // Refresh orders when component mounts and set up auto-refresh
   useEffect(() => {
     refreshOrders();
+    
+    // Set up auto-refresh every 30 seconds to keep status updated
+    const interval = setInterval(() => {
+      refreshOrders();
+    }, 30000); // 30 seconds
+    
+    return () => clearInterval(interval);
   }, []);
+
+  // Handle pull-to-refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshOrders();
+    setRefreshing(false);
+  };
 
   // Debug: Log the first order to see its structure
   if (orders.length > 0) {
@@ -109,7 +86,7 @@ export default function OrdersScreen() {
     .filter(order => {
       const matchesSearch = (order.order_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                            (order.pharmacy?.name || '').toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesFilter = activeFilter === 'all' || (order.order_status || '') === activeFilter;
+      const matchesFilter = activeFilter === 'all' || (order.status || '') === activeFilter;
       return matchesSearch && matchesFilter;
     })
     .sort((a, b) => {
@@ -117,7 +94,7 @@ export default function OrdersScreen() {
         case 'date':
           return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
         case 'status':
-          return (a.order_status || '').localeCompare(b.order_status || '');
+          return (a.status || '').localeCompare(b.status || '');
         case 'total':
           return (b.final_amount || 0) - (a.final_amount || 0);
         default:
@@ -125,9 +102,29 @@ export default function OrdersScreen() {
       }
     });
 
-  const handleTrackOrder = (order: Order) => {
-    // For now, show a placeholder since we don't have tracking implemented
-    Alert.alert('Track Order', 'Tracking feature will be available soon.');
+  const handleTrackOrder = async (order: Order) => {
+    try {
+      const response = await trackingService.getTrackingByOrderId(order.id);
+      
+      if (response.success && response.data) {
+        const trackingData = response.data;
+        
+        // Navigate to tracking screen with the tracking data
+        router.push({
+          pathname: '/(tabs)/order-tracking',
+          params: {
+            orderId: order.id.toString(),
+            trackingNumber: trackingData.tracking_number,
+            orderNumber: order.order_number
+          }
+        });
+      } else {
+        Alert.alert('Track Order', response.message || 'Failed to load tracking information.');
+      }
+    } catch (error) {
+      console.error('Error fetching tracking:', error);
+      Alert.alert('Track Order', 'Failed to load tracking information.');
+    }
   };
 
   const handleReorder = (order: Order) => {
@@ -225,6 +222,17 @@ export default function OrdersScreen() {
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
+            <TouchableOpacity 
+              style={styles.refreshButton}
+              onPress={onRefresh}
+              disabled={refreshing}
+            >
+              <FontAwesome 
+                name="refresh" 
+                size={18} 
+                color={refreshing ? "#95a5a6" : ACCENT} 
+              />
+            </TouchableOpacity>
       </View>
 
         {/* Filter Options */}
@@ -303,6 +311,14 @@ export default function OrdersScreen() {
         style={styles.ordersList} 
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[ACCENT]}
+            tintColor={ACCENT}
+          />
+        }
       >
         {filteredOrders.length === 0 ? (
           <View style={styles.emptyState}>
@@ -322,9 +338,9 @@ export default function OrdersScreen() {
                     <Text style={styles.orderId}>{order.order_number || 'Unknown'}</Text>
                     <Text style={styles.orderDate}>{order.created_at ? new Date(order.created_at).toLocaleDateString() : 'Unknown'}</Text>
                   </View>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.order_status || 'pending') }]}>
-                    <FontAwesome name={getStatusIcon(order.order_status || 'pending') as any} size={12} color="#fff" />
-                    <Text style={styles.statusText}>{getStatusText(order.order_status || 'pending')}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status || 'pending') }]}>
+                    <FontAwesome name={getStatusIcon(order.status || 'pending') as any} size={12} color="#fff" />
+                    <Text style={styles.statusText}>{getStatusText(order.status || 'pending')}</Text>
                   </View>
                     </View>
 
@@ -439,6 +455,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: '#2c3e50',
+  },
+  refreshButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   filterContainer: {
     marginBottom: 16,

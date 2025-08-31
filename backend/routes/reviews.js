@@ -1,391 +1,608 @@
 const express = require('express');
-const { body, param, query, validationResult } = require('express-validator');
-const { authenticateToken, requireRole, requireOwnership } = require('../middleware/auth');
-const db = require('../config/database');
+const { body, query, validationResult } = require('express-validator');
+const { executeQuery } = require('../config/database');
+const { authenticateToken, optionalAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Get all reviews with filters
-router.get('/', [
-  query('facilityId').optional().isInt().withMessage('Facility ID must be an integer'),
-  query('medicineId').optional().isInt().withMessage('Medicine ID must be an integer'),
-  query('userId').optional().isInt().withMessage('User ID must be an integer'),
-  query('rating').optional().isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
-  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { facilityId, medicineId, userId, rating, page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
-
-    let whereClause = 'WHERE r.deleted_at IS NULL';
-    const params = [];
-
-    if (facilityId) {
-      whereClause += ' AND r.facility_id = ?';
-      params.push(facilityId);
-    }
-
-    if (medicineId) {
-      whereClause += ' AND r.medicine_id = ?';
-      params.push(medicineId);
-    }
-
-    if (userId) {
-      whereClause += ' AND r.user_id = ?';
-      params.push(userId);
-    }
-
-    if (rating) {
-      whereClause += ' AND r.rating = ?';
-      params.push(rating);
-    }
-
-    const query = `
-      SELECT 
-        r.id, r.rating, r.comment, r.created_at, r.updated_at,
-        u.id as user_id, u.first_name, u.last_name, u.email,
-        u.profile_picture,
-        f.id as facility_id, f.name as facility_name, f.type as facility_type,
-        m.id as medicine_id, m.name as medicine_name
-      FROM reviews r
-      LEFT JOIN users u ON r.user_id = u.id
-      LEFT JOIN healthcare_facilities f ON r.facility_id = f.id
-      LEFT JOIN medicines m ON r.medicine_id = m.id
-      ${whereClause}
-      ORDER BY r.created_at DESC
-      LIMIT ? OFFSET ?
-    `;
-
-    params.push(parseInt(limit), offset);
-
-    const reviews = await db.executeQuery(query, params);
-
-    // Get total count for pagination
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM reviews r
-      ${whereClause}
-    `;
-    const countResult = await db.executeQuery(countQuery, params.slice(0, -2));
-    const total = countResult[0].total;
-
-    res.json({
-      reviews,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching reviews:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Get review by ID
-router.get('/:id', [
-  param('id').isInt().withMessage('Review ID must be an integer')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { id } = req.params;
-
-    const query = `
-      SELECT 
-        r.id, r.rating, r.comment, r.created_at, r.updated_at,
-        u.id as user_id, u.first_name, u.last_name, u.email,
-        u.profile_picture,
-        f.id as facility_id, f.name as facility_name, f.type as facility_type,
-        m.id as medicine_id, m.name as medicine_name
-      FROM reviews r
-      LEFT JOIN users u ON r.user_id = u.id
-      LEFT JOIN healthcare_facilities f ON r.facility_id = f.id
-      LEFT JOIN medicines m ON r.medicine_id = m.id
-      WHERE r.id = ? AND r.deleted_at IS NULL
-    `;
-
-    const reviews = await db.executeQuery(query, [id]);
-
-    if (reviews.length === 0) {
-      return res.status(404).json({ error: 'Review not found' });
-    }
-
-    res.json({ review: reviews[0] });
-  } catch (error) {
-    console.error('Error fetching review:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Create new review
+// Create a new review
 router.post('/', [
   authenticateToken,
-  body('facilityId').optional().isInt().withMessage('Facility ID must be an integer'),
-  body('medicineId').optional().isInt().withMessage('Medicine ID must be an integer'),
+  body('facilityId').notEmpty().withMessage('Facility ID is required'),
   body('rating').isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
-  body('comment').optional().isLength({ max: 1000 }).withMessage('Comment must be less than 1000 characters'),
+  body('comment').isString().trim().isLength({ min: 10, max: 500 }).withMessage('Comment must be between 10 and 500 characters'),
+  body('userId').notEmpty().withMessage('User ID is required'),
 ], async (req, res) => {
   try {
+    // Check validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
     }
 
-    const { facilityId, medicineId, rating, comment } = req.body;
-    const userId = req.user.id;
+    const { facilityId, rating, comment, userId } = req.body;
 
-    // Validate that either facilityId or medicineId is provided, but not both
-    if (!facilityId && !medicineId) {
-      return res.status(400).json({ error: 'Either facilityId or medicineId must be provided' });
-    }
-
-    if (facilityId && medicineId) {
-      return res.status(400).json({ error: 'Cannot review both facility and medicine at the same time' });
-    }
-
-    // Check if user has already reviewed this facility/medicine
-    const existingReviewQuery = `
-      SELECT id FROM reviews 
-      WHERE user_id = ? AND deleted_at IS NULL
-      ${facilityId ? 'AND facility_id = ?' : 'AND medicine_id = ?'}
-    `;
-    const existingReview = await db.executeQuery(
-      existingReviewQuery, 
-      [userId, facilityId || medicineId]
+    // Check if facility exists
+    const facilityCheck = await executeQuery(
+      'SELECT id FROM healthcare_facilities WHERE id = ? AND is_active = TRUE',
+      [facilityId]
     );
 
-    if (existingReview.length > 0) {
-      return res.status(400).json({ error: 'You have already reviewed this item' });
+    if (!facilityCheck.success || facilityCheck.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found'
+      });
     }
 
-    // Verify facility/medicine exists
-    if (facilityId) {
-      const facility = await db.executeQuery(
-        'SELECT id FROM healthcare_facilities WHERE id = ? AND deleted_at IS NULL',
-        [facilityId]
-      );
-      if (facility.length === 0) {
-        return res.status(404).json({ error: 'Facility not found' });
-      }
-    }
-
-    if (medicineId) {
-      const medicine = await db.executeQuery(
-        'SELECT id FROM medicines WHERE id = ? AND deleted_at IS NULL',
-        [medicineId]
-      );
-      if (medicine.length === 0) {
-        return res.status(404).json({ error: 'Medicine not found' });
-      }
-    }
-
-    const insertQuery = `
-      INSERT INTO reviews (user_id, facility_id, medicine_id, rating, comment, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-    `;
-
-    const result = await db.executeQuery(insertQuery, [
-      userId, 
-      facilityId || null, 
-      medicineId || null, 
-      rating, 
-      comment || null
-    ]);
-
-    // Get the created review
-    const newReview = await db.executeQuery(
-      'SELECT * FROM reviews WHERE id = ?',
-      [result.insertId]
+    // Check if user has already reviewed this facility
+    const existingReview = await executeQuery(
+      'SELECT id FROM facility_reviews WHERE facility_id = ? AND user_id = ?',
+      [facilityId, userId]
     );
 
-    res.status(201).json({ 
+    if (existingReview.success && existingReview.data.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'You have already reviewed this facility'
+      });
+    }
+
+    // Create the review
+    const createReview = await executeQuery(
+      'INSERT INTO facility_reviews (facility_id, user_id, rating, comment, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+      [facilityId, userId, rating, comment]
+    );
+
+    if (!createReview.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create review'
+      });
+    }
+
+    // Get the created review with user information
+    const reviewId = createReview.data.insertId;
+    const getReview = await executeQuery(
+      `SELECT 
+        fr.id,
+        fr.facility_id,
+        fr.user_id,
+        fr.rating,
+        fr.comment,
+        fr.created_at,
+        fr.updated_at,
+        u.first_name,
+        u.last_name,
+        u.profile_image
+      FROM facility_reviews fr
+      LEFT JOIN users u ON fr.user_id = u.id
+      WHERE fr.id = ?`,
+      [reviewId]
+    );
+
+    if (!getReview.success || getReview.data.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve created review'
+      });
+    }
+
+    const review = getReview.data[0];
+
+    console.log(`🎉 Review created successfully! ID: ${review.id}`);
+    console.log(`📝 Review details: Rating ${review.rating}/5, Comment: "${review.comment.substring(0, 50)}..."`);
+    
+    // Update facility average rating
+    console.log(`🔄 Triggering facility rating update for facility ${facilityId}...`);
+    await updateFacilityRating(facilityId);
+
+    res.status(201).json({
+      success: true,
       message: 'Review created successfully',
-      review: newReview[0]
+      data: {
+        id: review.id,
+        facilityId: review.facility_id,
+        userId: review.user_id,
+        rating: review.rating,
+        comment: review.comment,
+        createdAt: review.created_at,
+        updatedAt: review.updated_at,
+        user: {
+          firstName: review.first_name,
+          lastName: review.last_name,
+          profileImage: review.profile_image
+        }
+      }
     });
+
   } catch (error) {
-    console.error('Error creating review:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Create review error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 });
 
-// Update review
-router.put('/:id', [
-  authenticateToken,
-  param('id').isInt().withMessage('Review ID must be an integer'),
-  body('rating').optional().isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
-  body('comment').optional().isLength({ max: 1000 }).withMessage('Comment must be less than 1000 characters'),
+// Get reviews for a specific facility
+router.get('/facility/:facilityId', [
+  optionalAuth,
+  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
+  query('offset').optional().isInt({ min: 0 }).withMessage('Offset must be non-negative'),
 ], async (req, res) => {
   try {
+    // Check validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
     }
 
-    const { id } = req.params;
+    const { facilityId } = req.params;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Check if facility exists
+    const facilityCheck = await executeQuery(
+      'SELECT id FROM healthcare_facilities WHERE id = ? AND is_active = TRUE',
+      [facilityId]
+    );
+
+    if (!facilityCheck.success || facilityCheck.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found'
+      });
+    }
+
+    // Get reviews with user information
+    const getReviews = await executeQuery(
+      `SELECT 
+        fr.id,
+        fr.facility_id,
+        fr.user_id,
+        fr.rating,
+        fr.comment,
+        fr.created_at,
+        fr.updated_at,
+        u.first_name,
+        u.last_name,
+        u.profile_image
+      FROM facility_reviews fr
+      LEFT JOIN users u ON fr.user_id = u.id
+      WHERE fr.facility_id = ?
+      ORDER BY fr.created_at DESC
+      LIMIT ? OFFSET ?`,
+      [facilityId, limit, offset]
+    );
+
+    if (!getReviews.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch reviews'
+      });
+    }
+
+    const reviews = getReviews.data.map(review => ({
+      id: review.id,
+      facilityId: review.facility_id,
+      userId: review.user_id,
+      rating: review.rating,
+      comment: review.comment,
+      createdAt: review.created_at,
+      updatedAt: review.updated_at,
+      user: {
+        firstName: review.first_name,
+        lastName: review.last_name,
+        profileImage: review.profile_image
+      }
+    }));
+
+    res.json({
+      success: true,
+      message: 'Reviews fetched successfully',
+      data: reviews
+    });
+
+  } catch (error) {
+    console.error('Get facility reviews error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Get user's reviews
+router.get('/user/:userId', [
+  authenticateToken,
+  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
+  query('offset').optional().isInt({ min: 0 }).withMessage('Offset must be non-negative'),
+], async (req, res) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { userId } = req.params;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Get user's reviews with facility information
+    const getUserReviews = await executeQuery(
+      `SELECT 
+        fr.id,
+        fr.facility_id,
+        fr.user_id,
+        fr.rating,
+        fr.comment,
+        fr.created_at,
+        fr.updated_at,
+        hf.name as facility_name,
+        hf.facility_type
+      FROM facility_reviews fr
+      LEFT JOIN healthcare_facilities hf ON fr.facility_id = hf.id
+      WHERE fr.user_id = ?
+      ORDER BY fr.created_at DESC
+      LIMIT ? OFFSET ?`,
+      [userId, limit, offset]
+    );
+
+    if (!getUserReviews.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch user reviews'
+      });
+    }
+
+    const reviews = getUserReviews.data.map(review => ({
+      id: review.id,
+      facilityId: review.facility_id,
+      userId: review.user_id,
+      rating: review.rating,
+      comment: review.comment,
+      createdAt: review.created_at,
+      updatedAt: review.updated_at,
+      facility: {
+        name: review.facility_name,
+        type: review.facility_type
+      }
+    }));
+
+    res.json({
+      success: true,
+      message: 'User reviews fetched successfully',
+      data: reviews
+    });
+
+  } catch (error) {
+    console.error('Get user reviews error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Get average rating for a facility
+router.get('/facility/:facilityId/average', async (req, res) => {
+  try {
+    const { facilityId } = req.params;
+
+    // Check if facility exists
+    const facilityCheck = await executeQuery(
+      'SELECT id FROM healthcare_facilities WHERE id = ? AND is_active = TRUE',
+      [facilityId]
+    );
+
+    if (!facilityCheck.success || facilityCheck.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found'
+      });
+    }
+
+    // Get average rating and total reviews
+    const getAverageRating = await executeQuery(
+      `SELECT 
+        AVG(rating) as averageRating,
+        COUNT(*) as totalReviews
+      FROM facility_reviews 
+      WHERE facility_id = ?`,
+      [facilityId]
+    );
+
+    if (!getAverageRating.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch facility rating'
+      });
+    }
+
+    const result = getAverageRating.data[0];
+    const averageRating = result.averageRating ? parseFloat(result.averageRating.toFixed(1)) : 0;
+    const totalReviews = result.totalReviews || 0;
+
+    res.json({
+      success: true,
+      message: 'Facility rating fetched successfully',
+      data: {
+        averageRating,
+        totalReviews
+      }
+    });
+
+  } catch (error) {
+    console.error('Get facility average rating error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Check if user has already reviewed a facility
+router.get('/check/:facilityId/:userId', [
+  authenticateToken
+], async (req, res) => {
+  try {
+    const { facilityId, userId } = req.params;
+
+    // Check if user has reviewed this facility
+    const checkReview = await executeQuery(
+      `SELECT 
+        fr.id,
+        fr.facility_id,
+        fr.user_id,
+        fr.rating,
+        fr.comment,
+        fr.created_at,
+        fr.updated_at
+      FROM facility_reviews fr
+      WHERE fr.facility_id = ? AND fr.user_id = ?`,
+      [facilityId, userId]
+    );
+
+    if (!checkReview.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to check review status'
+      });
+    }
+
+    const hasReviewed = checkReview.data.length > 0;
+    const review = hasReviewed ? checkReview.data[0] : null;
+
+    res.json({
+      success: true,
+      message: 'Review status checked successfully',
+      data: {
+        hasReviewed,
+        review: hasReviewed ? {
+          id: review.id,
+          facilityId: review.facility_id,
+          userId: review.user_id,
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.created_at,
+          updatedAt: review.updated_at
+        } : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Check user review error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Update a review
+router.put('/:reviewId', [
+  authenticateToken,
+  body('rating').optional().isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+  body('comment').optional().isString().trim().isLength({ min: 10, max: 500 }).withMessage('Comment must be between 10 and 500 characters'),
+], async (req, res) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { reviewId } = req.params;
     const { rating, comment } = req.body;
     const userId = req.user.id;
 
     // Check if review exists and belongs to user
-    const existingReview = await db.executeQuery(
-      'SELECT * FROM reviews WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [id, userId]
+    const reviewCheck = await executeQuery(
+      'SELECT facility_id FROM facility_reviews WHERE id = ? AND user_id = ?',
+      [reviewId, userId]
     );
 
-    if (existingReview.length === 0) {
-      return res.status(404).json({ error: 'Review not found or access denied' });
-    }
-
-    // Update review
-    const updateQuery = `
-      UPDATE reviews 
-      SET rating = ?, comment = ?, updated_at = NOW()
-      WHERE id = ?
-    `;
-
-    await db.executeQuery(updateQuery, [
-      rating !== undefined ? rating : existingReview[0].rating,
-      comment !== undefined ? comment : existingReview[0].comment,
-      id
-    ]);
-
-    // Get updated review
-    const updatedReview = await db.executeQuery(
-      'SELECT * FROM reviews WHERE id = ?',
-      [id]
-    );
-
-    res.json({ 
-      message: 'Review updated successfully',
-      review: updatedReview[0]
-    });
-  } catch (error) {
-    console.error('Error updating review:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Delete review (soft delete)
-router.delete('/:id', [
-  authenticateToken,
-  param('id').isInt().withMessage('Review ID must be an integer')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { id } = req.params;
-    const userId = req.user.id;
-
-    // Check if review exists and belongs to user
-    const existingReview = await db.executeQuery(
-      'SELECT * FROM reviews WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [id, userId]
-    );
-
-    if (existingReview.length === 0) {
-      return res.status(404).json({ error: 'Review not found or access denied' });
-    }
-
-    // Soft delete
-    await db.executeQuery(
-      'UPDATE reviews SET deleted_at = NOW() WHERE id = ?',
-      [id]
-    );
-
-    res.json({ message: 'Review deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting review:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Get review statistics
-router.get('/stats/summary', [
-  query('facilityId').optional().isInt().withMessage('Facility ID must be an integer'),
-  query('medicineId').optional().isInt().withMessage('Medicine ID must be an integer'),
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { facilityId, medicineId } = req.query;
-
-    let whereClause = 'WHERE r.deleted_at IS NULL';
-    const params = [];
-
-    if (facilityId) {
-      whereClause += ' AND r.facility_id = ?';
-      params.push(facilityId);
-    }
-
-    if (medicineId) {
-      whereClause += ' AND r.medicine_id = ?';
-      params.push(medicineId);
-    }
-
-    const statsQuery = `
-      SELECT 
-        COUNT(*) as total_reviews,
-        AVG(rating) as average_rating,
-        COUNT(CASE WHEN rating = 5 THEN 1 END) as five_star,
-        COUNT(CASE WHEN rating = 4 THEN 1 END) as four_star,
-        COUNT(CASE WHEN rating = 3 THEN 1 END) as three_star,
-        COUNT(CASE WHEN rating = 2 THEN 1 END) as two_star,
-        COUNT(CASE WHEN rating = 1 THEN 1 END) as one_star
-      FROM reviews r
-      ${whereClause}
-    `;
-
-    const stats = await db.executeQuery(statsQuery, params);
-
-    if (stats.length === 0) {
-      return res.json({
-        total_reviews: 0,
-        average_rating: 0,
-        rating_distribution: {
-          five_star: 0,
-          four_star: 0,
-          three_star: 0,
-          two_star: 0,
-          one_star: 0
-        }
+    if (!reviewCheck.success || reviewCheck.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found or you are not authorized to update it'
       });
     }
 
-    const result = stats[0];
-    const ratingDistribution = {
-      five_star: result.five_star || 0,
-      four_star: result.four_star || 0,
-      three_star: result.three_star || 0,
-      two_star: result.two_star || 0,
-      one_star: result.one_star || 0
-    };
+    const facilityId = reviewCheck.data[0].facility_id;
+
+    // Update the review
+    const updateFields = [];
+    const updateValues = [];
+
+    if (rating !== undefined) {
+      updateFields.push('rating = ?');
+      updateValues.push(rating);
+    }
+
+    if (comment !== undefined) {
+      updateFields.push('comment = ?');
+      updateValues.push(comment);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update'
+      });
+    }
+
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(reviewId);
+
+    const updateReview = await executeQuery(
+      `UPDATE facility_reviews SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateValues
+    );
+
+    if (!updateReview.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update review'
+      });
+    }
+
+    // Update facility average rating
+    await updateFacilityRating(facilityId);
 
     res.json({
-      total_reviews: result.total_reviews || 0,
-      average_rating: parseFloat(result.average_rating || 0).toFixed(1),
-      rating_distribution: ratingDistribution
+      success: true,
+      message: 'Review updated successfully'
     });
+
   } catch (error) {
-    console.error('Error fetching review statistics:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Update review error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 });
+
+// Delete a review
+router.delete('/:reviewId', [
+  authenticateToken
+], async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const userId = req.user.id;
+
+    // Check if review exists and belongs to user
+    const reviewCheck = await executeQuery(
+      'SELECT facility_id FROM facility_reviews WHERE id = ? AND user_id = ?',
+      [reviewId, userId]
+    );
+
+    if (!reviewCheck.success || reviewCheck.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found or you are not authorized to delete it'
+      });
+    }
+
+    const facilityId = reviewCheck.data[0].facility_id;
+
+    // Delete the review
+    const deleteReview = await executeQuery(
+      'DELETE FROM facility_reviews WHERE id = ?',
+      [reviewId]
+    );
+
+    if (!deleteReview.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete review'
+      });
+    }
+
+    // Update facility average rating
+    await updateFacilityRating(facilityId);
+
+    res.json({
+      success: true,
+      message: 'Review deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete review error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Helper function to update facility average rating
+async function updateFacilityRating(facilityId) {
+  try {
+    console.log(`🔍 Updating facility rating for facility ID: ${facilityId}`);
+    
+    // Get all reviews for this facility
+    const getAverageRating = await executeQuery(
+      `SELECT 
+        AVG(rating) as averageRating,
+        COUNT(*) as totalReviews,
+        MIN(rating) as minRating,
+        MAX(rating) as maxRating
+      FROM facility_reviews 
+      WHERE facility_id = ?`,
+      [facilityId]
+    );
+
+    if (getAverageRating.success) {
+      const result = getAverageRating.data[0];
+      const averageRating = result.averageRating ? parseFloat(result.averageRating.toFixed(1)) : 0;
+      const totalReviews = result.totalReviews || 0;
+      const minRating = result.minRating || 0;
+      const maxRating = result.maxRating || 0;
+
+      console.log(`📊 Facility ${facilityId} rating stats:`, {
+        averageRating,
+        totalReviews,
+        minRating,
+        maxRating
+      });
+
+      // Update the facility table with new rating and review count
+      const updateResult = await executeQuery(
+        'UPDATE healthcare_facilities SET rating = ?, review_count = ? WHERE id = ?',
+        [averageRating, totalReviews, facilityId]
+      );
+
+      if (updateResult.success) {
+        console.log(`✅ Successfully updated facility ${facilityId} rating to ${averageRating} (${totalReviews} reviews)`);
+      } else {
+        console.error(`❌ Failed to update facility ${facilityId} rating:`, updateResult.error);
+      }
+    } else {
+      console.error(`❌ Failed to get average rating for facility ${facilityId}:`, getAverageRating.error);
+    }
+  } catch (error) {
+    console.error(`❌ Update facility rating error for facility ${facilityId}:`, error);
+  }
+}
 
 module.exports = router; 

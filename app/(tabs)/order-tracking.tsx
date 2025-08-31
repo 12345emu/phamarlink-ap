@@ -1,335 +1,311 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, Dimensions, Alert, Linking } from 'react-native';
+import { StyleSheet, ScrollView, View, Text, Image, Alert, ActivityIndicator } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import MapView, { Marker } from 'react-native-maps';
+import { trackingService, OrderTracking, TrackingEntry } from '../../services/trackingService';
 
-const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
-const SUCCESS = '#43e97b';
-const DANGER = '#e74c3c';
 
 interface TrackingStep {
-  id: string;
+  status: string;
   title: string;
   description: string;
-  timestamp: string;
-  status: 'completed' | 'current' | 'pending';
   icon: string;
+  color: string;
 }
 
-interface DeliveryLocation {
-  latitude: number;
-  longitude: number;
-  title: string;
-  description: string;
-}
+const TRACKING_STEPS: TrackingStep[] = [
+  {
+    status: 'pending',
+    title: 'Order Placed',
+    description: 'Your order has been placed and is awaiting confirmation',
+    icon: 'shopping-cart',
+    color: '#FF9800'
+  },
+  {
+    status: 'confirmed',
+    title: 'Order Confirmed',
+    description: 'Your order has been confirmed and is being processed',
+    icon: 'check-circle',
+    color: '#8B5CF6'
+  },
+  {
+    status: 'preparing',
+    title: 'Preparing',
+    description: 'Your order is being prepared for delivery',
+    icon: 'cog',
+    color: '#A855F7'
+  },
+  {
+    status: 'ready',
+    title: 'Ready',
+    description: 'Your order is ready for pickup or delivery',
+    icon: 'check-square',
+    color: '#10B981'
+  },
+  {
+    status: 'out_for_delivery',
+    title: 'Out for Delivery',
+    description: 'Your order is on its way to you',
+    icon: 'truck',
+    color: '#FF5722'
+  },
+  {
+    status: 'delivered',
+    title: 'Delivered',
+    description: 'Your order has been successfully delivered',
+    icon: 'home',
+    color: '#10B981'
+  }
+];
 
 export default function OrderTrackingScreen() {
-  const router = useRouter();
   const params = useLocalSearchParams();
-  const [currentStep, setCurrentStep] = useState(2); // Current step index
-  const [estimatedTime, setEstimatedTime] = useState('2:30 PM');
-  const [driverInfo, setDriverInfo] = useState({
-    name: 'Kwame Mensah',
-    phone: '+233-555-0123',
-    vehicle: 'Toyota Corolla - GX-1234-A'
-  });
+  const router = useRouter();
+  const [trackingData, setTrackingData] = useState<OrderTracking | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Sample tracking data based on order ID
-  const getTrackingSteps = (orderId: string): TrackingStep[] => {
-    const baseSteps: TrackingStep[] = [
-      {
-        id: '1',
-        title: 'Order Placed',
-        description: 'Your order has been successfully placed',
-        timestamp: '10:30 AM',
-        status: 'completed',
-        icon: 'check-circle'
-      },
-      {
-        id: '2',
-        title: 'Order Confirmed',
-        description: 'Pharmacy has confirmed your order',
-        timestamp: '10:45 AM',
-        status: 'completed',
-        icon: 'check-circle'
-      },
-      {
-        id: '3',
-        title: 'Preparing Order',
-        description: 'Your medicines are being prepared',
-        timestamp: '11:00 AM',
-        status: 'completed',
-        icon: 'check-circle'
-      },
-      {
-        id: '4',
-        title: 'Out for Delivery',
-        description: 'Your order is on its way to you',
-        timestamp: '12:15 PM',
-        status: 'current',
-        icon: 'truck'
-      },
-      {
-        id: '5',
-        title: 'Delivered',
-        description: 'Your order has been delivered',
-        timestamp: estimatedTime,
-        status: 'pending',
-        icon: 'home'
+  const orderId = params.orderId as string;
+  const trackingNumber = params.trackingNumber as string;
+  const orderNumber = params.orderNumber as string;
+
+  useEffect(() => {
+    loadTrackingData();
+  }, [orderId]);
+
+  const loadTrackingData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await trackingService.getTrackingByOrderId(parseInt(orderId));
+      
+      if (response.success && response.data) {
+        console.log('🔍 Tracking data received:', JSON.stringify(response.data, null, 2));
+        setTrackingData(response.data);
+      } else {
+        setError(response.message || 'Failed to load tracking information');
       }
-    ];
-
-    // Customize based on order status
-    if (orderId === 'ORD-2024-001') {
-      // Delivered order
-      return baseSteps.map((step, index) => ({
-        ...step,
-        status: index < 5 ? 'completed' : 'pending'
-      }));
-    } else if (orderId === 'ORD-2024-002') {
-      // Out for delivery
-      return baseSteps.map((step, index) => ({
-        ...step,
-        status: index < 4 ? 'completed' : index === 4 ? 'current' : 'pending'
-      }));
-    } else {
-      // Confirmed order
-      return baseSteps.map((step, index) => ({
-        ...step,
-        status: index < 3 ? 'completed' : index === 3 ? 'current' : 'pending'
-      }));
+    } catch (error) {
+      console.error('Error loading tracking data:', error);
+      setError('Failed to load tracking information');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const getDeliveryLocations = (orderId: string): DeliveryLocation[] => {
-    const baseLocations = [
-      {
-        latitude: 5.5600,
-        longitude: -0.2057,
-        title: 'Alpha Pharmacy',
-        description: 'Pickup location'
-      },
-      {
-        latitude: 5.6037,
-        longitude: -0.1870,
-        title: 'Your Location',
-        description: 'Delivery address'
-      }
-    ];
-
-    if (orderId === 'ORD-2024-002') {
-      // Add current driver location for out-for-delivery orders
-      return [
-        ...baseLocations,
-        {
-          latitude: 5.5800,
-          longitude: -0.1950,
-          title: 'Driver Location',
-          description: 'Currently here'
-        }
-      ];
-    }
-
-    return baseLocations;
+  const getCurrentStepIndex = (status: string): number => {
+    if (!status) return -1;
+    const stepIndex = TRACKING_STEPS.findIndex(step => step.status === status);
+    console.log(`🔍 Current status: ${status}, step index: ${stepIndex}`);
+    return stepIndex;
   };
 
-  const trackingSteps = getTrackingSteps(params.orderId as string);
-  const deliveryLocations = getDeliveryLocations(params.orderId as string);
+  const getStatusColor = (status: string) => {
+    if (!status) return '#666';
+    const step = TRACKING_STEPS.find(s => s.status === status);
+    return step ? step.color : '#666';
+  };
 
-  const handleCallDriver = () => {
-    Alert.alert(
-      'Call Driver',
-      `Call ${driverInfo.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Call', onPress: () => Alert.alert('Calling...', `Would call ${driverInfo.phone}`) }
-      ]
+  const getStatusIcon = (status: string) => {
+    if (!status) return 'question-circle';
+    const step = TRACKING_STEPS.find(s => s.status === status);
+    return step ? step.icon : 'question-circle';
+  };
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Unknown';
+    try {
+      return new Date(dateString).toLocaleString();
+    } catch (error) {
+      return 'Invalid Date';
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={ACCENT} />
+        <Text style={styles.loadingText}>Loading tracking information...</Text>
+      </View>
     );
-  };
+  }
 
-  const handleMessageDriver = () => {
-    Alert.alert('Message Driver', `Would open chat with ${driverInfo.name}`);
-  };
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <FontAwesome name="exclamation-triangle" size={60} color="#e74c3c" />
+        <Text style={styles.errorTitle}>Error Loading Tracking</Text>
+        <Text style={styles.errorText}>{error}</Text>
+        <Text style={styles.retryText} onPress={loadTrackingData}>
+          Tap to retry
+        </Text>
+      </View>
+    );
+  }
 
-  const getStepIconColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return SUCCESS;
-      case 'current':
-        return ACCENT;
-      case 'pending':
-        return '#95a5a6';
-      default:
-        return '#95a5a6';
-    }
-  };
+  if (!trackingData) {
+    return (
+      <View style={styles.errorContainer}>
+        <FontAwesome name="question-circle" size={60} color="#95a5a6" />
+        <Text style={styles.errorTitle}>No Tracking Information</Text>
+        <Text style={styles.errorText}>Tracking information not available for this order.</Text>
+      </View>
+    );
+  }
 
-  const getStepIconBackground = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return 'rgba(67, 233, 123, 0.1)';
-      case 'current':
-        return 'rgba(52, 152, 219, 0.1)';
-      case 'pending':
-        return '#f8f9fa';
-      default:
-        return '#f8f9fa';
-    }
-  };
+  const currentStepIndex = getCurrentStepIndex(trackingData.order?.status || '');
+  console.log(`🔍 Order status: ${trackingData.order?.status}, Current step index: ${currentStepIndex}`);
 
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
       
-      <ScrollView 
-        contentContainerStyle={{ paddingBottom: 120 }} 
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Swipe to go back area */}
-        <TouchableOpacity 
-          style={styles.swipeArea}
-          onPress={() => router.push('/(tabs)/orders' as any)}
-          activeOpacity={0.1}
-        />
-        
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton} 
-            onPress={() => router.push('/(tabs)/orders' as any)} 
-            activeOpacity={0.7}
-          >
-            <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Track Order</Text>
-          <View style={styles.headerRight}>
-            <FontAwesome name="map-marker" size={20} color={ACCENT} />
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Order Tracking</Text>
+                    <Text style={styles.orderNumber}>{orderNumber || 'Unknown'}</Text>
+        <Text style={styles.trackingNumber}>Tracking: {trackingData.tracking_number || 'N/A'}</Text>
+      </View>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Order Summary */}
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryTitle}>Order Summary</Text>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Order Date:</Text>
+            <Text style={styles.summaryValue}>
+              {formatDate(trackingData.order?.created_at || '')}
+            </Text>
           </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Delivery Address:</Text>
+            <Text style={styles.summaryValue}>
+              {trackingData.order?.delivery_address || 'No address specified'}
+            </Text>
+          </View>
+          {trackingData.order?.estimated_delivery && (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Estimated Delivery:</Text>
+                             <Text style={styles.summaryValue}>
+                 {formatDate(trackingData.order.estimated_delivery || '')}
+               </Text>
+            </View>
+          )}
         </View>
 
-        {/* Order Info */}
-        <View style={styles.orderInfoCard}>
-          <View style={styles.orderHeader}>
-            <Text style={styles.orderId}>Order #{params.orderId}</Text>
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>
-                {trackingSteps.find(step => step.status === 'current')?.title || 'Processing'}
-              </Text>
-            </View>
+        {/* Current Status */}
+        <View style={styles.statusCard}>
+          <View style={styles.currentStatusHeader}>
+            <FontAwesome 
+              name={getStatusIcon(trackingData.order.status) as any} 
+              size={24} 
+              color={getStatusColor(trackingData.order.status)} 
+            />
+                         <Text style={[styles.currentStatusText, { color: getStatusColor(trackingData.order.status) }]}>
+               {trackingData.order.status ? trackingData.order.status.replace('_', ' ').toUpperCase() : 'UNKNOWN'}
+             </Text>
           </View>
-          <Text style={styles.estimatedTime}>Estimated Delivery: {estimatedTime}</Text>
+                     <Text style={styles.currentStatusDescription}>
+             {TRACKING_STEPS.find(step => step.status === trackingData.order?.status)?.description || 
+              'Your order is being processed'}
+           </Text>
         </View>
-
-        {/* Driver Info */}
-        {trackingSteps.find(step => step.status === 'current')?.title === 'Out for Delivery' && (
-          <View style={styles.driverCard}>
-            <View style={styles.driverInfo}>
-              <View style={styles.driverAvatar}>
-                <FontAwesome name="user" size={20} color={ACCENT} />
-              </View>
-              <View style={styles.driverDetails}>
-                <Text style={styles.driverName}>{driverInfo.name}</Text>
-                <Text style={styles.driverVehicle}>{driverInfo.vehicle}</Text>
-              </View>
-            </View>
-            <View style={styles.driverActions}>
-              <TouchableOpacity style={styles.callButton} onPress={handleCallDriver} activeOpacity={0.7}>
-                <FontAwesome name="phone" size={16} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.messageButton} onPress={handleMessageDriver} activeOpacity={0.7}>
-                <FontAwesome name="comment" size={16} color={ACCENT} />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
 
         {/* Tracking Timeline */}
         <View style={styles.timelineCard}>
-          <Text style={styles.timelineTitle}>Delivery Progress</Text>
-          {trackingSteps.map((step, index) => (
-            <View key={step.id} style={styles.timelineItem}>
-              <View style={styles.timelineIcon}>
-                <View style={[
-                  styles.iconContainer,
-                  { backgroundColor: getStepIconBackground(step.status) }
-                ]}>
-                  <FontAwesome 
-                    name={step.icon as any} 
-                    size={16} 
-                    color={getStepIconColor(step.status)} 
-                  />
-                </View>
-                {index < trackingSteps.length - 1 && (
+          <Text style={styles.timelineTitle}>Tracking Timeline</Text>
+          
+          {TRACKING_STEPS.map((step, index) => {
+            const isCompleted = index <= currentStepIndex;
+            const isCurrent = index === currentStepIndex;
+            
+            return (
+              <View key={step.status} style={styles.timelineStep}>
+                <View style={styles.timelineIconContainer}>
                   <View style={[
-                    styles.timelineLine,
-                    { backgroundColor: step.status === 'completed' ? SUCCESS : '#ecf0f1' }
-                  ]} />
-                )}
-              </View>
-              <View style={styles.timelineContent}>
-                <View style={styles.timelineHeader}>
-                  <Text style={styles.stepTitle}>{step.title}</Text>
-                  <Text style={styles.stepTime}>{step.timestamp}</Text>
+                    styles.timelineIcon,
+                    {
+                      backgroundColor: isCompleted ? step.color : '#e0e0e0',
+                      borderColor: isCurrent ? step.color : '#e0e0e0'
+                    }
+                  ]}>
+                    <FontAwesome 
+                      name={step.icon as any} 
+                      size={16} 
+                      color={isCompleted ? '#fff' : '#999'} 
+                    />
+                  </View>
+                  {index < TRACKING_STEPS.length - 1 && (
+                    <View style={[
+                      styles.timelineLine,
+                      { backgroundColor: isCompleted ? step.color : '#e0e0e0' }
+                    ]} />
+                  )}
                 </View>
-                <Text style={styles.stepDescription}>{step.description}</Text>
+                
+                <View style={styles.timelineContent}>
+                  <Text style={[
+                    styles.timelineStepTitle,
+                    { color: isCompleted ? '#2c3e50' : '#95a5a6' }
+                  ]}>
+                    {step.title}
+                  </Text>
+                  <Text style={[
+                    styles.timelineStepDescription,
+                    { color: isCompleted ? '#7f8c8d' : '#bdc3c7' }
+                  ]}>
+                    {step.description}
+                  </Text>
+                  
+                                     {/* Show timestamp if this step has been reached */}
+                   {isCompleted && trackingData.tracking && trackingData.tracking.find(t => t.status === step.status) && (
+                     <Text style={styles.timelineTimestamp}>
+                       {formatDate(trackingData.tracking.find(t => t.status === step.status)?.timestamp || '')}
+                     </Text>
+                   )}
+                </View>
               </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
-        {/* Map */}
-        <View style={styles.mapCard}>
-          <Text style={styles.mapTitle}>Delivery Route</Text>
-          <MapView
-            style={styles.map}
-            initialRegion={{
-              latitude: 5.5800,
-              longitude: -0.1950,
-              latitudeDelta: 0.05,
-              longitudeDelta: 0.05,
-            }}
-            showsUserLocation={true}
-            showsMyLocationButton={true}
-            mapType="standard"
-            provider="google"
-          >
-            {deliveryLocations.map((location, index) => (
-              <Marker
-                key={index}
-                coordinate={{
-                  latitude: location.latitude,
-                  longitude: location.longitude,
-                }}
-                title={location.title}
-                description={location.description}
-                pinColor={location.title === 'Driver Location' ? ACCENT : 
-                         location.title === 'Your Location' ? SUCCESS : '#95a5a6'}
-              />
+                 {/* Recent Updates */}
+         {trackingData.tracking && trackingData.tracking.length > 0 && (
+          <View style={styles.updatesCard}>
+            <Text style={styles.updatesTitle}>Recent Updates</Text>
+            
+                         {(trackingData.tracking || []).slice(0, 5).map((update, index) => (
+              <View key={index} style={styles.updateItem}>
+                <View style={styles.updateHeader}>
+                  <FontAwesome 
+                    name={getStatusIcon(update.status) as any} 
+                    size={16} 
+                    color={getStatusColor(update.status)} 
+                  />
+                                     <Text style={[styles.updateStatus, { color: getStatusColor(update.status) }]}>
+                     {update.status ? update.status.replace('_', ' ').toUpperCase() : 'UNKNOWN'}
+                   </Text>
+                                     <Text style={styles.updateTime}>
+                     {formatDate(update.timestamp || '')}
+                   </Text>
+                </View>
+                
+                                 <Text style={styles.updateDescription}>
+                   {update.description || 'No description available'}
+                 </Text>
+                
+                {update.location && (
+                  <Text style={styles.updateLocation}>
+                    📍 {update.location}
+                  </Text>
+                )}
+              </View>
             ))}
-          </MapView>
-          
-          {/* Open in Google Maps Button */}
-          <TouchableOpacity 
-            style={styles.openMapsButton}
-            onPress={() => {
-              const pharmacyLocation = deliveryLocations.find(loc => loc.title === 'Alpha Pharmacy');
-              const userLocation = deliveryLocations.find(loc => loc.title === 'Your Location');
-              
-              if (pharmacyLocation && userLocation) {
-                const url = `https://www.google.com/maps/dir/${pharmacyLocation.latitude},${pharmacyLocation.longitude}/${userLocation.latitude},${userLocation.longitude}`;
-                Linking.openURL(url);
-              }
-            }}
-            activeOpacity={0.7}
-          >
-            <FontAwesome name="external-link" size={16} color="#fff" />
-            <Text style={styles.openMapsButtonText}>Open in Google Maps</Text>
-          </TouchableOpacity>
-        </View>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -340,242 +316,232 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
-  header: {
-    flexDirection: 'row',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginTop: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 40,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryText: {
+    fontSize: 16,
+    color: ACCENT,
+    fontWeight: '500',
+  },
+  header: {
     backgroundColor: '#fff',
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  orderNumber: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginBottom: 4,
+  },
+  trackingNumber: {
+    fontSize: 14,
+    color: ACCENT,
+    fontWeight: '500',
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  summaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#2c3e50',
-  },
-  headerRight: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(52, 152, 219, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  orderInfoCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  orderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  orderId: {
+  summaryTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
+    marginBottom: 12,
   },
-  statusBadge: {
-    backgroundColor: ACCENT,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  statusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  estimatedTime: {
+  summaryLabel: {
     fontSize: 14,
     color: '#7f8c8d',
-  },
-  driverCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginTop: 12,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  driverInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  driverAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(52, 152, 219, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  driverDetails: {
     flex: 1,
   },
-  driverName: {
-    fontSize: 16,
-    fontWeight: '600',
+  summaryValue: {
+    fontSize: 14,
     color: '#2c3e50',
-    marginBottom: 4,
+    flex: 2,
+    textAlign: 'right',
   },
-  driverVehicle: {
+  statusCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  currentStatusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  currentStatusText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 12,
+  },
+  currentStatusDescription: {
     fontSize: 14,
     color: '#7f8c8d',
-  },
-  driverActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  callButton: {
-    backgroundColor: SUCCESS,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  messageButton: {
-    backgroundColor: 'rgba(52, 152, 219, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+    lineHeight: 20,
   },
   timelineCard: {
     backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 3,
   },
   timelineTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
-    marginBottom: 20,
+    marginBottom: 16,
   },
-  timelineItem: {
+  timelineStep: {
     flexDirection: 'row',
     marginBottom: 20,
   },
-  timelineIcon: {
+  timelineIconContainer: {
     alignItems: 'center',
     marginRight: 16,
   },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
+  timelineIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
   },
   timelineLine: {
     width: 2,
-    height: 30,
+    height: 40,
     marginTop: 8,
   },
   timelineContent: {
     flex: 1,
   },
-  timelineHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  stepTitle: {
+  timelineStepTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#2c3e50',
+    marginBottom: 4,
   },
-  stepTime: {
+  timelineStepDescription: {
     fontSize: 14,
-    color: '#7f8c8d',
+    lineHeight: 20,
+    marginBottom: 4,
   },
-  stepDescription: {
-    fontSize: 14,
-    color: '#7f8c8d',
+  timelineTimestamp: {
+    fontSize: 12,
+    color: ACCENT,
+    fontWeight: '500',
   },
-  mapCard: {
+  updatesCard: {
     backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 3,
   },
-  mapTitle: {
+  updatesTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
     marginBottom: 16,
   },
-  map: {
-    height: 200,
-    borderRadius: 12,
+  updateItem: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ecf0f1',
   },
-  openMapsButton: {
-    backgroundColor: ACCENT,
+  updateHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 16,
+    marginBottom: 8,
   },
-  openMapsButtonText: {
-    color: '#fff',
-    fontSize: 16,
+  updateStatus: {
+    fontSize: 14,
     fontWeight: '600',
     marginLeft: 8,
+    flex: 1,
   },
-  swipeArea: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    zIndex: 10,
+  updateTime: {
+    fontSize: 12,
+    color: '#95a5a6',
+  },
+  updateDescription: {
+    fontSize: 14,
+    color: '#2c3e50',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  updateLocation: {
+    fontSize: 12,
+    color: '#7f8c8d',
   },
 }); 

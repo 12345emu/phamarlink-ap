@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, Modal, Linking } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, Modal, Linking, RefreshControl } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -15,6 +15,21 @@ const GLASS_BG = 'rgba(255,255,255,0.7)';
 
 // Using the Facility interface from facilitiesService
 type Pharmacy = Facility;
+
+// Get facility image URL
+const getFacilityImageUrl = (facility: Facility) => {
+  if (facility?.images && facility.images.length > 0) {
+    // Return the first image from the array
+    const imagePath = facility.images[0];
+    // Convert relative path to full URL
+    if (imagePath.startsWith('/uploads/')) {
+      return `http://172.20.10.3:3000${imagePath}`;
+    }
+    return imagePath;
+  }
+  // Fallback to default pharmacy image
+  return 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80';
+};
 
 export default function PharmaciesScreen() {
   const router = useRouter();
@@ -33,6 +48,7 @@ export default function PharmaciesScreen() {
   
   const [facilities, setFacilities] = useState<Pharmacy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,6 +90,13 @@ export default function PharmaciesScreen() {
         if (response.success && response.data) {
           console.log('✅ Facilities fetched successfully:', response.data.length);
           console.log('📊 Facilities data (fallback):', JSON.stringify(response.data, null, 2));
+          
+          // Debug distance values
+          console.log('🔍 Distance debugging (fallback):');
+          response.data.forEach((facility, index) => {
+            console.log(`${index + 1}. ${facility.name}: distance = ${facility.distance} km (type: ${typeof facility.distance})`);
+          });
+          
           setFacilities(response.data);
         } else {
           console.error('❌ Failed to fetch facilities:', response.message);
@@ -93,6 +116,13 @@ export default function PharmaciesScreen() {
         if (response.success && response.data) {
           console.log('✅ Facilities fetched successfully:', response.data.length);
           console.log('📊 Facilities data (user location):', JSON.stringify(response.data, null, 2));
+          
+          // Debug distance values
+          console.log('🔍 Distance debugging:');
+          response.data.forEach((facility, index) => {
+            console.log(`${index + 1}. ${facility.name}: distance = ${facility.distance} km (type: ${typeof facility.distance})`);
+          });
+          
           setFacilities(response.data);
         } else {
           console.error('❌ Failed to fetch facilities:', response.message);
@@ -119,6 +149,22 @@ export default function PharmaciesScreen() {
       setUserLocation(location);
     } catch (error) {
       console.error('Error getting location:', error);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      console.log('🔄 Refreshing pharmacies data...');
+      // Get fresh location and fetch facilities
+      await getCurrentLocation();
+      await fetchFacilities();
+      console.log('✅ Refresh completed successfully');
+    } catch (error) {
+      console.error('❌ Error during refresh:', error);
+      Alert.alert('Refresh Error', 'Failed to refresh data. Please try again.');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -459,14 +505,17 @@ export default function PharmaciesScreen() {
       alignItems: 'flex-start',
       marginBottom: 12,
     },
-    itemIcon: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: ACCENT + '20',
-      alignItems: 'center',
-      justifyContent: 'center',
+    itemImageContainer: {
+      width: 60,
+      height: 60,
+      borderRadius: 12,
       marginRight: 16,
+      overflow: 'hidden',
+      backgroundColor: '#f8f9fa',
+    },
+    itemImage: {
+      width: '100%',
+      height: '100%',
     },
     itemInfo: {
       flex: 1,
@@ -683,6 +732,14 @@ export default function PharmaciesScreen() {
         style={styles.itemsList} 
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#3498db']}
+            tintColor="#3498db"
+          />
+        }
       >
         {loading && (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 50 }}>
@@ -712,11 +769,11 @@ export default function PharmaciesScreen() {
             activeOpacity={0.7}
           >
             <View style={styles.itemHeader}>
-              <View style={styles.itemIcon}>
-                <FontAwesome 
-                  name={activeTab === 'pharmacies' ? 'medkit' : 'hospital-o'} 
-                  size={20} 
-                  color={ACCENT} 
+              <View style={styles.itemImageContainer}>
+                <Image 
+                  source={{ uri: getFacilityImageUrl(item) }}
+                  style={styles.itemImage}
+                  resizeMode="cover"
                 />
               </View>
               <View style={styles.itemInfo}>
@@ -750,7 +807,9 @@ export default function PharmaciesScreen() {
               <View style={styles.itemDistance}>
                 <FontAwesome name="map-marker" size={14} color="#95a5a6" />
                 <Text style={styles.distanceText}>
-                  {item.distance ? `${item.distance.toFixed(1)} km` : 'N/A'}
+                  {item.distance !== undefined && item.distance !== null 
+                    ? `${parseFloat(item.distance).toFixed(1)} km` 
+                    : 'N/A'}
                 </Text>
               </View>
 

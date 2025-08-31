@@ -24,6 +24,7 @@ class ApiClient {
     resolve: (value?: any) => void;
     reject: (error?: any) => void;
   }> = [];
+  private onTokenExpiredCallback: (() => void) | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -33,9 +34,33 @@ class ApiClient {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
+      // Ensure FormData is handled properly
+      transformRequest: [function (data, headers) {
+        if (data instanceof FormData) {
+          console.log('🔍 TransformRequest: FormData detected');
+          // Don't transform FormData, let axios handle it
+          return data;
+        }
+        return data;
+      }],
     });
 
     this.setupInterceptors();
+  }
+
+  // Set callback for token expiration
+  setTokenExpiredCallback(callback: () => void) {
+    this.onTokenExpiredCallback = callback;
+  }
+
+  // Manually trigger token expiration (for testing)
+  triggerTokenExpiration() {
+    console.log('🔍 Manually triggering token expiration');
+    if (this.onTokenExpiredCallback) {
+      this.onTokenExpiredCallback();
+    } else {
+      console.log('⚠️ No token expired callback set');
+    }
   }
 
   // Setup request and response interceptors
@@ -70,7 +95,10 @@ class ApiClient {
       async (error: AxiosError) => {
         const originalRequest = error.config as any;
         
+        // Check if the error is due to token expiration (401 Unauthorized)
         if (error.response?.status === HTTP_STATUS.UNAUTHORIZED && !originalRequest._retry) {
+          console.log('🔍 Token expired detected, attempting refresh...');
+          
           if (this.isRefreshing) {
             // Wait for token refresh
             return new Promise((resolve, reject) => {
@@ -88,6 +116,7 @@ class ApiClient {
           try {
             const newToken = await this.refreshToken();
             if (newToken) {
+              console.log('🔍 Token refreshed successfully');
               // Retry failed requests
               this.failedQueue.forEach(({ resolve }) => {
                 resolve();
@@ -99,13 +128,14 @@ class ApiClient {
               return this.client(originalRequest);
             }
           } catch (refreshError) {
+            console.log('❌ Token refresh failed, logging out user');
             // Clear failed queue
             this.failedQueue.forEach(({ reject }) => {
               reject(refreshError);
             });
             this.failedQueue = [];
             
-            // Redirect to login
+            // Handle authentication failure (logout user)
             await this.handleAuthFailure();
           } finally {
             this.isRefreshing = false;
@@ -137,11 +167,19 @@ class ApiClient {
         throw new Error('No refresh token available');
       }
 
+      console.log('🔍 Refreshing token...');
       const response = await axios.post(`${API_CONFIG.BASE_URL}/auth/refresh-token`, {
         refreshToken,
       });
 
-      if (response.data.success && response.data.data.token) {
+      console.log('🔍 Refresh token response:', {
+        success: response.data.success,
+        hasData: !!response.data.data,
+        message: response.data.message
+      });
+
+      if (response.data.success && response.data.data && response.data.data.token) {
+        console.log('🔍 Token refresh successful, updating storage');
         await AsyncStorage.setItem('userToken', response.data.data.token);
         if (response.data.data.refreshToken) {
           await AsyncStorage.setItem('refreshToken', response.data.data.refreshToken);
@@ -149,9 +187,9 @@ class ApiClient {
         return response.data.data.token;
       }
 
-      throw new Error('Failed to refresh token');
+      throw new Error('Failed to refresh token - invalid response format');
     } catch (error) {
-      console.error('Error refreshing token:', error);
+      console.error('❌ Error refreshing token:', error);
       return null;
     }
   }
@@ -159,9 +197,16 @@ class ApiClient {
   // Handle authentication failure
   private async handleAuthFailure() {
     try {
+      console.log('🔍 Handling authentication failure - clearing auth data');
       await AsyncStorage.multiRemove(['userToken', 'refreshToken', 'userData']);
-      // You can emit an event here to notify the app to redirect to login
-      // For now, we'll just clear the storage
+      
+      // Trigger logout callback if set
+      if (this.onTokenExpiredCallback) {
+        console.log('🔍 Triggering token expired callback');
+        this.onTokenExpiredCallback();
+      } else {
+        console.log('⚠️ No token expired callback set');
+      }
     } catch (error) {
       console.error('Error clearing auth data:', error);
     }
@@ -170,6 +215,15 @@ class ApiClient {
   // Generic request method
   private async request<T>(config: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
+      // If data is FormData, don't set Content-Type header (let browser set it)
+      if (config.data instanceof FormData) {
+        console.log('🔍 FormData detected, removing Content-Type header');
+        delete config.headers?.['Content-Type'];
+        // Also ensure we don't have any other conflicting headers
+        delete config.headers?.['Accept'];
+        console.log('🔍 Headers after FormData processing:', config.headers);
+      }
+      
       const response: AxiosResponse<ApiResponse<T>> = await this.client(config);
       return response.data;
     } catch (error) {

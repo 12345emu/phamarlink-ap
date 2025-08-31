@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, Image, TouchableOpacity, ScrollView, Dimensions, TextInput, Animated, Alert } from 'react-native';
+import { StyleSheet, View, Text, Image, TouchableOpacity, ScrollView, Dimensions, TextInput, Animated, Alert, RefreshControl } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -22,6 +22,8 @@ export default function HomeScreen(props: any) {
   const [availableMedicines, setAvailableMedicines] = useState<Medicine[]>([]);
   const [availableProfessionals, setAvailableProfessionals] = useState<HealthcareProfessional[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [medicinesLoading, setMedicinesLoading] = useState(false);
   const [professionalsLoading, setProfessionalsLoading] = useState(false);
   const router = useRouter();
@@ -38,9 +40,6 @@ export default function HomeScreen(props: any) {
   // Debug logging
   console.log('🔍 nearbyFacilities state:', nearbyFacilities.length, 'facilities');
   console.log('🔍 filteredNearbyOptions:', filteredNearbyOptions.length, 'facilities');
-  if (nearbyFacilities.length > 0) {
-    console.log('🔍 First facility:', nearbyFacilities[0]);
-  }
 
   // Filter medicines based on search query
   const filteredMedicines = availableMedicines.filter(medicine =>
@@ -120,7 +119,7 @@ export default function HomeScreen(props: any) {
   const fetchNearbyFacilities = async (latitude: number, longitude: number) => {
     try {
       setLoading(true);
-      console.log('🔍 Fetching nearby facilities for coordinates:', latitude, longitude);
+      console.log('🔍 Fetching nearby facilities...');
       
       const response = await facilitiesService.searchNearby({
         latitude,
@@ -129,7 +128,7 @@ export default function HomeScreen(props: any) {
         limit: 10,
       });
 
-      console.log('🔍 Home page received response:', JSON.stringify(response, null, 2));
+      // Response received successfully
 
       if (response.success && response.data) {
         console.log('🔍 Setting nearby facilities:', response.data.length, 'facilities');
@@ -147,6 +146,23 @@ export default function HomeScreen(props: any) {
       setNearbyFacilities(getSampleFacilities());
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (userLocation) {
+        await fetchNearbyFacilities(userLocation.coords.latitude, userLocation.coords.longitude);
+      }
+      await Promise.all([
+        fetchAvailableMedicines(),
+        fetchAvailableProfessionals()
+      ]);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -320,13 +336,39 @@ export default function HomeScreen(props: any) {
     return facilitiesService.getFacilityTypeDisplayName(type);
   };
 
+  // Get facility image URL
+  const getFacilityImageUrl = (facility: Facility) => {
+    if (facility?.images && facility.images.length > 0) {
+      // Return the first image from the array
+      const imagePath = facility.images[0];
+      // Convert relative path to full URL
+      if (imagePath.startsWith('/uploads/')) {
+        return `http://172.20.10.3:3000${imagePath}`;
+      }
+      return imagePath;
+    }
+    // Fallback to default pharmacy image
+    return 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80';
+  };
+
   const formatDistance = (distance: number): string => {
     return facilitiesService.formatDistance(distance);
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        contentContainerStyle={{ paddingBottom: 120 }} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#3498db']}
+            tintColor="#3498db"
+          />
+        }
+      >
         {/* Location Card */}
         <View style={styles.locationCard}>
           <FontAwesome name="map-marker" size={16} color="#e74c3c" />
@@ -353,7 +395,25 @@ export default function HomeScreen(props: any) {
 
         {/* Nearby Options Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Nearby options</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Nearby options</Text>
+            <TouchableOpacity 
+              style={[styles.reloadButton, loading && styles.reloadButtonDisabled]}
+              onPress={() => {
+                if (userLocation && !loading) {
+                  fetchNearbyFacilities(userLocation.coords.latitude, userLocation.coords.longitude);
+                }
+              }}
+              disabled={loading}
+              activeOpacity={0.7}
+            >
+              <FontAwesome 
+                name={loading ? "spinner" : "refresh"} 
+                size={16} 
+                color={loading ? "#95a5a6" : "#3498db"} 
+              />
+            </TouchableOpacity>
+          </View>
           <View style={styles.nearbyList}>
             {loading ? (
               <View style={styles.loadingContainer}>
@@ -415,9 +475,13 @@ export default function HomeScreen(props: any) {
                 }}
                 activeOpacity={0.7}
               >
-                  <View style={[styles.nearbyIcon, { backgroundColor: getFacilityIconColor(facility.type) + '20' }]}>
-                    <FontAwesome name={getFacilityIcon(facility.type)} size={16} color={getFacilityIconColor(facility.type)} />
-                </View>
+                  <View style={styles.nearbyImageContainer}>
+                    <Image 
+                      source={{ uri: getFacilityImageUrl(facility) }}
+                      style={styles.nearbyImage}
+                      resizeMode="cover"
+                    />
+                  </View>
                 <View style={styles.nearbyInfo}>
                     <Text style={styles.nearbyName}>{facility.name}</Text>
                     <Text style={styles.nearbyType}>{getFacilityTypeDisplayName(facility.type)}</Text>
@@ -754,11 +818,24 @@ const styles = StyleSheet.create({
     marginTop: 24,
     paddingHorizontal: 20,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#2c3e50',
-    marginBottom: 16,
+  },
+  reloadButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+  },
+  reloadButtonDisabled: {
+    opacity: 0.5,
   },
   nearbyList: {
     backgroundColor: '#fff',
@@ -777,13 +854,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ecf0f1',
   },
-  nearbyIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+  nearbyImageContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 12,
     marginRight: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f8f9fa',
+  },
+  nearbyImage: {
+    width: '100%',
+    height: '100%',
   },
   nearbyInfo: {
     flex: 1,

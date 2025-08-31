@@ -1,10 +1,19 @@
 import { apiClient, ApiResponse } from './apiClient';
 
 export interface OrderItem {
-  medicineId: number;
+  id: number;
+  order_id: number;
+  medicine_id: number;
+  pharmacy_medicine_id: number | null;
   quantity: number;
-  unitPrice: number;
-  totalPrice: number;
+  unit_price: number;
+  total_price: number;
+  created_at: string;
+  medicine_name: string;
+  generic_name: string;
+  dosage_form: string;
+  strength: string;
+  prescription_required: number;
 }
 
 export interface CreateOrderData {
@@ -21,22 +30,22 @@ export interface CreateOrderData {
 
 export interface Order {
   id: number;
-  orderNumber: string;
-  patientId: number;
-  pharmacyId: number;
-  totalAmount: number;
-  taxAmount: number;
-  discountAmount: number;
-  finalAmount: number;
+  order_number: string;
+  patient_id: number;
+  pharmacy_id: number;
+  total_amount: number;
+  tax_amount: number;
+  discount_amount: number;
+  final_amount: number;
   status: string;
-  paymentStatus: string;
-  paymentMethod: string;
-  deliveryAddress: string;
-  deliveryInstructions?: string;
-  estimatedDelivery?: string;
-  actualDelivery?: string;
-  createdAt: string;
-  updatedAt: string;
+  payment_status: string;
+  payment_method: string;
+  delivery_address: string;
+  delivery_instructions?: string;
+  estimated_delivery?: string;
+  actual_delivery?: string;
+  created_at: string;
+  updated_at: string;
   items: OrderItem[];
   pharmacy: {
     id: number;

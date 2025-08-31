@@ -160,13 +160,13 @@ class FacilitiesService {
           phone: facility.phone || '',
           email: facility.email || '',
           website: facility.website || '',
-          services: facility.services ? facility.services.split(',').map((s: string) => s.trim()) : [],
+          services: facility.services ? (Array.isArray(facility.services) ? facility.services : typeof facility.services === 'string' ? facility.services.split(',').map((s: string) => s.trim()) : []) : [],
           specialties: [],
           rating: parseFloat(facility.rating) || 0,
           reviewCount: parseInt(facility.total_reviews) || 0,
           isOpen: true, // Default to true since we don't have this data from backend
           distance: 0,
-          images: [],
+          images: facility.images || [],
           amenities: [],
           insuranceAccepted: [],
           emergencyServices: false,
@@ -241,13 +241,13 @@ class FacilitiesService {
           phone: facility.phone || '',
           email: facility.email || '',
           website: facility.website || '',
-          services: facility.services ? facility.services.split(',').map((s: string) => s.trim()) : [],
+          services: facility.services ? (Array.isArray(facility.services) ? facility.services : typeof facility.services === 'string' ? facility.services.split(',').map((s: string) => s.trim()) : []) : [],
           specialties: [],
           rating: parseFloat(facility.rating) || 0,
           reviewCount: parseInt(facility.total_reviews) || 0,
           isOpen: true, // Default to true since we don't have this data from backend
           distance: parseFloat(facility.distance_km) || 0,
-          images: [],
+          images: facility.images || [],
           amenities: [],
           insuranceAccepted: [],
           emergencyServices: false,
@@ -442,10 +442,15 @@ class FacilitiesService {
 
   // Format distance for display
   formatDistance(distance: number): string {
+    if (!distance || isNaN(distance)) {
+      return 'N/A';
+    }
+    
     if (distance < 1) {
       return `${Math.round(distance * 1000)}m`;
     }
-    return `${distance}km`;
+    // Round to 1 decimal place for cleaner display
+    return `${Math.round(distance * 10) / 10}km`;
   }
 
   // Get facility status (Open/Closed)

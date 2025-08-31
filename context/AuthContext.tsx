@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService, User, LoginCredentials, SignupData } from '../services/authService';
+import { apiClient } from '../services/apiClient';
 import { useProfile } from './ProfileContext';
 import { constructProfileImageUrl } from '../utils/imageUtils';
 
@@ -15,6 +16,7 @@ interface AuthContextType {
   markUserAsNotFirstTime: () => void;
   resetFirstTimeUser: () => void; // For testing purposes
   clearAllData: () => Promise<void>; // For testing purposes
+  checkTokenExpiration: () => Promise<void>; // Check if token is expired
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -37,7 +39,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Check if user is already logged in
     checkAuthStatus();
-  }, []);
+    
+    // Set up token expiration callback
+    apiClient.setTokenExpiredCallback(handleTokenExpired);
+    
+    console.log('🔍 AuthContext - Token expiration callback set up');
+    
+    // Set up periodic token expiration check (every 5 minutes)
+    const tokenCheckInterval = setInterval(async () => {
+      if (isAuthenticated) {
+        await checkTokenExpiration();
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    // Cleanup interval on unmount
+    return () => {
+      clearInterval(tokenCheckInterval);
+    };
+  }, [isAuthenticated]);
+
+  // Handle automatic logout when token expires
+  const handleTokenExpired = async () => {
+    console.log('🔍 AuthContext - Token expired, performing automatic logout');
+    try {
+      // Clear local state
+      setIsAuthenticated(false);
+      setUser(null);
+      setFirstTimeUser(true); // Reset to first time user after logout
+      
+      // Clear profile image from context and storage
+      clearProfileImage();
+      
+      console.log('🔍 AuthContext - Automatic logout completed');
+    } catch (error) {
+      console.error('❌ AuthContext - Error during automatic logout:', error);
+    }
+  };
 
   const checkAuthStatus = async () => {
     try {
@@ -224,6 +261,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Check if token is expired and logout if needed
+  const checkTokenExpiration = async (): Promise<void> => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        console.log('🔍 No token found, user is not authenticated');
+        return;
+      }
+
+      // Try to decode the token to check expiration
+      const tokenParts = token.split('.');
+      if (tokenParts.length !== 3) {
+        console.log('🔍 Invalid token format, logging out');
+        await handleTokenExpired();
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(atob(tokenParts[1]));
+        const currentTime = Math.floor(Date.now() / 1000);
+        
+        if (payload.exp && payload.exp < currentTime) {
+          console.log('🔍 Token is expired, logging out');
+          await handleTokenExpired();
+        } else {
+          console.log('🔍 Token is still valid');
+        }
+      } catch (decodeError) {
+        console.error('❌ Error decoding token:', decodeError);
+        await handleTokenExpired();
+      }
+    } catch (error) {
+      console.error('❌ Error checking token expiration:', error);
+    }
+  };
+
   const value: AuthContextType = {
     isAuthenticated,
     user,
@@ -235,6 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     markUserAsNotFirstTime,
     resetFirstTimeUser,
     clearAllData,
+    checkTokenExpiration,
   };
 
   return (

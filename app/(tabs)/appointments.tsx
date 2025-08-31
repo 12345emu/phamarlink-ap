@@ -107,7 +107,6 @@ export default function AppointmentsScreen() {
   };
 
   const handleCancel = (appointment: Appointment) => {
-    console.log('🔍 Cancel button pressed for appointment:', appointment.id);
     Alert.alert(
       'Cancel Appointment',
       `Are you sure you want to cancel your appointment with ${appointment.doctorName || 'the doctor'}?`,
@@ -115,16 +114,9 @@ export default function AppointmentsScreen() {
         { text: 'No', style: 'cancel' },
         { text: 'Yes, Cancel', style: 'destructive', onPress: async () => {
           try {
-            console.log('🔍 Proceeding with cancellation for appointment:', appointment.id);
-            console.log('📅 Appointment date:', appointment.appointment_date);
-            console.log('⏰ Appointment time:', appointment.appointment_time);
-            
             await cancelAppointment(appointment.id);
             Alert.alert('Appointment Cancelled', 'Your appointment has been cancelled successfully.');
           } catch (error: any) {
-            console.error('❌ Error cancelling appointment:', error);
-            console.error('❌ Error message:', error.message);
-            
             // Show the specific error message from the backend
             const errorMessage = error.message || 'Failed to cancel appointment. Please try again.';
             
@@ -151,8 +143,6 @@ export default function AppointmentsScreen() {
   };
 
   const handleContactHospital = (appointment: Appointment) => {
-    console.log('🔍 Contact button pressed for appointment:', appointment.id);
-    
     // Get facility contact info from appointment data
     const facilityPhone = appointment.facility_phone || '+233 20 111 1111';
     const facilityEmail = appointment.facility_email || 'info@communityhealth.com';
@@ -164,7 +154,6 @@ export default function AppointmentsScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Call', onPress: async () => {
           try {
-            console.log('🔍 Calling hospital:', facilityPhone);
             const canOpen = await Linking.canOpenURL(`tel:${facilityPhone}`);
             if (canOpen) {
               await Linking.openURL(`tel:${facilityPhone}`);
@@ -178,7 +167,6 @@ export default function AppointmentsScreen() {
         }},
         { text: 'Email', onPress: async () => {
           try {
-            console.log('🔍 Emailing hospital:', facilityEmail);
             const canOpen = await Linking.canOpenURL(`mailto:${facilityEmail}?subject=Appointment Inquiry - ID: ${appointment.id}`);
             if (canOpen) {
               await Linking.openURL(`mailto:${facilityEmail}?subject=Appointment Inquiry - ID: ${appointment.id}`);

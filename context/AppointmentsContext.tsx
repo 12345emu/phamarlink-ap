@@ -62,18 +62,14 @@ export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ chil
   // Fetch appointments from API
   const fetchAppointments = async () => {
     if (!isAuthenticated || !user) {
-      console.log('User not authenticated, skipping appointments fetch');
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      console.log('🔍 Fetching appointments for user:', user.id);
       
       const response = await appointmentsService.getAppointments();
-      
-      console.log('✅ Appointments fetched successfully:', response.appointments.length);
       
       // Transform the data to include display fields
       const transformedAppointments = response.appointments.map((apt: any) => ({
@@ -86,7 +82,6 @@ export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ chil
       
       setAppointments(transformedAppointments);
     } catch (error: any) {
-      console.error('❌ Error fetching appointments:', error);
       setError(error.message || 'Failed to fetch appointments');
     } finally {
       setLoading(false);
@@ -101,11 +96,9 @@ export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ chil
       
       const response = await appointmentsService.createAppointment(appointmentData);
       
-      console.log('✅ Appointment created successfully:', response);
       // Refresh the appointments list
       await fetchAppointments();
     } catch (error: any) {
-      console.error('❌ Error creating appointment:', error);
       setError(error.message || 'Failed to create appointment');
     } finally {
       setLoading(false);
@@ -120,11 +113,9 @@ export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ chil
       
       await appointmentsService.updateAppointmentStatus(id, status);
       
-      console.log('✅ Appointment status updated successfully');
       // Refresh the appointments list
       await fetchAppointments();
     } catch (error: any) {
-      console.error('❌ Error updating appointment status:', error);
       setError(error.message || 'Failed to update appointment status');
     } finally {
       setLoading(false);
@@ -139,11 +130,9 @@ export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ chil
       
       await appointmentsService.cancelAppointment(id);
       
-      console.log('✅ Appointment cancelled successfully');
       // Refresh the appointments list
       await fetchAppointments();
     } catch (error: any) {
-      console.error('❌ Error cancelling appointment:', error);
       setError(error.message || 'Failed to cancel appointment');
       // Re-throw the error so the calling function can handle it
       throw error;
@@ -160,11 +149,9 @@ export const AppointmentsProvider: React.FC<AppointmentsProviderProps> = ({ chil
       
       await appointmentsService.rescheduleAppointment(id, newDate, newTime);
       
-      console.log('✅ Appointment rescheduled successfully');
       // Refresh the appointments list
       await fetchAppointments();
     } catch (error: any) {
-      console.error('❌ Error rescheduling appointment:', error);
       setError(error.message || 'Failed to reschedule appointment');
     } finally {
       setLoading(false);

@@ -52,6 +52,7 @@ export const API_ENDPOINTS = {
     GET_MEDICINES: (id: string) => `/facilities/${id}/medicines`,
     SEARCH_NEARBY: '/facilities/nearby',
     ADD_REVIEW: (id: string) => `/facilities/${id}/reviews`,
+    PHARMACY_REGISTER: '/facilities/pharmacy/register',
   },
   
   // Medicines
@@ -99,10 +100,14 @@ export const API_ENDPOINTS = {
   // Reviews
   REVIEWS: {
     LIST: '/reviews',
-    GET_BY_ID: (id: string) => `/reviews/${id}`,
     CREATE: '/reviews',
+    GET_BY_ID: (id: string) => `/reviews/${id}`,
     UPDATE: (id: string) => `/reviews/${id}`,
     DELETE: (id: string) => `/reviews/${id}`,
+    FACILITY: (facilityId: string) => `/reviews/facility/${facilityId}`,
+    USER: (userId: string) => `/reviews/user/${userId}`,
+    AVERAGE: (facilityId: string) => `/reviews/facility/${facilityId}/average`,
+    CHECK: (facilityId: string, userId: string) => `/reviews/check/${facilityId}/${userId}`,
     STATISTICS: '/reviews/statistics',
   },
   

@@ -9,6 +9,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useProfile } from '../../context/ProfileContext';
 import { useAuth } from '../../context/AuthContext';
 import { authService, User } from '../../services/authService';
+import { apiClient } from '../../services/apiClient';
 import ProfileImage from '../../components/ProfileImage';
 import { constructProfileImageUrl } from '../../utils/imageUtils';
 
@@ -655,6 +656,24 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleTestTokenExpiration = () => {
+    Alert.alert(
+      'Test Token Expiration',
+      'This will simulate token expiration and trigger automatic logout. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Test',
+          style: 'destructive',
+          onPress: () => {
+            console.log('🔍 Testing token expiration...');
+            apiClient.triggerTokenExpiration();
+          }
+        }
+      ]
+    );
+  };
+
   const renderProfileSection = (section: any) => (
     <View key={section.title} style={styles.section}>
       <Text style={styles.sectionTitle}>{section.title}</Text>
@@ -911,6 +930,16 @@ export default function ProfileScreen() {
         >
           <FontAwesome name="sign-out" size={20} color={DANGER} />
           <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+
+        {/* Test Token Expiration Button (for development) */}
+        <TouchableOpacity
+          style={[styles.logoutButton, { backgroundColor: '#f39c12', marginTop: 10 }]}
+          onPress={handleTestTokenExpiration}
+          activeOpacity={0.8}
+        >
+          <FontAwesome name="clock-o" size={20} color="white" />
+          <Text style={styles.logoutText}>Test Token Expiration</Text>
         </TouchableOpacity>
       </ScrollView>
 

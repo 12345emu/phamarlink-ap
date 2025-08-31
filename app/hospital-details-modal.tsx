@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated, View, Text, Linking } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Alert, Platform, Animated, View, Text, Linking, FlatList } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { Marker } from 'react-native-maps';
 import { useAppointments } from '../context/AppointmentsContext';
 import { facilitiesService, Facility } from '../services/facilitiesService';
 import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
+import RateFacilityModal from './rate-facility-modal';
 
 const { width } = Dimensions.get('window');
 
@@ -23,6 +23,8 @@ export default function HospitalDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [facilityProfessionals, setFacilityProfessionals] = useState<HealthcareProfessional[]>([]);
   const [professionalsLoading, setProfessionalsLoading] = useState(false);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // Fetch facility data and professionals from API
   useEffect(() => {
@@ -173,6 +175,25 @@ export default function HospitalDetailsScreen() {
   };
 
   const services = getServicesFromDatabase();
+
+  // Get all facility images
+  const getFacilityImages = () => {
+    if (facility?.images && facility.images.length > 0) {
+      return facility.images.map((imagePath, index) => {
+        if (imagePath.startsWith('/uploads/')) {
+          return `http://172.20.10.3:3000${imagePath}`;
+        }
+        return imagePath;
+      });
+    }
+    // Fallback to default hospital image
+    return ['https://images.unsplash.com/photo-1504439468489-c8920d796a29?auto=format&fit=crop&w=400&q=80'];
+  };
+
+  // Reset image index when facility changes
+  useEffect(() => {
+    setCurrentImageIndex(0);
+  }, [facility?.id]);
 
   const doctors = [
     {
@@ -367,34 +388,57 @@ export default function HospitalDetailsScreen() {
           )}
         </View>
 
-        {/* Map Section */}
-        <View style={styles.mapSection}>
-          <MapView
-            style={styles.map}
-            initialRegion={{
-              latitude: facility?.coordinates?.latitude || 5.5600,
-              longitude: facility?.coordinates?.longitude || -0.2057,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
+        {/* Facility Images with Swiping */}
+        <View style={styles.facilityImageContainer}>
+          <FlatList
+            data={getFacilityImages()}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / width);
+              setCurrentImageIndex(index);
             }}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-            mapType="standard"
-            userInterfaceStyle="light"
-          >
-            <Marker
-              coordinate={{
-                latitude: facility?.coordinates?.latitude || 5.5600,
-                longitude: facility?.coordinates?.longitude || -0.2057,
-              }}
-              title={facilityData.name}
-              description={getFacilityTypeDisplayName(facilityData.type)}
-              pinColor="#e74c3c"
-            />
-          </MapView>
-          </View>
+            onScroll={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / width);
+              if (index !== currentImageIndex) {
+                setCurrentImageIndex(index);
+              }
+            }}
+            renderItem={({ item }) => (
+              <Image 
+                source={{ uri: item }}
+                style={styles.facilityImage}
+                resizeMode="cover"
+              />
+            )}
+            keyExtractor={(item, index) => index.toString()}
+          />
+          
+          {/* Pagination Dots */}
+          {getFacilityImages().length > 1 && (
+            <View style={styles.paginationContainer}>
+              {getFacilityImages().map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.paginationDot,
+                    index === currentImageIndex && styles.paginationDotActive
+                  ]}
+                />
+              ))}
+            </View>
+          )}
+          
+          {/* Image Counter */}
+          {getFacilityImages().length > 1 && (
+            <View style={styles.imageCounter}>
+              <Text style={styles.imageCounterText}>
+                {currentImageIndex + 1} / {getFacilityImages().length}
+              </Text>
+            </View>
+          )}
+        </View>
         
         {/* Get Directions Button */}
         <View style={styles.directionsButtonContainer}>
@@ -439,6 +483,13 @@ export default function HospitalDetailsScreen() {
               </View>
               <Text style={styles.quickActionText}>Emergency</Text>
           </TouchableOpacity>
+          
+            <TouchableOpacity style={styles.quickActionCard} onPress={() => setShowRatingModal(true)}>
+              <View style={styles.quickActionIcon}>
+                <FontAwesome name="star" size={24} color="#f39c12" />
+              </View>
+              <Text style={styles.quickActionText}>Rate Facility</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -515,6 +566,15 @@ export default function HospitalDetailsScreen() {
           <Text style={styles.emergencyButtonText}>Emergency Contact</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Rating Modal */}
+      <RateFacilityModal
+        visible={showRatingModal}
+        onClose={() => setShowRatingModal(false)}
+        facilityId={facility?.id || params.id as string}
+        facilityName={facility?.name || params.hospitalName as string}
+        facilityType={facility?.type || 'hospital'}
+      />
     </View>
   );
 }
@@ -560,28 +620,7 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginLeft: 4,
   },
-  mapSection: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-    height: 200,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  map: {
-    flex: 1,
-  },
-  mapOverlay: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 16,
-  },
+
   directionsButtonContainer: {
     marginHorizontal: 20,
     marginBottom: 24,
@@ -872,5 +911,59 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#7f8c8d',
     textAlign: 'center',
+  },
+  facilityImageContainer: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    height: 200,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  facilityImage: {
+    width: width,
+    height: '100%',
+  },
+  paginationContainer: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    backgroundColor: '#fff',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  imageCounter: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  imageCounterText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 }); 

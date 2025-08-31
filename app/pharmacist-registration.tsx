@@ -1,38 +1,25 @@
 import React, { useState } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import { useAuth } from '../context/AuthContext';
+import { pharmacistServiceNew, PharmacistRegistration } from '../services/pharmacistServiceNew';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
 const BACKGROUND = '#f8f9fa';
 const DANGER = '#e74c3c';
 
-interface PharmacistRegistration {
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  address: string;
-  city: string;
-  licenseNumber: string;
-  education: string;
-  experience: string;
-  specializations: string[];
-  currentWorkplace: string;
-  emergencyContact: string;
-  bio: string;
-  hasConsultation: boolean;
-  hasCompounding: boolean;
-  hasVaccination: boolean;
-  acceptsInsurance: boolean;
-}
+
 
 export default function PharmacistRegistrationScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [formData, setFormData] = useState<PharmacistRegistration>({
     firstName: '',
     lastName: '',
@@ -51,6 +38,7 @@ export default function PharmacistRegistrationScreen() {
     hasCompounding: false,
     hasVaccination: false,
     acceptsInsurance: false,
+    userId: user?.id || '',
   });
 
   const availableSpecializations = [
@@ -81,6 +69,31 @@ export default function PharmacistRegistrationScreen() {
     }));
   };
 
+  const selectProfileImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant permission to access your photo library');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        setProfileImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error selecting image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
   const handleSubmit = async () => {
     // Validation
     if (!formData.firstName.trim()) {
@@ -99,28 +112,72 @@ export default function PharmacistRegistrationScreen() {
       Alert.alert('Error', 'Please enter phone number');
       return;
     }
+    if (!formData.address.trim()) {
+      Alert.alert('Error', 'Please enter address');
+      return;
+    }
+    if (!formData.city.trim()) {
+      Alert.alert('Error', 'Please enter city');
+      return;
+    }
     if (!formData.licenseNumber.trim()) {
       Alert.alert('Error', 'Please enter license number');
+      return;
+    }
+    if (!formData.education.trim()) {
+      Alert.alert('Error', 'Please enter education');
+      return;
+    }
+    if (formData.education.trim().length < 5) {
+      Alert.alert('Error', 'Education must be at least 5 characters long');
+      return;
+    }
+    if (!formData.experience.trim()) {
+      Alert.alert('Error', 'Please enter experience');
+      return;
+    }
+    if (formData.specializations.length === 0) {
+      Alert.alert('Error', 'Please select at least one specialization');
+      return;
+    }
+    if (!formData.emergencyContact.trim()) {
+      Alert.alert('Error', 'Please enter emergency contact');
+      return;
+    }
+    if (formData.bio.trim() && formData.bio.trim().length < 10) {
+      Alert.alert('Error', 'Bio must be at least 10 characters long');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('🔍 Submitting pharmacist registration:', formData);
       
-      Alert.alert(
-        'Registration Successful!',
-        'Your pharmacist registration has been submitted successfully. We will review your application and contact you within 3-5 business days.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.back()
-          }
-        ]
-      );
+      // Add profile image to form data
+      const registrationData = {
+        ...formData,
+        profileImage: profileImage
+      };
+      
+      const response = await pharmacistServiceNew.registerPharmacist(registrationData);
+      
+      if (response.success) {
+        Alert.alert(
+          'Registration Successful!',
+          response.message,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Registration Failed', response.message);
+      }
     } catch (error) {
+      console.error('❌ Pharmacist registration error:', error);
       Alert.alert('Error', 'Failed to submit registration. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -212,6 +269,20 @@ export default function PharmacistRegistrationScreen() {
               keyboardType="phone-pad"
             />
           </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Profile Image</Text>
+            <TouchableOpacity style={styles.imageUploadContainer} onPress={selectProfileImage}>
+              {profileImage ? (
+                <Image source={{ uri: profileImage }} style={styles.profileImage} />
+              ) : (
+                <View style={styles.imagePlaceholder}>
+                  <FontAwesome name="camera" size={24} color="#ccc" />
+                  <Text style={styles.imagePlaceholderText}>Tap to add profile image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -259,7 +330,7 @@ export default function PharmacistRegistrationScreen() {
               style={styles.input}
               value={formData.education}
               onChangeText={(text) => setFormData(prev => ({ ...prev, education: text }))}
-              placeholder="e.g., PharmD, B.Pharm, etc."
+              placeholder="e.g., PharmD, B.Pharm, etc. (minimum 5 characters)"
             />
           </View>
 
@@ -375,7 +446,7 @@ export default function PharmacistRegistrationScreen() {
               style={[styles.input, styles.multilineInput]}
               value={formData.bio}
               onChangeText={(text) => setFormData(prev => ({ ...prev, bio: text }))}
-              placeholder="Tell us about your experience and expertise..."
+              placeholder="Tell us about your experience and expertise... (minimum 10 characters)"
               multiline
               numberOfLines={4}
             />
@@ -572,5 +643,38 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  imageUploadContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#ddd',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    padding: 20,
+    backgroundColor: '#f8f9fa',
+  },
+  profileImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 2,
+    borderColor: '#9b59b6',
+  },
+  imagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#ddd',
+  },
+  imagePlaceholderText: {
+    fontSize: 12,
+    color: '#6c757d',
+    marginTop: 8,
+    textAlign: 'center',
   },
 }); 

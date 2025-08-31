@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Animated, View, Text, Platform, Alert, Linking, TextInput } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, Animated, View, Text, Platform, Alert, Linking, TextInput, FlatList } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCart } from '../context/CartContext';
-import MapView, { Marker } from 'react-native-maps';
 import { facilitiesService, Facility } from '../services/facilitiesService';
 import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
+import RateFacilityModal from './rate-facility-modal';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -52,6 +52,8 @@ export default function PharmacyDetailsScreen() {
   const [medicinesLoading, setMedicinesLoading] = useState(false);
   const [facilityProfessionals, setFacilityProfessionals] = useState<HealthcareProfessional[]>([]);
   const [professionalsLoading, setProfessionalsLoading] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showRatingModal, setShowRatingModal] = useState(false);
 
   // Fetch facility data, medicines, and professionals from API
   useEffect(() => {
@@ -109,7 +111,7 @@ export default function PharmacyDetailsScreen() {
     name: facility?.name || params.pharmacyName as string || 'CityMed Pharmacy',
     image: params.pharmacyImage as string || 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80',
     rating: facility?.rating || parseFloat(params.pharmacyRating as string) || 4.5,
-    distance: params.pharmacyDistance as string || '1,2 km',
+    distance: params.pharmacyDistance as string || '1.2 km',
     address: facility?.address?.street || params.pharmacyAddress as string || '456 Pharmacy Street, Osu',
     isOpen: facility?.isOpen || params.pharmacyOpen === 'true',
     phone: facility?.phone || params.phone as string || '+233-555-0123',
@@ -193,6 +195,39 @@ export default function PharmacyDetailsScreen() {
   };
 
   const services = getServicesFromDatabase();
+
+  // Get facility image URL for specific index
+  const getFacilityImageUrl = (index: number = 0) => {
+    if (facility?.images && facility.images.length > 0) {
+      const imagePath = facility.images[index];
+      // Convert relative path to full URL
+      if (imagePath.startsWith('/uploads/')) {
+        return `http://172.20.10.3:3000${imagePath}`;
+      }
+      return imagePath;
+    }
+    // Fallback to default pharmacy image
+    return 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80';
+  };
+
+  // Get all facility images
+  const getFacilityImages = () => {
+    if (facility?.images && facility.images.length > 0) {
+      return facility.images.map((imagePath, index) => {
+        if (imagePath.startsWith('/uploads/')) {
+          return `http://172.20.10.3:3000${imagePath}`;
+        }
+        return imagePath;
+      });
+    }
+    // Fallback to default pharmacy image
+    return ['https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80'];
+  };
+
+  // Reset image index when facility changes
+  useEffect(() => {
+    setCurrentImageIndex(0);
+  }, [facility?.id]);
 
   const medicineCategories = [
     {
@@ -337,6 +372,38 @@ export default function PharmacyDetailsScreen() {
   };
   
   const handleDirections = () => {
+    // Get the most accurate coordinates available
+    let latitude = facility?.coordinates?.latitude || 
+                  (params.latitude ? parseFloat(params.latitude as string) : null) ||
+                  5.5650;
+    
+    let longitude = facility?.coordinates?.longitude || 
+                   (params.longitude ? parseFloat(params.longitude as string) : null) ||
+                   -0.2100;
+
+    // Validate coordinates are valid numbers
+    if (isNaN(latitude) || isNaN(longitude)) {
+      latitude = 5.5650;
+      longitude = -0.2100;
+      console.warn('⚠️ Invalid coordinates detected, using default coordinates');
+    }
+
+    console.log('🔍 Navigating to map with coordinates:', { latitude, longitude });
+    console.log('🔍 Facility data:', {
+      facilityId: facility?.id,
+      facilityName: facility?.name,
+      facilityCoordinates: facility?.coordinates,
+      facilityAddress: facility?.address,
+      facilityPhone: facility?.phone,
+      facilityEmail: facility?.email
+    });
+    console.log('🔍 Params data:', {
+      paramsLatitude: params.latitude,
+      paramsLongitude: params.longitude,
+      pharmacyName: pharmacy.name,
+      pharmacyAddress: pharmacy.address
+    });
+    
     // Navigate to the pharmacy map modal with pharmacy data
     router.push({
       pathname: '/pharmacy-map-modal',
@@ -346,8 +413,8 @@ export default function PharmacyDetailsScreen() {
         pharmacyPhone: facility?.phone || pharmacy.phone,
         pharmacyRating: pharmacy.rating.toString(),
         pharmacyDistance: pharmacy.distance,
-        latitude: facility?.coordinates?.latitude?.toString() || '5.5650',
-        longitude: facility?.coordinates?.longitude?.toString() || '-0.2100',
+        latitude: latitude.toString(),
+        longitude: longitude.toString(),
       }
     });
   };
@@ -620,33 +687,56 @@ export default function PharmacyDetailsScreen() {
           </View>
         </View>
 
-        {/* Map Section */}
-        <View style={styles.mapSection}>
-          <MapView
-            style={styles.map}
-            initialRegion={{
-              latitude: facility?.coordinates?.latitude || 5.5650,
-              longitude: facility?.coordinates?.longitude || -0.2100,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
+        {/* Facility Images with Swiping */}
+        <View style={styles.facilityImageContainer}>
+          <FlatList
+            data={getFacilityImages()}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / width);
+              setCurrentImageIndex(index);
             }}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-            mapType="standard"
-            userInterfaceStyle="light"
-          >
-            <Marker
-              coordinate={{
-                latitude: facility?.coordinates?.latitude || 5.5650,
-                longitude: facility?.coordinates?.longitude || -0.2100,
-              }}
-              title={pharmacy.name}
-              description="Pharmacy"
-              pinColor="#3498db"
-            />
-          </MapView>
+            onScroll={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / width);
+              if (index !== currentImageIndex) {
+                setCurrentImageIndex(index);
+              }
+            }}
+            renderItem={({ item }) => (
+              <Image 
+                source={{ uri: item }}
+                style={styles.facilityImage}
+                resizeMode="cover"
+              />
+            )}
+            keyExtractor={(item, index) => index.toString()}
+          />
+          
+          {/* Pagination Dots */}
+          {getFacilityImages().length > 1 && (
+            <View style={styles.paginationContainer}>
+              {getFacilityImages().map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.paginationDot,
+                    index === currentImageIndex && styles.paginationDotActive
+                  ]}
+                />
+              ))}
+            </View>
+          )}
+          
+          {/* Image Counter */}
+          {getFacilityImages().length > 1 && (
+            <View style={styles.imageCounter}>
+              <Text style={styles.imageCounterText}>
+                {currentImageIndex + 1} / {getFacilityImages().length}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Get Directions Button */}
@@ -691,6 +781,13 @@ export default function PharmacyDetailsScreen() {
                 <FontAwesome name="shopping-cart" size={24} color={ACCENT} />
               </View>
               <Text style={styles.quickActionText}>View Orders</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickActionCard} onPress={() => setShowRatingModal(true)}>
+              <View style={styles.quickActionIcon}>
+                <FontAwesome name="star" size={24} color="#f39c12" />
+              </View>
+              <Text style={styles.quickActionText}>Rate Facility</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -881,6 +978,15 @@ export default function PharmacyDetailsScreen() {
           <Text style={styles.emergencyButtonText}>Emergency Contact</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Rating Modal */}
+      <RateFacilityModal
+        visible={showRatingModal}
+        onClose={() => setShowRatingModal(false)}
+        facilityId={facility?.id || params.id as string}
+        facilityName={facility?.name || params.pharmacyName as string}
+        facilityType={facility?.type || 'pharmacy'}
+      />
     </View>
   );
 }
@@ -895,6 +1001,60 @@ const styles = StyleSheet.create({
     paddingTop: 40,
     paddingBottom: 30,
     backgroundColor: '#fff',
+  },
+  facilityImageContainer: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    height: 200,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  facilityImage: {
+    width: width,
+    height: '100%',
+  },
+  paginationContainer: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    backgroundColor: '#fff',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  imageCounter: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  imageCounterText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   logoContainer: {
     width: 80,
@@ -935,28 +1095,7 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginBottom: 2,
   },
-  mapSection: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-    height: 200,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  map: {
-    flex: 1,
-  },
-  mapOverlay: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 16,
-  },
+
   directionsButtonContainer: {
     marginHorizontal: 20,
     marginBottom: 24,

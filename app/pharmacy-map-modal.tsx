@@ -29,6 +29,14 @@ export default function PharmacyMapModal() {
     longitude: parseFloat(params.longitude as string) || -0.2057,
   };
 
+  // Debug: Log received coordinates
+  console.log('🔍 Map modal received coordinates:', {
+    latitude: params.latitude,
+    longitude: params.longitude,
+    parsedLatitude: pharmacy.latitude,
+    parsedLongitude: pharmacy.longitude
+  });
+
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -62,8 +70,9 @@ export default function PharmacyMapModal() {
   };
 
   const handleGetDirections = () => {
-    const pharmacyAddress = pharmacy.address;
     const pharmacyName = pharmacy.name;
+    const latitude = pharmacy.latitude;
+    const longitude = pharmacy.longitude;
     
     Alert.alert(
       'Get Directions',
@@ -77,16 +86,19 @@ export default function PharmacyMapModal() {
           text: 'Open Directions',
           onPress: async () => {
             try {
-              // First try to open Google Maps app
-              const googleMapsUrl = `comgooglemaps://?daddr=${encodeURIComponent(pharmacyAddress)}&directionsmode=driving`;
+              // Use coordinates for more accurate navigation
+              const coordinates = `${latitude},${longitude}`;
+              
+              // First try to open Google Maps app with coordinates
+              const googleMapsUrl = `comgooglemaps://?daddr=${coordinates}&directionsmode=driving`;
               const canOpenGoogleMaps = await Linking.canOpenURL(googleMapsUrl);
               
               if (canOpenGoogleMaps) {
-                // Google Maps app is installed, open it
+                // Google Maps app is installed, open it with coordinates
                 await Linking.openURL(googleMapsUrl);
               } else {
-                // Google Maps app not installed, open in browser
-                const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pharmacyAddress)}`;
+                // Google Maps app not installed, open in browser with coordinates
+                const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${coordinates}`;
                 await Linking.openURL(webUrl);
               }
             } catch (err) {

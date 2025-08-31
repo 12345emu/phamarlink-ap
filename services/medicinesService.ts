@@ -7,7 +7,7 @@ export interface Medicine {
   name: string;
   generic_name?: string;
   category: string;
-  prescription_required: boolean;
+  prescription_required: boolean | number | string;
   dosage_form?: string;
   strength?: string;
   description?: string;

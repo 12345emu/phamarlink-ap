@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, ActivityIndicator } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, View, Text, Animated, Dimensions, Image, ActivityIndicator, RefreshControl } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useCart } from '../../context/CartContext';
 import { medicinesService, Medicine as MedicineType } from '../../services/medicinesService';
+
+// Helper function to check if prescription is required
+const isPrescriptionRequired = (value: boolean | number | string | undefined): boolean => {
+  if (value === true || value === 1 || value === '1') return true;
+  if (value === false || value === 0 || value === '0') return false;
+  return false;
+};
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -24,6 +31,7 @@ export default function MedicinesScreen() {
   const [showInStockOnly, setShowInStockOnly] = useState(false);
   const [medicines, setMedicines] = useState<MedicineType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
 
@@ -87,7 +95,7 @@ export default function MedicinesScreen() {
       const matchesSearch = (medicine.name && medicine.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
                            (medicine.description && medicine.description.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = activeCategory === 'all' || (medicine.category && medicine.category === activeCategory);
-      const matchesPrescription = !showPrescriptionOnly || medicine.prescription_required;
+      const matchesPrescription = !showPrescriptionOnly || isPrescriptionRequired(medicine.prescription_required);
       const matchesStock = !showInStockOnly || (medicine.avg_stock && medicine.avg_stock > 0);
       
       return matchesSearch && matchesCategory && matchesPrescription && matchesStock;
@@ -151,6 +159,24 @@ export default function MedicinesScreen() {
         medicineImage: '' // API doesn't provide images
       }
     });
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      console.log('🔄 Refreshing medicines data...');
+      // Fetch fresh medicines and categories data
+      await Promise.all([
+        fetchCategories(),
+        fetchMedicines()
+      ]);
+      console.log('✅ Medicines refresh completed successfully');
+    } catch (error) {
+      console.error('❌ Error during medicines refresh:', error);
+      Alert.alert('Refresh Error', 'Failed to refresh medicines data. Please try again.');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
 
@@ -275,7 +301,18 @@ export default function MedicinesScreen() {
       </View>
 
       {/* Medicines List */}
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        contentContainerStyle={{ paddingBottom: 120 }} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#3498db']}
+            tintColor="#3498db"
+          />
+        }
+      >
         {filteredMedicines.length === 0 ? (
           <View style={styles.emptyState}>
             <FontAwesome name="search" size={60} color="#95a5a6" />
@@ -302,7 +339,7 @@ export default function MedicinesScreen() {
                 <View style={styles.medicineInfo}>
                   <View style={styles.medicineHeader}>
                     <Text style={styles.medicineName}>{medicine.name || 'Unknown Medicine'}</Text>
-                    {medicine.prescription_required && (
+                    {isPrescriptionRequired(medicine.prescription_required) && (
                       <View style={styles.prescriptionBadge}>
                         <FontAwesome name="medkit" size={10} color="#fff" />
                         <Text style={styles.prescriptionText}>Rx</Text>
