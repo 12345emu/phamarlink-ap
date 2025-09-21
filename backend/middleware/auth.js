@@ -4,10 +4,15 @@ const { executeQuery } = require('../config/database');
 // Verify JWT token middleware
 const authenticateToken = async (req, res, next) => {
   try {
+    console.log('🔍 Auth middleware - Starting authentication...');
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
+    console.log('🔍 Auth middleware - Auth header:', authHeader);
+    console.log('🔍 Auth middleware - Token:', token ? token.substring(0, 50) + '...' : 'No token');
+
     if (!token) {
+      console.log('❌ Auth middleware - No token provided');
       return res.status(401).json({
         success: false,
         message: 'Access token required'
@@ -15,13 +20,21 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
+    console.log('🔍 Auth middleware - Verifying token...');
+    const secret = process.env.JWT_SECRET || 'fallback-secret';
+    console.log('🔍 Auth middleware - Using secret:', secret);
+    const decoded = jwt.verify(token, secret);
+    console.log('✅ Auth middleware - Token verified:', decoded);
     
     // Get user from database to ensure they still exist and are active
     const userQuery = 'SELECT id, email, user_type, first_name, last_name, is_active FROM users WHERE id = ? AND is_active = TRUE';
+    console.log('🔍 Auth middleware - Querying user with ID:', decoded.userId);
     const userResult = await executeQuery(userQuery, [decoded.userId]);
     
+    console.log('🔍 Auth middleware - User query result:', userResult);
+    
     if (!userResult.success || userResult.data.length === 0) {
+      console.log('❌ Auth middleware - User not found or inactive');
       return res.status(401).json({
         success: false,
         message: 'User not found or inactive'
@@ -30,8 +43,13 @@ const authenticateToken = async (req, res, next) => {
 
     // Add user info to request object
     req.user = userResult.data[0];
+    console.log('✅ Auth middleware - User authenticated:', req.user);
     next();
   } catch (error) {
+    console.log('❌ Auth middleware - Error caught:', error);
+    console.log('❌ Auth middleware - Error name:', error.name);
+    console.log('❌ Auth middleware - Error message:', error.message);
+    
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,

@@ -1,352 +1,262 @@
 import { apiClient, ApiResponse } from './apiClient';
-import { API_ENDPOINTS } from '../constants/API';
+import { API_ENDPOINTS, API_CONFIG } from '../constants/API';
+
+// Base URL for static files (without /api)
+const STATIC_BASE_URL = API_CONFIG.BASE_URL.replace('/api', '');
 
 // Types
 export interface HealthcareProfessional {
-  id: string;
+  id: number;
+  user_id: number;
+  facility_id: number;
   first_name: string;
   last_name: string;
-  full_name?: string;
   email: string;
   phone?: string;
   specialty: string;
-  qualification?: string;
+  license_number: string;
   experience_years: number;
-  experience_text?: string;
-  rating: number;
-  total_reviews: number;
-  is_available: boolean;
-  is_verified: boolean;
-  profile_image?: string;
+  education: string;
   bio?: string;
-  facility_id?: string;
-  facility_name?: string;
-  facility_type?: string;
+  consultation_fee?: number;
+  languages?: string[];
+  is_available: boolean;
+  profile_image?: string;
   created_at: string;
   updated_at: string;
+  // Additional properties from database
+  qualification?: string;
+  rating?: number;
+  total_reviews?: number;
+  is_verified?: boolean;
+  // Facility information
+  facility_name?: string;
+  facility_type?: string;
+  facility_address?: string;
+  facility_phone?: string;
+  // User information
+  user_type?: string;
+  is_active?: boolean;
 }
 
 export interface ProfessionalSearchParams {
-  search?: string;
   specialty?: string;
+  facility_type?: string;
   is_available?: boolean;
+  search?: string;
   page?: number;
   limit?: number;
-  sort_by?: 'rating' | 'experience_years' | 'first_name' | 'created_at';
-  sort_order?: 'ASC' | 'DESC';
 }
 
-// Healthcare Professionals Service
 class ProfessionalsService {
+  // Helper method to process professionals data and convert relative image paths to full URLs
+  private processProfessionalsData(professionals: HealthcareProfessional[]): HealthcareProfessional[] {
+    return professionals.map(professional => ({
+      ...professional,
+      profile_image: professional.profile_image && professional.profile_image !== 'null'
+        ? `${STATIC_BASE_URL}${professional.profile_image}`
+        : null
+    }));
+  }
+
   // Get all healthcare professionals
-  async getProfessionals(params?: ProfessionalSearchParams): Promise<ApiResponse<HealthcareProfessional[]>> {
+  async getProfessionals(params?: ProfessionalSearchParams): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
     try {
       const queryParams = new URLSearchParams();
       
-      if (params?.search) queryParams.append('search', params.search);
       if (params?.specialty) queryParams.append('specialty', params.specialty);
+      if (params?.facility_type) queryParams.append('facility_type', params.facility_type);
       if (params?.is_available !== undefined) queryParams.append('is_available', params.is_available.toString());
+      if (params?.search) queryParams.append('search', params.search);
       if (params?.page) queryParams.append('page', params.page.toString());
       if (params?.limit) queryParams.append('limit', params.limit.toString());
-      if (params?.sort_by) queryParams.append('sort_by', params.sort_by);
-      if (params?.sort_order) queryParams.append('sort_order', params.sort_order);
 
-      const url = `${API_ENDPOINTS.PROFESSIONALS.LIST}?${queryParams.toString()}`;
-      const response = await apiClient.get<any>(url);
+      const url = `${API_ENDPOINTS.PROFESSIONALS.BASE}?${queryParams.toString()}`;
+      const response = await apiClient.get(url);
       
-      if (response.success && response.data && response.data.professionals) {
+      // Ensure we always return a valid response object
+      if (response && response.data && typeof response.data === 'object') {
+        // Check if the response already has success field
+        if ('success' in response.data) {
+          const responseData = response.data as ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>;
+          // Process professionals data to convert relative image paths to full URLs
+          if (responseData.data && responseData.data.professionals) {
+            responseData.data.professionals = this.processProfessionalsData(responseData.data.professionals);
+          }
+          return responseData;
+        } else {
+          // Wrap the response data in the proper ApiResponse format
+          const responseData = response.data as { professionals: HealthcareProfessional[]; pagination: any };
+          // Process professionals data to convert relative image paths to full URLs
+          if (responseData.professionals) {
+            responseData.professionals = this.processProfessionalsData(responseData.professionals);
+          }
+          return {
+            success: true,
+            data: responseData
+          };
+        }
+      } else {
         return {
-          success: true,
-          data: response.data.professionals.map((professional: any) => ({
-            ...professional,
-            rating: parseFloat(professional.rating) || 0,
-            total_reviews: parseInt(professional.total_reviews) || 0,
-            experience_years: parseInt(professional.experience_years) || 0,
-            full_name: `${professional.first_name} ${professional.last_name}`,
-            experience_text: `${professional.experience_years || 0} years experience`
-          })),
+          success: false,
+          message: 'Invalid response from server',
+          error: 'Invalid Response',
         };
       }
-      
-      return response;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Get professionals error:', error);
-      return {
-        success: false,
-        message: 'Failed to fetch healthcare professionals. Please try again.',
-        error: 'Professionals Fetch Error',
-      };
-    }
-  }
-
-  // Get available professionals for home page
-  async getAvailableProfessionals(limit: number = 5): Promise<ApiResponse<HealthcareProfessional[]>> {
-    try {
-      const url = `${API_ENDPOINTS.PROFESSIONALS.LIST}/home/available?limit=${limit}`;
-      const response = await apiClient.get<any>(url);
       
-      if (response.success && response.data && response.data.professionals) {
+      // Handle specific error types
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        if (status === 401) {
+          return {
+            success: false,
+            message: 'Authentication required. Please log in again.',
+            error: 'Authentication Error',
+          };
+        } else if (status === 403) {
+          return {
+            success: false,
+            message: 'Access denied.',
+            error: 'Authorization Error',
+          };
+        }
+        
         return {
-          success: true,
-          data: response.data.professionals.map((professional: any) => ({
-            ...professional,
-            rating: parseFloat(professional.rating) || 0,
-            total_reviews: parseInt(professional.total_reviews) || 0,
-            experience_years: parseInt(professional.experience_years) || 0,
-            full_name: `${professional.first_name} ${professional.last_name}`,
-            experience_text: `${professional.experience_years || 0} years experience`
-          })),
+          success: false,
+          message: data?.message || `HTTP ${status} error`,
+          error: 'Network Error',
         };
       }
       
-      return response;
-    } catch (error) {
-      console.error('Get available professionals error:', error);
       return {
         success: false,
-        message: 'Failed to fetch available professionals. Please try again.',
-        error: 'Available Professionals Error',
+        message: 'Failed to get professionals.',
+        error: 'Unknown Error',
       };
     }
   }
 
   // Get professional by ID
-  async getProfessionalById(id: string): Promise<ApiResponse<HealthcareProfessional>> {
+  async getProfessionalById(id: number): Promise<ApiResponse<HealthcareProfessional>> {
     try {
-      const url = API_ENDPOINTS.PROFESSIONALS.GET_BY_ID(id);
-      const response = await apiClient.get<any>(url);
+      const response = await apiClient.get(`${API_ENDPOINTS.PROFESSIONALS.BASE}/${id}`);
       
-      if (response.success && response.data) {
+      if (response && response.data && typeof response.data === 'object') {
+        if ('success' in response.data) {
+          return response.data as ApiResponse<HealthcareProfessional>;
+        } else {
+          return {
+            success: true,
+            data: response.data as HealthcareProfessional
+          };
+        }
+      } else {
         return {
-          success: true,
-          data: {
-            ...response.data,
-            rating: parseFloat(response.data.rating) || 0,
-            total_reviews: parseInt(response.data.total_reviews) || 0,
-            experience_years: parseInt(response.data.experience_years) || 0,
-            full_name: `${response.data.first_name} ${response.data.last_name}`,
-            experience_text: `${response.data.experience_years || 0} years experience`
-          },
+          success: false,
+          message: 'Invalid response from server',
+          error: 'Invalid Response',
+        };
+      }
+    } catch (error: any) {
+      console.error('Get professional error:', error);
+      
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        return {
+          success: false,
+          message: data?.message || `HTTP ${status} error`,
+          error: 'Network Error',
         };
       }
       
-      return response;
-    } catch (error) {
-      console.error('Get professional by ID error:', error);
       return {
         success: false,
-        message: 'Failed to fetch professional details. Please try again.',
-        error: 'Professional Details Error',
-      };
-    }
-  }
-
-  // Get professionals by facility ID
-  async getProfessionalsByFacility(facilityId: string, limit: number = 10): Promise<ApiResponse<HealthcareProfessional[]>> {
-    try {
-      const url = `${API_ENDPOINTS.PROFESSIONALS.GET_BY_FACILITY(facilityId)}?limit=${limit}`;
-      const response = await apiClient.get<any>(url);
-      
-      if (response.success && response.data && response.data.professionals) {
-        return {
-          success: true,
-          data: response.data.professionals.map((professional: any) => ({
-            ...professional,
-            rating: parseFloat(professional.rating) || 0,
-            total_reviews: parseInt(professional.total_reviews) || 0,
-            experience_years: parseInt(professional.experience_years) || 0,
-            full_name: `${professional.first_name} ${professional.last_name}`,
-            experience_text: `${professional.experience_years || 0} years experience`
-          })),
-        };
-      }
-      
-      return response;
-    } catch (error) {
-      console.error('Get professionals by facility error:', error);
-      return {
-        success: false,
-        message: 'Failed to fetch facility professionals. Please try again.',
-        error: 'Facility Professionals Error',
-      };
-    }
-  }
-
-  // Get professional specialties
-  async getSpecialties(): Promise<ApiResponse<{ specialty: string; count: number }[]>> {
-    try {
-      const url = `${API_ENDPOINTS.PROFESSIONALS.LIST}/specialties/list`;
-      return await apiClient.get<{ specialty: string; count: number }[]>(url);
-    } catch (error) {
-      console.error('Get professional specialties error:', error);
-      return {
-        success: false,
-        message: 'Failed to fetch professional specialties. Please try again.',
-        error: 'Specialties Error',
+        message: 'Failed to get professional.',
+        error: 'Unknown Error',
       };
     }
   }
 
   // Get professionals by specialty
-  async getProfessionalsBySpecialty(specialty: string): Promise<ApiResponse<HealthcareProfessional[]>> {
-    try {
-      return await this.getProfessionals({ specialty });
-    } catch (error) {
-      console.error('Get professionals by specialty error:', error);
-      return {
-        success: false,
-        message: `Failed to fetch ${specialty} professionals. Please try again.`,
-        error: 'Specialty Professionals Error',
-      };
-    }
+  async getProfessionalsBySpecialty(specialty: string): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
+    return this.getProfessionals({ specialty });
   }
 
   // Get available professionals
-  async getAvailableOnly(): Promise<ApiResponse<HealthcareProfessional[]>> {
+  async getAvailableProfessionals(): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
+    return this.getProfessionals({ is_available: true });
+  }
+
+  // Get professionals by facility ID
+  async getProfessionalsByFacility(facilityId: string | number, limit?: number): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
     try {
-      return await this.getProfessionals({ is_available: true });
-    } catch (error) {
-      console.error('Get available professionals error:', error);
+      const queryParams = new URLSearchParams();
+      queryParams.append('facility_id', facilityId.toString());
+      if (limit) queryParams.append('limit', limit.toString());
+
+      const url = `${API_ENDPOINTS.PROFESSIONALS.BASE}/facility/${facilityId}?${queryParams.toString()}`;
+      const response = await apiClient.get(url);
+      
+      if (response && response.data && typeof response.data === 'object') {
+        if ('success' in response.data) {
+          return response.data as ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>;
+        } else {
+          return {
+            success: true,
+            data: response.data as { professionals: HealthcareProfessional[]; pagination: any }
+          };
+        }
+      } else {
+        return {
+          success: false,
+          message: 'Invalid response from server',
+          error: 'Invalid Response',
+        };
+      }
+    } catch (error: any) {
+      console.error('Get professionals by facility error:', error);
       return {
         success: false,
-        message: 'Failed to fetch available professionals. Please try again.',
-        error: 'Available Professionals Error',
+        message: 'Failed to get professionals by facility.',
+        error: 'Unknown Error',
       };
     }
   }
 
-  // Get top rated professionals
-  async getTopRated(limit: number = 10): Promise<ApiResponse<HealthcareProfessional[]>> {
-    try {
-      return await this.getProfessionals({ 
-        sort_by: 'rating', 
-        sort_order: 'DESC', 
-        limit 
-      });
-    } catch (error) {
-      console.error('Get top rated professionals error:', error);
-      return {
-        success: false,
-        message: 'Failed to fetch top rated professionals. Please try again.',
-        error: 'Top Rated Error',
-      };
-    }
-  }
-
-  // Get experienced professionals
-  async getExperienced(limit: number = 10): Promise<ApiResponse<HealthcareProfessional[]>> {
-    try {
-      return await this.getProfessionals({ 
-        sort_by: 'experience_years', 
-        sort_order: 'DESC', 
-        limit 
-      });
-    } catch (error) {
-      console.error('Get experienced professionals error:', error);
-      return {
-        success: false,
-        message: 'Failed to fetch experienced professionals. Please try again.',
-        error: 'Experienced Professionals Error',
-      };
-    }
-  }
-
-  // Format rating for display
-  formatRating(rating: number | undefined | null): string {
-    if (rating === undefined || rating === null || isNaN(rating)) {
-      return '0.0';
-    }
-    return Number(rating).toFixed(1);
-  }
-
-  // Get professional status
-  getProfessionalStatus(professional: HealthcareProfessional): 'available' | 'unavailable' {
-    return professional.is_available ? 'available' : 'unavailable';
-  }
-
-  // Get professional icon based on specialty
-  getProfessionalIcon(specialty: string): string {
-    const specialtyIcons: { [key: string]: string } = {
-      'General Medicine': 'user-md',
-      'Pediatrics': 'child',
-      'Cardiology': 'heartbeat',
-      'Dermatology': 'eye',
-      'Orthopedics': 'wheelchair',
-      'Neurology': 'brain',
-      'Psychiatry': 'brain',
-      'Gynecology': 'female',
-      'Urology': 'male',
-      'Ophthalmology': 'eye',
-      'ENT': 'ear',
-      'Dentistry': 'tooth',
-      'Emergency Medicine': 'ambulance',
-      'Anesthesiology': 'bed',
-      'Radiology': 'x-ray',
-      'Pathology': 'microscope',
-      'Oncology': 'shield',
-      'Pulmonology': 'lungs',
-      'Gastroenterology': 'stomach',
-      'Endocrinology': 'tint',
-      'Nephrology': 'kidney',
-      'Rheumatology': 'bone',
-      'Infectious Disease': 'bug',
-      'default': 'user-md'
-    };
-    
-    return specialtyIcons[specialty] || specialtyIcons.default;
-  }
-
-  // Get professional color based on specialty
+  // Utility methods for UI
   getProfessionalColor(specialty: string): string {
-    const specialtyColors: { [key: string]: string } = {
-      'General Medicine': '#3498db',
-      'Pediatrics': '#e74c3c',
-      'Cardiology': '#e67e22',
-      'Dermatology': '#9b59b6',
-      'Orthopedics': '#34495e',
-      'Neurology': '#2c3e50',
-      'Psychiatry': '#8e44ad',
-      'Gynecology': '#e91e63',
-      'Urology': '#2196f3',
-      'Ophthalmology': '#ff9800',
-      'ENT': '#4caf50',
-      'Dentistry': '#00bcd4',
-      'Emergency Medicine': '#f44336',
-      'Anesthesiology': '#607d8b',
-      'Radiology': '#795548',
-      'Pathology': '#9e9e9e',
-      'Oncology': '#673ab7',
-      'Pulmonology': '#3f51b5',
-      'Gastroenterology': '#009688',
-      'Endocrinology': '#ff5722',
-      'Nephrology': '#2196f3',
-      'Rheumatology': '#ff9800',
-      'Infectious Disease': '#4caf50',
+    const colors: { [key: string]: string } = {
+      'cardiology': '#e74c3c',
+      'dermatology': '#f39c12',
+      'pediatrics': '#2ecc71',
+      'pharmacist': '#3498db',
+      'general': '#9b59b6',
       'default': '#95a5a6'
     };
-    
-    return specialtyColors[specialty] || specialtyColors.default;
+    return colors[specialty.toLowerCase()] || colors.default;
   }
 
-  // Get experience level text
-  getExperienceLevel(experienceYears: number): string {
-    if (experienceYears < 2) return 'Junior';
-    if (experienceYears < 5) return 'Mid-level';
-    if (experienceYears < 10) return 'Senior';
-    if (experienceYears < 20) return 'Expert';
-    return 'Veteran';
+  getProfessionalIcon(specialty: string): string {
+    const icons: { [key: string]: string } = {
+      'cardiology': 'heart',
+      'dermatology': 'user-md',
+      'pediatrics': 'child',
+      'pharmacist': 'user',
+      'general': 'user-md',
+      'default': 'user-md'
+    };
+    return icons[specialty.toLowerCase()] || icons.default;
   }
 
-  // Check if professional is highly rated
-  isHighlyRated(professional: HealthcareProfessional): boolean {
-    return professional.rating >= 4.5;
-  }
-
-  // Check if professional is experienced
-  isExperienced(professional: HealthcareProfessional): boolean {
-    return professional.experience_years >= 10;
+  formatRating(rating: number): string {
+    return rating ? rating.toFixed(1) : 'No rating';
   }
 }
 
-// Export singleton instance
-export const professionalsService = new ProfessionalsService(); 
+export const professionalsService = new ProfessionalsService();

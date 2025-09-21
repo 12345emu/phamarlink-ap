@@ -12,6 +12,7 @@ import { authService, User } from '../../services/authService';
 import { apiClient } from '../../services/apiClient';
 import ProfileImage from '../../components/ProfileImage';
 import { constructProfileImageUrl } from '../../utils/imageUtils';
+import { validateProfileImage, getOptimalImagePickerOptions, formatFileSize } from '../../utils/imageValidation';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
@@ -63,6 +64,11 @@ export default function ProfileScreen() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<User | null>(null);
+  const [changePasswordModalVisible, setChangePasswordModalVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const router = useRouter();
   const { profileImage, updateProfileImage } = useProfile();
   const { logout: authLogout, user: authUser } = useAuth();
@@ -150,64 +156,180 @@ export default function ProfileScreen() {
     setRateModalVisible(true);
   };
 
+  const handleChangePassword = () => {
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setChangePasswordModalVisible(true);
+  };
+
+  const handleChangePasswordSubmit = async () => {
+    // Validation
+    if (!currentPassword.trim()) {
+      Alert.alert('Error', 'Please enter your current password');
+      return;
+    }
+
+    if (!newPassword.trim()) {
+      Alert.alert('Error', 'Please enter a new password');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      Alert.alert('Error', 'New password must be at least 6 characters long');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Error', 'New password and confirm password do not match');
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      Alert.alert('Error', 'New password must be different from current password');
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      const response = await authService.changePassword({
+        currentPassword: currentPassword.trim(),
+        newPassword: newPassword.trim()
+      });
+
+      if (response.success) {
+        setChangePasswordModalVisible(false);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        Alert.alert('Success', 'Password changed successfully!');
+      } else {
+        Alert.alert('Error', response.message || 'Failed to change password. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error changing password:', error);
+      Alert.alert('Error', 'Failed to change password. Please try again.');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   const handleRatingSelect = (rating: number) => {
     setSelectedRating(rating);
   };
 
   const handleUpdateProfileImage = async () => {
-    // Request permissions
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permission Required',
-        'Sorry, we need camera roll permissions to update your profile picture.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
+    try {
+      // Request permissions for both camera and media library
+      const [cameraPermission, mediaLibraryPermission] = await Promise.all([
+        ImagePicker.requestCameraPermissionsAsync(),
+        ImagePicker.requestMediaLibraryPermissionsAsync()
+      ]);
+      
+      const hasCameraPermission = cameraPermission.status === 'granted';
+      const hasMediaLibraryPermission = mediaLibraryPermission.status === 'granted';
+      
+      if (!hasCameraPermission && !hasMediaLibraryPermission) {
+        Alert.alert(
+          'Permissions Required',
+          'We need camera and photo library permissions to update your profile picture. Please enable them in Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => Linking.openSettings()
+            }
+          ]
+        );
+        return;
+      }
 
-    // Show image picker options
-    Alert.alert(
-      'Update Profile Picture',
-      'Choose an option',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
+      // Show image picker options based on available permissions
+      const options = [
+        { text: 'Cancel', style: 'cancel' }
+      ];
+      
+      if (hasCameraPermission) {
+        options.push({ 
           text: 'Take Photo', 
           onPress: () => pickImage('camera')
-        },
-        { 
+        });
+      }
+      
+      if (hasMediaLibraryPermission) {
+        options.push({ 
           text: 'Choose from Gallery', 
           onPress: () => pickImage('library')
-        }
-      ]
-    );
+        });
+      }
+
+      Alert.alert(
+        'Update Profile Picture',
+        'Choose an option',
+        options
+      );
+    } catch (error) {
+      console.error('Error requesting permissions:', error);
+      Alert.alert('Error', 'Failed to request permissions. Please try again.');
+    }
   };
 
   const pickImage = async (source: 'camera' | 'library') => {
     try {
       setIsUpdatingImage(true);
       
+      // Get optimal image picker options
+      const options = getOptimalImagePickerOptions(source);
+      
       let result;
       if (source === 'camera') {
-        result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.8,
-        });
+        result = await ImagePicker.launchCameraAsync(options);
       } else {
-        result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.8,
-        });
+        result = await ImagePicker.launchImageLibraryAsync(options);
       }
 
       if (!result.canceled && result.assets && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
+        const asset = result.assets[0];
+        const imageUri = asset.uri;
+        
+        console.log('🔍 Image picker result:', {
+          canceled: result.canceled,
+          assetsCount: result.assets?.length,
+          asset: asset
+        });
+        
+        // Validate image using utility function with lenient options
+        const validation = validateProfileImage(asset, {
+          maxFileSize: 8 * 1024 * 1024, // 8MB instead of 5MB
+          maxDimensions: 6144, // 6144px instead of 4096px (6K resolution)
+          strictDimensions: false, // Disable strict dimension validation
+          strictFormat: false // Disable strict format validation
+        });
+        
+        if (!validation.isValid) {
+          Alert.alert(
+            'Invalid Image',
+            validation.errors.join('\n'),
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+        
+        // Show warnings if any
+        if (validation.warnings.length > 0) {
+          console.log('⚠️ Image validation warnings:', validation.warnings);
+        }
+        
+        console.log('🔍 Uploading image:', {
+          uri: imageUri,
+          width: asset.width,
+          height: asset.height,
+          fileSize: asset.fileSize ? formatFileSize(asset.fileSize) : 'Unknown',
+          type: asset.type,
+          mimeType: asset.mimeType,
+          fileName: asset.fileName
+        });
         
         // Upload image to API
         const response = await authService.uploadProfileImage(imageUri);
@@ -224,13 +346,46 @@ export default function ProfileScreen() {
             });
           }
           
-          Alert.alert('Success', 'Profile picture updated successfully!');
+          Alert.alert(
+            'Success', 
+            'Profile picture updated successfully!',
+            [{ text: 'OK', style: 'default' }]
+          );
         } else {
-          Alert.alert('Error', response.message || 'Failed to upload profile picture. Please try again.');
+          console.error('Upload failed:', response);
+          Alert.alert(
+            'Upload Failed', 
+            response.message || 'Failed to upload profile picture. Please try again.',
+            [{ text: 'OK', style: 'default' }]
+          );
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to update profile picture. Please try again.');
+      console.error('Image picker error:', error);
+      
+      // Handle specific error types
+      if (error.code === 'camera_unavailable') {
+        Alert.alert(
+          'Camera Unavailable',
+          'Camera is not available on this device. Please use the gallery option instead.',
+          [{ text: 'OK' }]
+        );
+      } else if (error.code === 'permission_denied') {
+        Alert.alert(
+          'Permission Denied',
+          'Please grant camera and photo library permissions in Settings to update your profile picture.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Error', 
+          'Failed to update profile picture. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
     } finally {
       setIsUpdatingImage(false);
     }
@@ -610,6 +765,18 @@ export default function ProfileScreen() {
       }
     } else if (action === 'Rate App') {
       handleRateApp();
+    } else if (action === 'Change Password') {
+      handleChangePassword();
+    } else if (action === 'Prescriptions') {
+      router.push('/prescriptions-modal');
+    } else if (action === 'Order History') {
+      router.push('/(tabs)/orders');
+    } else if (action === 'Help & FAQ') {
+      router.push('/help-faq-modal');
+    } else if (action === 'Contact Support') {
+      router.push('/contact-support-modal');
+    } else if (action === 'About') {
+      router.push('/about-modal');
     } else if (action.includes('Register')) {
       // Handle registration actions
       switch (action) {
@@ -656,23 +823,6 @@ export default function ProfileScreen() {
     );
   };
 
-  const handleTestTokenExpiration = () => {
-    Alert.alert(
-      'Test Token Expiration',
-      'This will simulate token expiration and trigger automatic logout. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Test',
-          style: 'destructive',
-          onPress: () => {
-            console.log('🔍 Testing token expiration...');
-            apiClient.triggerTokenExpiration();
-          }
-        }
-      ]
-    );
-  };
 
   const renderProfileSection = (section: any) => (
     <View key={section.title} style={styles.section}>
@@ -820,7 +970,8 @@ export default function ProfileScreen() {
               {/* Loading Overlay */}
               {isUpdatingImage && (
                 <View style={styles.loadingOverlay}>
-                  <FontAwesome name="spinner" size={20} color="white" />
+                  <ActivityIndicator size="large" color="white" />
+                  <Text style={styles.loadingText}>Uploading...</Text>
                 </View>
               )}
           </View>
@@ -932,15 +1083,6 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        {/* Test Token Expiration Button (for development) */}
-        <TouchableOpacity
-          style={[styles.logoutButton, { backgroundColor: '#f39c12', marginTop: 10 }]}
-          onPress={handleTestTokenExpiration}
-          activeOpacity={0.8}
-        >
-          <FontAwesome name="clock-o" size={20} color="white" />
-          <Text style={styles.logoutText}>Test Token Expiration</Text>
-        </TouchableOpacity>
       </ScrollView>
 
       {/* Edit Profile Modal */}
@@ -1237,6 +1379,97 @@ export default function ProfileScreen() {
             </View>
           </Modal>
         )}
+
+        {/* Change Password Modal */}
+        <Modal
+          visible={changePasswordModalVisible}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setChangePasswordModalVisible(false)}
+        >
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalOverlay}
+          >
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Change Password</Text>
+                <TouchableOpacity 
+                  onPress={() => setChangePasswordModalVisible(false)}
+                  style={styles.closeButton}
+                >
+                  <FontAwesome name="times" size={20} color="#95a5a6" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.modalContent}>
+                <Text style={styles.fieldLabel}>Current Password</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                  placeholder="Enter your current password"
+                  secureTextEntry={true}
+                  autoFocus={true}
+                  returnKeyType="next"
+                />
+                
+                <Text style={[styles.fieldLabel, { marginTop: 15 }]}>New Password</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  placeholder="Enter your new password"
+                  secureTextEntry={true}
+                  returnKeyType="next"
+                />
+                
+                <Text style={[styles.fieldLabel, { marginTop: 15 }]}>Confirm New Password</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Confirm your new password"
+                  secureTextEntry={true}
+                  returnKeyType="done"
+                  onSubmitEditing={handleChangePasswordSubmit}
+                />
+                
+                <Text style={styles.passwordHint}>
+                  Password must be at least 6 characters long
+                </Text>
+              </View>
+              
+              <View style={styles.modalFooter}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setChangePasswordModalVisible(false)}
+                  disabled={isChangingPassword}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.saveButton,
+                    isChangingPassword && styles.saveButtonDisabled
+                  ]}
+                  onPress={handleChangePasswordSubmit}
+                  disabled={isChangingPassword}
+                >
+                  {isChangingPassword ? (
+                    <View style={styles.inlineLoadingContainer}>
+                      <FontAwesome name="spinner" size={16} color="white" />
+                      <Text style={styles.saveButtonText}>Changing...</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.saveButtonText}>Change Password</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
     </View>
   );
 }
@@ -1663,6 +1896,12 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 4,
   },
+  passwordHint: {
+    fontSize: 12,
+    color: '#95a5a6',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
   // Profile Image Styles
   profileImage: {
     width: 80,
@@ -1693,10 +1932,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     borderRadius: 50,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 8,
   },
   datePickerLabel: {
     fontSize: 16,

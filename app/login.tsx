@@ -32,6 +32,13 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
+    // Debug logging
+    console.log('🔍 Frontend - Login attempt:');
+    console.log('📧 Email value:', `"${email}"`);
+    console.log('📧 Email length:', email.length);
+    console.log('🔑 Password value:', `"${password}"`);
+    console.log('🔑 Password length:', password.length);
+    
     if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
@@ -45,6 +52,7 @@ export default function LoginScreen() {
     setIsLoading(true);
     
     try {
+      console.log('🔍 Frontend - Calling login with:', { email, password });
       const success = await login(email, password);
       if (success) {
         router.push('/(tabs)');
@@ -52,6 +60,7 @@ export default function LoginScreen() {
         Alert.alert('Error', 'Invalid credentials. Please try again.');
       }
     } catch (error) {
+      console.error('❌ Frontend - Login error:', error);
       Alert.alert('Error', 'An error occurred during login. Please try again.');
     } finally {
       setIsLoading(false);

@@ -7,6 +7,7 @@ const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const { executeQuery } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const logRequest = require('../log-requests');
 
 const router = express.Router();
 
@@ -14,26 +15,48 @@ const router = express.Router();
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads/profile-images');
+    console.log('🔍 Multer destination - upload directory:', uploadDir);
+    
     // Create directory if it doesn't exist
     if (!fs.existsSync(uploadDir)) {
+      console.log('📁 Creating upload directory...');
       fs.mkdirSync(uploadDir, { recursive: true });
     }
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const userId = req.user.id;
+    const userId = req.user ? req.user.id : 'unknown';
     const timestamp = Date.now();
     const ext = path.extname(file.originalname);
-    cb(null, `profile-${userId}-${timestamp}${ext}`);
+    const filename = `profile-${userId}-${timestamp}${ext}`;
+    console.log('🔍 Multer filename - generated:', filename);
+    cb(null, filename);
   }
 });
 
 const fileFilter = (req, file, cb) => {
-  // Accept only image files
-  if (file.mimetype.startsWith('image/')) {
+  console.log('🔍 File filter - checking file:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    fieldname: file.fieldname,
+    size: file.size
+  });
+  
+  // Accept image files with more lenient checking
+  if (file.mimetype && (
+    file.mimetype.startsWith('image/') ||
+    file.mimetype.includes('jpeg') ||
+    file.mimetype.includes('jpg') ||
+    file.mimetype.includes('png') ||
+    file.mimetype.includes('webp') ||
+    file.mimetype.includes('heic') ||
+    file.mimetype.includes('heif')
+  )) {
+    console.log('✅ File type accepted:', file.mimetype);
     cb(null, true);
   } else {
-    cb(new Error('Only image files are allowed'), false);
+    console.log('❌ File type rejected - mimetype:', file.mimetype);
+    cb(new Error('Only image files are allowed (JPEG, PNG, WebP, HEIC)'), false);
   }
 };
 
@@ -41,7 +64,11 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: 10 * 1024 * 1024 // 10MB limit (increased for better user experience)
+  },
+  onError: function (err, next) {
+    console.log('❌ Multer error:', err);
+    next(err);
   }
 });
 
@@ -152,14 +179,35 @@ router.post('/signup', [
 });
 
 // User Login
-router.post('/login', [
+router.post('/login', logRequest, [
   body('email').isEmail().normalizeEmail(),
   body('password').notEmpty()
 ], async (req, res) => {
   try {
+    // Detailed logging for debugging
+    console.log('🔍 LOGIN REQUEST DEBUG:');
+    console.log('📋 Headers:', req.headers);
+    console.log('📦 Raw body:', req.body);
+    console.log('📊 Body type:', typeof req.body);
+    console.log('📊 Body keys:', Object.keys(req.body || {}));
+    
+    if (req.body.email) {
+      console.log('📧 Email value:', `"${req.body.email}"`);
+      console.log('📧 Email length:', req.body.email.length);
+      console.log('📧 Email type:', typeof req.body.email);
+      console.log('📧 Email includes @:', req.body.email.includes('@'));
+    }
+    
+    if (req.body.password) {
+      console.log('🔑 Password value:', `"${req.body.password}"`);
+      console.log('🔑 Password length:', req.body.password.length);
+      console.log('🔑 Password type:', typeof req.body.password);
+    }
+    
     // Check validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ VALIDATION ERRORS:', errors.array());
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
@@ -511,18 +559,72 @@ router.put('/profile', authenticateToken, [
 });
 
 // Upload profile image
-router.post('/upload-profile-image', authenticateToken, upload.single('profileImage'), async (req, res) => {
+router.post('/upload-profile-image', authenticateToken, (req, res, next) => {
+  console.log('🔍 Pre-multer middleware - Request headers:', req.headers);
+  console.log('🔍 Pre-multer middleware - Content-Type:', req.headers['content-type']);
+  next();
+}, upload.any(), (err, req, res, next) => {
+  if (err) {
+    console.log('❌ Multer middleware error:', err);
+    return res.status(400).json({
+      success: false,
+      message: 'File upload error: ' + err.message
+    });
+  }
+  next();
+}, async (req, res) => {
   try {
-    if (!req.file) {
+    console.log('🔍 Upload profile image endpoint called');
+    console.log('🔍 Request headers:', req.headers);
+    console.log('🔍 Request body:', req.body);
+    console.log('🔍 Request file:', req.file);
+    console.log('🔍 Request files:', req.files);
+    console.log('🔍 Request user:', req.user);
+    console.log('🔍 Content-Type:', req.headers['content-type']);
+    console.log('🔍 Multer error:', req.fileValidationError);
+    console.log('🔍 Multer errors:', req.fileValidationErrors);
+    
+    // Ensure user is authenticated
+    if (!req.user) {
+      console.log('❌ No authenticated user found');
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+    
+    // Check for files (using upload.any() now)
+    if (!req.files || req.files.length === 0) {
+      console.log('❌ No files received in request');
+      console.log('🔍 Request body keys:', Object.keys(req.body || {}));
+      console.log('🔍 Request headers:', req.headers);
       return res.status(400).json({
         success: false,
         message: 'No image file provided'
       });
     }
 
+    // Get the first file (should be the profile image)
+    const file = req.files[0];
+    console.log('🔍 Processing file:', {
+      fieldname: file.fieldname,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      filename: file.filename
+    });
+    
+    // Log all files received for debugging
+    console.log('🔍 All files received:', req.files.map(f => ({
+      fieldname: f.fieldname,
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size
+    })));
+
     const userId = req.user.id;
-    const imagePath = req.file.path;
-    const imageUrl = `/uploads/profile-images/${req.file.filename}`;
+    const imagePath = file.path;
+    const imageUrl = `/uploads/profile-images/${file.filename}`;
 
     // Update user's profile image in database
     const updateQuery = 'UPDATE users SET profile_image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';

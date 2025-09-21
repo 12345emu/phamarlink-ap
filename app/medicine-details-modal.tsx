@@ -172,7 +172,7 @@ export default function MedicineDetailsScreen() {
     
     try {
       // For medicine details, we'll use the first available pharmacy
-      const pharmacyId = 1; // Default pharmacy ID
+      const pharmacyId = 5; // CityMed Pharmacy ID (valid pharmacy with medicines)
       const pricePerUnit = medicine.price;
       
       const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);
@@ -207,7 +207,7 @@ export default function MedicineDetailsScreen() {
     
     try {
       // For medicine details, we'll use the first available pharmacy
-      const pharmacyId = 1; // Default pharmacy ID
+      const pharmacyId = 5; // CityMed Pharmacy ID (valid pharmacy with medicines)
       const pricePerUnit = medicine.price;
       
       const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);

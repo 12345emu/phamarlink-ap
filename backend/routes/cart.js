@@ -14,7 +14,8 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT 
         ci.id,
         ci.quantity,
-        ci.price_per_unit,
+        pm.price as price_per_unit,
+        pm.discount_price,
         m.id as medicine_id,
         m.name as medicine_name,
         m.generic_name,
@@ -30,10 +31,11 @@ router.get('/', authenticateToken, async (req, res) => {
         hf.address as pharmacy_address,
         hf.city as pharmacy_city
       FROM cart_items ci
-      JOIN medicines m ON ci.medicine_id = m.id
-      JOIN healthcare_facilities hf ON ci.pharmacy_id = hf.id
+      JOIN pharmacy_medicines pm ON ci.pharmacy_medicine_id = pm.id
+      JOIN medicines m ON pm.medicine_id = m.id
+      JOIN healthcare_facilities hf ON pm.pharmacy_id = hf.id
       WHERE ci.user_id = ?
-      ORDER BY ci.created_at DESC
+      ORDER BY ci.added_at DESC
     `;
 
     const result = await executeQuery(cartQuery, [userId]);
@@ -69,6 +71,7 @@ router.get('/', authenticateToken, async (req, res) => {
       },
       quantity: item.quantity,
       pricePerUnit: parseFloat(item.price_per_unit),
+      discountPrice: item.discount_price ? parseFloat(item.discount_price) : null,
       totalPrice: parseFloat(item.price_per_unit) * item.quantity
     }));
 
@@ -88,10 +91,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // Add item to cart
 router.post('/add', authenticateToken, [
-  body('medicineId').isInt().notEmpty(),
-  body('pharmacyId').isInt().notEmpty(),
-  body('quantity').isInt({ min: 1 }).notEmpty(),
-  body('pricePerUnit').isFloat({ min: 0 }).notEmpty()
+  body('quantity').isInt({ min: 1 }).notEmpty()
 ], async (req, res) => {
   try {
     // Check validation errors
@@ -105,24 +105,87 @@ router.post('/add', authenticateToken, [
     }
 
     const userId = req.user.id;
-    const { medicineId, pharmacyId, quantity, pricePerUnit } = req.body;
+    const { quantity } = req.body;
+    
+    console.log('🔍 Adding to cart request body:', req.body);
+    
+    let pharmacyMedicineId;
+    
+    // Handle both old and new API formats
+    if (req.body.pharmacyMedicineId) {
+      // New format: direct pharmacy_medicine_id
+      pharmacyMedicineId = req.body.pharmacyMedicineId;
+    } else if (req.body.medicineId && req.body.pharmacyId) {
+      // Old format: find pharmacy_medicine_id from medicine_id and pharmacy_id
+      const findQuery = `
+        SELECT pm.id 
+        FROM pharmacy_medicines pm 
+        WHERE pm.medicine_id = ? AND pm.pharmacy_id = ? AND pm.is_available = TRUE
+      `;
+      
+      const findResult = await executeQuery(findQuery, [req.body.medicineId, req.body.pharmacyId]);
+      
+      if (!findResult.success || findResult.data.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Medicine not available at this pharmacy'
+        });
+      }
+      
+      pharmacyMedicineId = findResult.data[0].id;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Either pharmacyMedicineId or both medicineId and pharmacyId are required'
+      });
+    }
     
     console.log('🔍 Adding to cart:', {
       userId,
-      medicineId,
-      pharmacyId,
+      pharmacyMedicineId,
       quantity,
-      pricePerUnit
+      originalRequest: req.body
     });
 
+    // Verify the pharmacy_medicine exists and is available
+    const verifyQuery = `
+      SELECT pm.id, pm.stock_quantity, pm.price, pm.is_available,
+             m.name as medicine_name, hf.name as pharmacy_name
+      FROM pharmacy_medicines pm
+      JOIN medicines m ON pm.medicine_id = m.id
+      JOIN healthcare_facilities hf ON pm.pharmacy_id = hf.id
+      WHERE pm.id = ? AND pm.is_available = TRUE
+    `;
+    
+    const verifyResult = await executeQuery(verifyQuery, [pharmacyMedicineId]);
+    
+    if (!verifyResult.success || verifyResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Medicine not available at this pharmacy'
+      });
+    }
+    
+    const pharmacyMedicine = verifyResult.data[0];
+    
+    // Check stock availability
+    if (pharmacyMedicine.stock_quantity < quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Only ${pharmacyMedicine.stock_quantity} units available in stock`
+      });
+    }
+
     // Check if item already exists in cart
-    const existingQuery = 'SELECT id, quantity FROM cart_items WHERE user_id = ? AND medicine_id = ? AND pharmacy_id = ?';
-    const existingResult = await executeQuery(existingQuery, [userId, medicineId, pharmacyId]);
+    const existingQuery = 'SELECT id, quantity FROM cart_items WHERE user_id = ? AND pharmacy_medicine_id = ?';
+    const existingResult = await executeQuery(existingQuery, [userId, pharmacyMedicineId]);
 
     if (!existingResult.success) {
+      console.error('❌ Database error checking existing cart item:', existingResult.error);
       return res.status(500).json({
         success: false,
-        message: 'Failed to check existing cart item'
+        message: 'Failed to check existing cart item',
+        error: existingResult.error
       });
     }
 
@@ -130,12 +193,21 @@ router.post('/add', authenticateToken, [
     if (existingResult.data.length > 0) {
       // Update existing item quantity
       const newQuantity = existingResult.data[0].quantity + quantity;
+      
+      // Check if new total quantity exceeds stock
+      if (pharmacyMedicine.stock_quantity < newQuantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot add ${quantity} more units. Only ${pharmacyMedicine.stock_quantity} total units available in stock`
+        });
+      }
+      
       const updateQuery = 'UPDATE cart_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
       result = await executeQuery(updateQuery, [newQuantity, existingResult.data[0].id]);
     } else {
       // Add new item to cart
-      const insertQuery = 'INSERT INTO cart_items (user_id, medicine_id, pharmacy_id, quantity, price_per_unit) VALUES (?, ?, ?, ?, ?)';
-      result = await executeQuery(insertQuery, [userId, medicineId, pharmacyId, quantity, pricePerUnit]);
+      const insertQuery = 'INSERT INTO cart_items (user_id, pharmacy_medicine_id, quantity) VALUES (?, ?, ?)';
+      result = await executeQuery(insertQuery, [userId, pharmacyMedicineId, quantity]);
     }
 
     if (!result.success) {
@@ -149,7 +221,7 @@ router.post('/add', authenticateToken, [
 
     res.json({
       success: true,
-      message: 'Item added to cart successfully'
+      message: `${pharmacyMedicine.medicine_name} added to cart successfully from ${pharmacyMedicine.pharmacy_name}`
     });
 
   } catch (error) {

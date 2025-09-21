@@ -1,5 +1,7 @@
 import { apiClient, ApiResponse } from './apiClient';
-import { API_ENDPOINTS } from '../constants/API';
+import { API_ENDPOINTS, API_CONFIG } from '../constants/API';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Types
 export interface PharmacyRegistrationData {
@@ -60,7 +62,6 @@ class PharmacyService {
   // Register a new pharmacy
   async registerPharmacy(data: PharmacyRegistrationData): Promise<ApiResponse<{ pharmacy: Pharmacy }>> {
     try {
-      console.log('🔍 PharmacyService - Starting pharmacy registration...');
       
       // Create FormData for multipart/form-data submission
       const formData = new FormData();
@@ -83,11 +84,11 @@ class PharmacyService {
       if (data.emergencyContact) formData.append('emergencyContact', data.emergencyContact);
       if (data.description) formData.append('description', data.description);
       
-             // Add boolean fields
-       if (data.acceptsInsurance !== undefined) formData.append('acceptsInsurance', data.acceptsInsurance.toString());
-       if (data.hasDelivery !== undefined) formData.append('hasDelivery', data.hasDelivery.toString());
-       if (data.hasConsultation !== undefined) formData.append('hasConsultation', data.hasConsultation.toString());
-       if (data.userId) formData.append('userId', data.userId.toString());
+      // Add boolean fields
+      if (data.acceptsInsurance !== undefined) formData.append('acceptsInsurance', data.acceptsInsurance.toString());
+      if (data.hasDelivery !== undefined) formData.append('hasDelivery', data.hasDelivery.toString());
+      if (data.hasConsultation !== undefined) formData.append('hasConsultation', data.hasConsultation.toString());
+      if (data.userId) formData.append('userId', data.userId.toString());
       
       // Add services array
       if (data.services && data.services.length > 0) {
@@ -96,16 +97,31 @@ class PharmacyService {
         });
       }
       
-      // Add images
+      // Add images - React Native specific approach
       if (data.images && data.images.length > 0) {
+        console.log('🔍 PharmacyService - Processing images for upload...');
         data.images.forEach((imageUri, index) => {
+          console.log(`🔍 PharmacyService - Processing image ${index + 1}:`, imageUri);
+          
+          // Create proper file object for React Native
+          // React Native FormData expects objects with uri, type, and name properties
           const imageFile = {
             uri: imageUri,
             type: 'image/jpeg',
-            name: `pharmacy-image-${index}.jpg`
+            name: `pharmacy-image-${Date.now()}-${index}.jpg`
           } as any;
+          
+          // For React Native, we need to append the file object directly
+          // The network layer will handle the multipart encoding
           formData.append('images', imageFile);
+          console.log(`✅ PharmacyService - Image ${index + 1} added to FormData:`, {
+            uri: imageFile.uri,
+            type: imageFile.type,
+            name: imageFile.name
+          });
         });
+      } else {
+        console.log('⚠️ PharmacyService - No images to upload');
       }
       
       console.log('🔍 PharmacyService - FormData created, submitting registration...');
@@ -133,23 +149,67 @@ class PharmacyService {
         images: data.images
       });
       
-      const response = await apiClient.post<{ pharmacy: Pharmacy }>(
-        API_ENDPOINTS.FACILITIES.PHARMACY_REGISTER,
+       // Debug FormData contents
+       console.log('🔍 PharmacyService - FormData type:', typeof formData);
+       console.log('🔍 PharmacyService - FormData constructor:', formData.constructor.name);
+       console.log('🔍 PharmacyService - FormData is FormData:', formData instanceof FormData);
+       console.log('🔍 PharmacyService - FormData has append method:', typeof formData.append === 'function');
+       
+       // Try to debug FormData contents (React Native specific)
+       try {
+         const formDataAny = formData as any;
+         if (formDataAny._parts) {
+           console.log('🔍 PharmacyService - FormData parts count:', formDataAny._parts.length);
+           const imageParts = formDataAny._parts.filter((part: any) => part.name === 'images');
+           console.log('🔍 PharmacyService - Image parts count:', imageParts.length);
+         }
+       } catch (e) {
+         console.log('🔍 PharmacyService - Cannot access FormData internals (normal in React Native)');
+       }
+      
+      // Use direct axios for React Native FormData (more reliable)
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('🔍 PharmacyService - Making direct axios request for React Native FormData');
+      
+      const response = await axios.post(
+        `${API_CONFIG.BASE_URL}${API_ENDPOINTS.FACILITIES.PHARMACY_REGISTER}`,
         formData,
         {
+          timeout: 30000,
           headers: {
-            'Content-Type': 'multipart/form-data',
-          },
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            // Don't set Content-Type - let React Native handle it
+          }
         }
       );
+
+      // Convert axios response to our ApiResponse format
+      const apiResponse: ApiResponse<{ pharmacy: Pharmacy }> = {
+        success: response.data.success,
+        data: response.data.data,
+        message: response.data.message,
+        error: response.data.error
+      };
       
       console.log('🔍 PharmacyService - Registration response:', {
-        success: response.success,
-        hasData: !!response.data,
-        message: response.message
+        success: apiResponse.success,
+        hasData: !!apiResponse.data,
+        message: apiResponse.message
       });
       
-      return response;
+      if (apiResponse.success && apiResponse.data) {
+        console.log('✅ PharmacyService - Registration successful');
+        console.log('📸 Images in response:', apiResponse.data.pharmacy.images);
+      } else {
+        console.log('❌ PharmacyService - Registration failed:', apiResponse.message);
+      }
+      
+      return apiResponse;
     } catch (error) {
       console.error('❌ PharmacyService - Registration error:', error);
       return {

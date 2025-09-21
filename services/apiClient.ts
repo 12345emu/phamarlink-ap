@@ -34,15 +34,8 @@ class ApiClient {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      // Ensure FormData is handled properly
-      transformRequest: [function (data, headers) {
-        if (data instanceof FormData) {
-          console.log('🔍 TransformRequest: FormData detected');
-          // Don't transform FormData, let axios handle it
-          return data;
-        }
-        return data;
-      }],
+      // Let axios handle JSON serialization automatically
+      // transformRequest removed to avoid interference with JSON data
     });
 
     this.setupInterceptors();
@@ -215,18 +208,37 @@ class ApiClient {
   // Generic request method
   private async request<T>(config: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
+      console.log('🔍 API Client - Request method called');
+      console.log('🔍 API Client - Config method:', config.method);
+      console.log('🔍 API Client - Config URL:', config.url);
+      console.log('🔍 API Client - Config headers:', config.headers);
+      
       // If data is FormData, don't set Content-Type header (let browser set it)
-      if (config.data instanceof FormData) {
-        console.log('🔍 FormData detected, removing Content-Type header');
+      // Check for both standard FormData and React Native FormData
+      const isFormData = config.data instanceof FormData || 
+                        (config.data && typeof config.data === 'object' && 
+                         config.data.constructor && 
+                         config.data.constructor.name === 'FormData') ||
+                        (config.data && typeof config.data === 'object' && 
+                         config.data.append && typeof config.data.append === 'function');
+      
+      if (isFormData) {
         delete config.headers?.['Content-Type'];
-        // Also ensure we don't have any other conflicting headers
-        delete config.headers?.['Accept'];
-        console.log('🔍 Headers after FormData processing:', config.headers);
+      } else {
+        // Ensure Content-Type is set for JSON data
+        if (config.data && typeof config.data === 'object') {
+          config.headers = config.headers || {};
+          config.headers['Content-Type'] = 'application/json';
+        }
       }
       
+      console.log('🔍 API Client - About to make request with axios');
       const response: AxiosResponse<ApiResponse<T>> = await this.client(config);
+      console.log('🔍 API Client - Response received:', response.status);
+      console.log('🔍 API Client - Response data:', response.data);
       return response.data;
     } catch (error) {
+      console.log('🔍 API Client - Request failed:', error);
       return this.handleError(error as AxiosError);
     }
   }
@@ -238,6 +250,12 @@ class ApiClient {
       const status = error.response.status;
       const data = error.response.data as any;
       
+      // If the server response already has the correct structure, return it
+      if (data && typeof data === 'object' && 'success' in data) {
+        return data as ApiResponse;
+      }
+      
+      // Otherwise, wrap it in the expected structure
       return {
         success: false,
         message: data?.message || this.getErrorMessage(status),

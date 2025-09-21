@@ -1,5 +1,7 @@
 import { apiClient } from './apiClient';
-import { API_ENDPOINTS } from '../constants/API';
+import { API_ENDPOINTS, API_CONFIG } from '../constants/API';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface HospitalRegistration {
   hospitalName: string;
@@ -38,7 +40,7 @@ class HospitalService {
   async registerHospital(registrationData: HospitalRegistration, images?: string[]): Promise<ApiResponse<any>> {
     try {
       console.log('🔍 HospitalService - Registering hospital with data:', registrationData);
-      console.log('🔍 HospitalService - Images:', images);
+      console.log('🔍 HospitalService - Images to upload:', images);
 
       // Create FormData for multipart/form-data
       const formData = new FormData();
@@ -58,30 +60,67 @@ class HospitalService {
         }
       });
 
-      // Add images if provided
+      // Add images if provided - React Native specific approach
       if (images && images.length > 0) {
+        console.log('🔍 HospitalService - Processing images for upload...');
         images.forEach((imageUri, index) => {
-          // Create a file object from the image URI
+          console.log(`🔍 HospitalService - Processing image ${index + 1}:`, imageUri);
+          
+          // Create proper file object for React Native
+          // React Native FormData expects objects with uri, type, and name properties
           const imageFile = {
             uri: imageUri,
             type: 'image/jpeg',
-            name: `hospital-image-${index}.jpg`
+            name: `hospital-image-${Date.now()}-${index}.jpg`
           } as any;
+          
+          // For React Native, we need to append the file object directly
+          // The network layer will handle the multipart encoding
           formData.append('images', imageFile);
+          console.log(`✅ HospitalService - Image ${index + 1} added to FormData:`, {
+            uri: imageFile.uri,
+            type: imageFile.type,
+            name: imageFile.name
+          });
         });
+      } else {
+        console.log('⚠️ HospitalService - No images to upload');
       }
 
       console.log('🔍 HospitalService - FormData created, sending request...');
       console.log('🔍 HospitalService - API endpoint:', `${API_ENDPOINTS.FACILITIES.LIST}/hospital/register`);
 
-      const response = await apiClient.post<any>(`${API_ENDPOINTS.FACILITIES.LIST}/hospital/register`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      // Use direct axios for React Native FormData (more reliable)
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
 
-      console.log('🔍 HospitalService - Response received:', response);
-      return response;
+      console.log('🔍 HospitalService - Making direct axios request for React Native FormData');
+      
+      const response = await axios.post(
+        `${API_CONFIG.BASE_URL}${API_ENDPOINTS.FACILITIES.LIST}/hospital/register`,
+        formData,
+        {
+          timeout: 30000,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            // Don't set Content-Type - let React Native handle it
+          }
+        }
+      );
+
+      // Convert axios response to our ApiResponse format
+      const apiResponse: ApiResponse<any> = {
+        success: response.data.success,
+        data: response.data.data,
+        message: response.data.message,
+        error: response.data.error
+      };
+
+      console.log('🔍 HospitalService - Response received:', apiResponse);
+      return apiResponse;
     } catch (error) {
       console.error('❌ HospitalService - Register hospital error:', error);
 

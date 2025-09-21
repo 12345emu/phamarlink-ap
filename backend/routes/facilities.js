@@ -376,18 +376,19 @@ router.get('/:id/medicines', async (req, res) => {
       });
     }
 
-    // Get medicines for this facility
+    // Get medicines for this facility (only medicines actually available at this pharmacy)
     const medicinesQuery = `
       SELECT 
         m.id, m.name, m.generic_name, m.category, m.prescription_required,
         m.dosage_form, m.strength, m.description, m.manufacturer,
-        COALESCE(pm.stock_quantity, 50) as stock_quantity,
-        COALESCE(pm.price, 45.00) as price,
+        pm.stock_quantity,
+        pm.price,
         pm.discount_price,
-        COALESCE(pm.is_available, TRUE) as is_available
+        pm.is_available,
+        pm.id as pharmacy_medicine_id
       FROM medicines m
-      LEFT JOIN pharmacy_medicines pm ON m.id = pm.medicine_id AND pm.facility_id = m.facility_id
-      WHERE m.facility_id = ? AND m.is_active = TRUE
+      INNER JOIN pharmacy_medicines pm ON m.id = pm.medicine_id
+      WHERE pm.pharmacy_id = ? AND pm.is_available = TRUE AND m.is_active = TRUE
       ORDER BY m.category, m.name
     `;
     
@@ -419,7 +420,8 @@ router.get('/:id/medicines', async (req, res) => {
         stock_quantity: medicine.stock_quantity,
         price: parseFloat(medicine.price),
         discount_price: medicine.discount_price ? parseFloat(medicine.discount_price) : null,
-        is_available: medicine.is_available === 1
+        is_available: medicine.is_available === 1,
+        pharmacy_medicine_id: medicine.pharmacy_medicine_id
       });
     });
 

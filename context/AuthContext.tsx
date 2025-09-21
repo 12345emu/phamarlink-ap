@@ -125,9 +125,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       console.log('🔍 AuthContext - Starting login for:', email);
+      console.log('🔍 AuthContext - Email received:', `"${email}"`);
+      console.log('🔍 AuthContext - Password received:', `"${password}"`);
+      console.log('🔍 AuthContext - Email type:', typeof email);
+      console.log('🔍 AuthContext - Password type:', typeof password);
       
       // Use the auth service for real API call
       const credentials: LoginCredentials = { email, password };
+      console.log('🔍 AuthContext - Credentials object:', credentials);
       const response = await authService.login(credentials);
       
       console.log('🔍 AuthContext - Login response:', {

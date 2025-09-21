@@ -1,7 +1,8 @@
 import { apiClient, ApiResponse } from './apiClient';
-import { API_ENDPOINTS } from '../constants/API';
+import { API_ENDPOINTS, API_CONFIG } from '../constants/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { constructProfileImageUrl } from '../utils/imageUtils';
+import axios from 'axios';
 
 // Types
 export interface User {
@@ -66,6 +67,10 @@ class AuthService {
   async login(credentials: LoginCredentials): Promise<ApiResponse<AuthResponse>> {
     try {
       console.log('🔍 AuthService - Starting login for:', credentials.email);
+      console.log('🔍 AuthService - Full credentials object:', credentials);
+      console.log('🔍 AuthService - Email in credentials:', `"${credentials.email}"`);
+      console.log('🔍 AuthService - Password in credentials:', `"${credentials.password}"`);
+      console.log('🔍 AuthService - API endpoint:', API_ENDPOINTS.AUTH.LOGIN);
       const response = await apiClient.post<AuthResponse>(API_ENDPOINTS.AUTH.LOGIN, credentials);
       
       console.log('🔍 AuthService - API response:', {
@@ -140,37 +145,134 @@ class AuthService {
   async uploadProfileImage(imageUri: string): Promise<ApiResponse<{ profileImage: string }>> {
     try {
       console.log('🔍 AuthService - Uploading profile image...');
+      console.log('🔍 AuthService - Image URI:', imageUri);
       
-      // Create form data
+      // Validate image URI
+      if (!imageUri || typeof imageUri !== 'string') {
+        throw new Error('Invalid image URI provided');
+      }
+      
+      // Create form data with explicit file object for React Native
       const formData = new FormData();
-      formData.append('profileImage', {
+      
+      // Create a proper file object for React Native
+      const file = {
         uri: imageUri,
         type: 'image/jpeg',
-        name: 'profile-image.jpg'
-      } as any);
+        name: `profile-image-${Date.now()}.jpg`
+      };
       
-      const response = await apiClient.post<{ profileImage: string }>(
-        API_ENDPOINTS.AUTH.UPLOAD_PROFILE_IMAGE,
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      );
+      // Append the file to FormData (React Native specific approach)
+      // Try multiple field names to ensure compatibility
+      formData.append('profileImage', file as any);
+      formData.append('image', file as any);
+      formData.append('file', file as any);
       
-      console.log('🔍 AuthService - Upload response:', {
-        success: response.success,
-        hasData: !!response.data,
-        message: response.message
+      console.log('🔍 AuthService - FormData created with file:', {
+        uri: file.uri,
+        type: file.type,
+        name: file.name
       });
       
-      return response;
-    } catch (error) {
+      // Debug FormData contents
+      console.log('🔍 AuthService - FormData entries:');
+      try {
+        for (const [key, value] of formData.entries()) {
+          console.log(`  ${key}:`, typeof value, value);
+        }
+      } catch (error) {
+        console.log('⚠️ Could not iterate FormData entries:', error);
+      }
+      
+      console.log('🔍 AuthService - FormData created, sending request...');
+      
+      // Try direct axios call instead of apiClient for FormData
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('🔍 AuthService - Making direct axios request with FormData');
+      
+      try {
+        const response = await axios.post(
+          `${API_CONFIG.BASE_URL}${API_ENDPOINTS.AUTH.UPLOAD_PROFILE_IMAGE}`,
+          formData,
+          {
+            timeout: 30000,
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+              // Don't set Content-Type - let axios handle it for FormData
+            }
+          }
+        );
+
+        // Convert axios response to our ApiResponse format
+        const apiResponse: ApiResponse<{ profileImage: string }> = {
+          success: response.data.success,
+          data: response.data.data,
+          message: response.data.message,
+          error: response.data.error
+        };
+        
+        return apiResponse;
+      } catch (axiosError: any) {
+        console.log('⚠️ Direct axios call failed, trying apiClient fallback');
+        
+        // Fallback to apiClient
+        const fallbackResponse = await apiClient.post<{ profileImage: string }>(
+          API_ENDPOINTS.AUTH.UPLOAD_PROFILE_IMAGE,
+          formData,
+          {
+            timeout: 30000,
+            headers: {
+              'Accept': 'application/json',
+            }
+          }
+        );
+        
+        return fallbackResponse;
+      }
+    } catch (error: any) {
       console.error('❌ AuthService - Upload profile image error:', error);
+      
+      // Handle specific error types
+      if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        return {
+          success: false,
+          message: 'Network error. Please check your internet connection and try again.',
+          error: 'Network Error',
+        };
+      } else if (error.code === 'TIMEOUT' || error.message?.includes('timeout')) {
+        return {
+          success: false,
+          message: 'Upload timeout. The image might be too large. Please try a smaller image.',
+          error: 'Timeout Error',
+        };
+      } else if (error.response?.status === 413) {
+        return {
+          success: false,
+          message: 'Image file is too large. Please select a smaller image (max 5MB).',
+          error: 'File Too Large',
+        };
+      } else if (error.response?.status === 415) {
+        return {
+          success: false,
+          message: 'Invalid image format. Please select a JPEG or PNG image.',
+          error: 'Invalid Format',
+        };
+      } else if (error.response?.status === 401) {
+        return {
+          success: false,
+          message: 'Authentication required. Please log in again.',
+          error: 'Authentication Error',
+        };
+      }
+      
       return {
         success: false,
-        message: 'Failed to upload profile image',
+        message: error.message || 'Failed to upload profile image. Please try again.',
         error: 'Upload Error',
       };
     }
@@ -234,7 +336,7 @@ class AuthService {
   // Change password
   async changePassword(passwordData: ChangePasswordData): Promise<ApiResponse<{ message: string }>> {
     try {
-      return await apiClient.post<{ message: string }>(API_ENDPOINTS.AUTH.CHANGE_PASSWORD, passwordData);
+      return await apiClient.put<{ message: string }>(API_ENDPOINTS.AUTH.CHANGE_PASSWORD, passwordData);
     } catch (error) {
       console.error('Change password error:', error);
       return {

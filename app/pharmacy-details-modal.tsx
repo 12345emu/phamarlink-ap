@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCart } from '../context/CartContext';
 import { facilitiesService, Facility } from '../services/facilitiesService';
 import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
+import { authService } from '../services/authService';
 import RateFacilityModal from './rate-facility-modal';
 
 const { width } = Dimensions.get('window');
@@ -428,17 +429,44 @@ export default function PharmacyDetailsScreen() {
     
     try {
       // Get pharmacy ID from params or facility
-      const pharmacyId = parseInt(params.facilityId as string) || (facility?.id ? parseInt(facility.id.toString()) : 1);
+      const pharmacyId = parseInt(params.facilityId as string) || (facility?.id ? parseInt(facility.id.toString()) : 5);
       const pricePerUnit = parseFloat(medicine.price.replace('GHS ', ''));
       
-      // Use the new database-backed cart system
-      const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);
-      
-      if (success) {
-        setAddedToCart(prev => new Set(prev).add(medicine.id));
-        Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
+      // If pharmacy_medicine_id is available, use it directly for better accuracy
+      if (medicine.pharmacy_medicine_id) {
+        // Use the new API format with pharmacy_medicine_id
+        const cartData = {
+          pharmacyMedicineId: medicine.pharmacy_medicine_id,
+          quantity: 1
+        };
+        
+        const response = await fetch('http://172.20.10.3:3000/api/cart/add', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await authService.getStoredToken()}`
+          },
+          body: JSON.stringify(cartData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          setAddedToCart(prev => new Set(prev).add(medicine.id));
+          Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
+        } else {
+          Alert.alert('Error', result.message || 'Failed to add item to cart. Please try again.');
+        }
       } else {
-        Alert.alert('Error', 'Failed to add item to cart. Please try again.');
+        // Fallback to old method
+        const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);
+        
+        if (success) {
+          setAddedToCart(prev => new Set(prev).add(medicine.id));
+          Alert.alert('Added to Cart', `${medicine.name} has been added to your cart!`);
+        } else {
+          Alert.alert('Error', 'Failed to add item to cart. Please try again.');
+        }
       }
     } catch (error) {
       console.error('Error adding to cart:', error);

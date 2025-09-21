@@ -37,6 +37,17 @@ export default function HomeScreen(props: any) {
     )
   );
 
+  // Get 2 hospitals and 2 pharmacies for display
+  const hospitals = filteredNearbyOptions.filter(facility => 
+    facility.type === 'hospital' || facility.type === 'clinic'
+  ).slice(0, 2);
+  
+  const pharmacies = filteredNearbyOptions.filter(facility => 
+    facility.type === 'pharmacy'
+  ).slice(0, 2);
+  
+  const displayNearbyOptions = [...hospitals, ...pharmacies];
+
   // Debug logging
   console.log('🔍 nearbyFacilities state:', nearbyFacilities.length, 'facilities');
   console.log('🔍 filteredNearbyOptions:', filteredNearbyOptions.length, 'facilities');
@@ -49,8 +60,8 @@ export default function HomeScreen(props: any) {
   );
 
   // Filter professionals based on search query
-  const filteredProfessionals = availableProfessionals.filter(professional =>
-    professional.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+  const filteredProfessionals = (availableProfessionals || []).filter(professional =>
+    `${professional.first_name} ${professional.last_name}`.toLowerCase().includes(search.toLowerCase()) ||
     professional.specialty.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -77,11 +88,11 @@ export default function HomeScreen(props: any) {
   const fetchAvailableProfessionals = async () => {
     try {
       setProfessionalsLoading(true);
-      const response = await professionalsService.getAvailableProfessionals(5);
+      const response = await professionalsService.getAvailableProfessionals();
       
       if (response.success && response.data) {
-        console.log('👨‍⚕️ Fetched professionals:', response.data.length, 'professionals');
-        setAvailableProfessionals(response.data);
+        console.log('👨‍⚕️ Fetched professionals:', response.data.professionals.length, 'professionals');
+        setAvailableProfessionals(response.data.professionals);
       } else {
         console.error('Failed to fetch professionals:', response.message);
       }
@@ -424,13 +435,13 @@ export default function HomeScreen(props: any) {
                 <FontAwesome name="map-marker" size={24} color="#95a5a6" />
                 <Text style={styles.noResultsText}>No nearby facilities found</Text>
               </View>
-            ) : filteredNearbyOptions.length === 0 && search.length > 0 ? (
+            ) : displayNearbyOptions.length === 0 && search.length > 0 ? (
               <View style={styles.noResults}>
                 <FontAwesome name="search" size={24} color="#95a5a6" />
                 <Text style={styles.noResultsText}>No nearby places found</Text>
               </View>
             ) : (
-              filteredNearbyOptions.map((facility) => (
+              displayNearbyOptions.map((facility) => (
               <TouchableOpacity 
                   key={facility.id} 
                 style={styles.nearbyItem}
@@ -643,18 +654,18 @@ export default function HomeScreen(props: any) {
               filteredProfessionals.slice(0, 3).map((professional, index) => (
                 <View key={professional.id} style={styles.orderItem}>
                   <View style={styles.orderLeft}>
-                    <View style={[styles.orderIcon, { backgroundColor: professionalsService.getProfessionalColor(professional.specialty || 'default') + '20' }]}>
-                      <FontAwesome name={professionalsService.getProfessionalIcon(professional.specialty || 'default') as FontAwesomeIconName} size={18} color={professionalsService.getProfessionalColor(professional.specialty || 'default')} />
+                    <View style={[styles.orderIcon, { backgroundColor: '#3498db20' }]}>
+                      <FontAwesome name='user-md' size={18} color='#3498db' />
                     </View>
                     <View style={styles.orderInfo}>
-                      <Text style={styles.orderName}>{professional.full_name || 'Unknown Professional'}</Text>
+                      <Text style={styles.orderName}>{`${professional.first_name} ${professional.last_name}` || 'Unknown Professional'}</Text>
                       <Text style={styles.orderPrice}>
-                        {professional.specialty || 'General'} • {professional.experience_text || 'No experience listed'}
+                        {professional.specialty || 'General'} • {professional.experience_years || 0} years experience
                       </Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
                         <FontAwesome name="star" size={12} color="#f39c12" />
                         <Text style={{ fontSize: 12, color: '#7f8c8d', marginLeft: 4 }}>
-                          {professionalsService.formatRating(professional.rating || 0)} ({professional.total_reviews || 0} reviews)
+                          No rating available
                         </Text>
                       </View>
                     </View>
@@ -668,10 +679,10 @@ export default function HomeScreen(props: any) {
                           pathname: '/appointment-booking-modal',
                           params: {
                             professionalId: professional.id.toString(),
-                            professionalName: professional.full_name,
+                            professionalName: `${professional.first_name} ${professional.last_name}`,
                             professionalSpecialty: professional.specialty,
-                            professionalRating: professional.rating?.toString() || '0',
-                            professionalExperience: professional.experience_text,
+                            professionalRating: '0',
+                            professionalExperience: `${professional.experience_years || 0} years`,
                             facilityId: professional.facility_id?.toString() || '',
                             facilityName: professional.facility_name || 'General Practice'
                           }
@@ -715,13 +726,13 @@ export default function HomeScreen(props: any) {
                     pathname: '/(tabs)/chat',
                     params: {
                       professionalId: professional.id.toString(),
-                      professionalName: professional.full_name,
+                      professionalName: `${professional.first_name} ${professional.last_name}`,
                       professionalRole: professional.specialty.toLowerCase().includes('pharmacist') ? 'pharmacist' : 'doctor',
                       facilityName: professional.facility_name || 'General Practice',
                       professionalSpecialty: professional.specialty,
-                      professionalAvatar: professionalsService.getProfessionalIcon(professional.specialty),
-                      professionalRating: professional.rating.toString(),
-                      professionalExperience: professional.experience_years.toString()
+                      professionalAvatar: 'user-md',
+                      professionalRating: '0',
+                      professionalExperience: (professional.experience_years || 0).toString()
                     }
                   }) : null}
                   activeOpacity={professional.is_available ? 0.7 : 1}
@@ -737,12 +748,12 @@ export default function HomeScreen(props: any) {
                       )}
                     </View>
                     <View style={styles.chatInfo}>
-                      <Text style={styles.chatName}>{professional.full_name}</Text>
+                      <Text style={styles.chatName}>{`${professional.first_name} ${professional.last_name}`}</Text>
                       <Text style={styles.chatSpecialty}>{professional.specialty}</Text>
                       <View style={styles.chatRating}>
                         <FontAwesome name="star" size={12} color="#f39c12" />
-                        <Text style={styles.chatRatingText}>{professionalsService.formatRating(professional.rating || 0)}</Text>
-                        <Text style={styles.chatExperience}> • {professional.experience_text || `${professional.experience_years || 0} years experience`}</Text>
+                        <Text style={styles.chatRatingText}>No rating</Text>
+                        <Text style={styles.chatExperience}> • {professional.experience_years || 0} years experience</Text>
                       </View>
                       {!professional.is_available && (
                         <Text style={styles.chatUnavailable}>Currently unavailable</Text>

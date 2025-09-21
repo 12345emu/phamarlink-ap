@@ -1,4 +1,7 @@
 import { apiClient } from './apiClient';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_CONFIG, API_ENDPOINTS } from '../constants/API';
 
 export interface PharmacistRegistration {
   firstName: string;
@@ -18,7 +21,7 @@ export interface PharmacistRegistration {
   hasCompounding: boolean;
   hasVaccination: boolean;
   acceptsInsurance: boolean;
-  userId: string;
+  userId?: string;
   profileImage?: string;
 }
 
@@ -35,20 +38,8 @@ export interface PharmacistRegistrationResponse {
 }
 
 class PharmacistServiceNew {
-  constructor() {
-    console.log('🚨🚨🚨 NEW PHARMACIST SERVICE CONSTRUCTOR CALLED 🚨🚨🚨');
-  }
-
   async registerPharmacist(data: PharmacistRegistration): Promise<PharmacistRegistrationResponse> {
-    console.log('🚨🚨🚨 NEW PHARMACIST SERVICE FUNCTION CALLED 🚨🚨🚨');
     try {
-      console.log('🚨🚨🚨 NEW PHARMACIST SERVICE UPDATED - NEW VERSION RUNNING 🚨🚨🚨');
-      console.log('🔍 Sending pharmacist registration data:', data);
-      console.log('🔍 Profile image in data:', data.profileImage);
-      console.log('🔍 API URL:', '/professionals/register');
-      
-      // Create FormData for file upload
-      console.log('🔍 Creating FormData for file upload...');
       const formData = new FormData();
       
       // Add text fields
@@ -62,7 +53,9 @@ class PharmacistServiceNew {
       formData.append('education', data.education);
       formData.append('experience', data.experience);
       formData.append('emergencyContact', data.emergencyContact);
-      formData.append('userId', data.userId);
+      if (data.userId) {
+        formData.append('userId', data.userId);
+      }
       
       // Add optional fields
       if (data.currentWorkplace) {
@@ -88,12 +81,6 @@ class PharmacistServiceNew {
         const match = /\.(\w+)$/.exec(filename);
         const type = match ? `image/${match[1]}` : 'image/jpeg';
         
-        console.log('🔍 Adding profile image to FormData:', {
-          uri: imageUri,
-          name: filename,
-          type: type,
-        });
-        
         // React Native FormData format - use the correct structure
         const imageFile = {
           uri: imageUri,
@@ -101,46 +88,40 @@ class PharmacistServiceNew {
           name: filename,
         };
         
-        console.log('🔍 Image file object:', imageFile);
-        
         // React Native FormData requires the file object to be passed directly
         formData.append('profileImage', imageFile as any);
-        console.log('✅ Image appended to FormData successfully');
-        
-        // Log FormData entries to verify
-        console.log('🔍 FormData entries after adding image:');
-        for (let [key, value] of formData.entries()) {
-          console.log(`  ${key}:`, typeof value === 'object' ? '[File Object]' : value);
+      }
+      
+      // Use direct axios for React Native FormData (more reliable)
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.post(
+        `${API_CONFIG.BASE_URL}${API_ENDPOINTS.PROFESSIONALS.REGISTER}`,
+        formData,
+        {
+          timeout: 30000,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            // Don't set Content-Type - let React Native handle it
+          }
         }
-      } else {
-        console.log('🔍 No profile image provided');
-      }
+      );
       
-      console.log('🔍 Sending FormData to API...');
-      console.log('🔍 FormData entries:');
-      for (let [key, value] of formData.entries()) {
-        console.log(`  ${key}:`, value);
-      }
-      
-      const response = await apiClient.post('/professionals/register', formData);
-      
-      console.log('✅ Full response object:', response);
-      console.log('✅ Response success:', response.success);
-      console.log('✅ Response message:', response.message);
-      
-      // The apiClient already returns an ApiResponse object, not a raw axios response
-      if (response && response.success) {
-        console.log('✅ Registration successful:', response);
+      // Handle direct axios response
+      if (response && response.data && response.data.success) {
         return {
           success: true,
-          message: response.message || 'Pharmacist registered successfully',
-          data: response.data as PharmacistRegistrationResponse['data']
+          message: response.data.message || 'Pharmacist registered successfully',
+          data: response.data.data as PharmacistRegistrationResponse['data']
         };
       } else {
-        console.log('❌ Registration failed:', response);
         return {
           success: false,
-          message: response.message || 'Registration failed'
+          message: response.data?.message || 'Registration failed'
         };
       }
     } catch (error: any) {

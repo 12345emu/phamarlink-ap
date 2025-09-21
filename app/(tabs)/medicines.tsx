@@ -123,7 +123,7 @@ export default function MedicinesScreen() {
     try {
       // For medicines page, we'll use the first available pharmacy
       // This allows users to add medicines directly from the medicines page
-      const pharmacyId = 1; // Default pharmacy ID
+      const pharmacyId = 5; // CityMed Pharmacy ID (valid pharmacy with medicines)
       const pricePerUnit = Number(medicine.min_price) || 0;
       
       const success = await addToCart(medicine, pharmacyId, pricePerUnit, 1);

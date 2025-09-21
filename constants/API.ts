@@ -38,9 +38,12 @@ export const API_ENDPOINTS = {
   
   // Healthcare Professionals
   PROFESSIONALS: {
+    BASE: '/professionals',
     LIST: '/professionals',
     GET_BY_ID: (id: string) => `/professionals/${id}`,
     GET_BY_FACILITY: (facilityId: string) => `/professionals/facility/${facilityId}`,
+    REGISTER: '/professionals/register',
+    REGISTER_DOCTOR: '/professionals/register-doctor',
     UPDATE: (id: string) => `/professionals/${id}`,
     DEACTIVATE: (id: string) => `/professionals/${id}/deactivate`,
   },
@@ -54,6 +57,18 @@ export const API_ENDPOINTS = {
     ADD_REVIEW: (id: string) => `/facilities/${id}/reviews`,
     PHARMACY_REGISTER: '/facilities/pharmacy/register',
   },
+
+  // Chat
+  CHAT: {
+    CONVERSATIONS: '/chat/conversations',
+    CREATE_CONVERSATION: '/chat/conversations',
+    SEND_MESSAGE: (conversationId: string) => `/chat/conversations/${conversationId}/messages`,
+    MARK_AS_READ: (conversationId: string) => `/chat/conversations/${conversationId}/read`,
+    UNREAD_COUNT: '/chat/unread-count',
+  },
+  
+  // WebSocket
+  WEBSOCKET: 'ws://172.20.10.3:3000/ws/chat',
   
   // Medicines
   MEDICINES: {
@@ -85,16 +100,6 @@ export const API_ENDPOINTS = {
     CREATE: '/orders',
     UPDATE_STATUS: (id: string) => `/orders/${id}/status`,
     TRACK: (id: string) => `/orders/${id}/track`,
-  },
-  
-  // Chat
-  CHAT: {
-    CONVERSATIONS: '/chat/conversations',
-    MESSAGES: (conversationId: string) => `/chat/conversations/${conversationId}/messages`,
-    CREATE_CONVERSATION: '/chat/conversations',
-    SEND_MESSAGE: (conversationId: string) => `/chat/conversations/${conversationId}/messages`,
-    MARK_AS_READ: (conversationId: string) => `/chat/conversations/${conversationId}/read`,
-    UNREAD_COUNT: '/chat/unread-count',
   },
   
   // Reviews
@@ -144,6 +149,17 @@ export const API_ENDPOINTS = {
     UPDATE: (itemId: string) => `/cart/update/${itemId}`,
     REMOVE: (itemId: string) => `/cart/remove/${itemId}`,
     CLEAR: '/cart/clear',
+  },
+  
+  // Prescriptions
+  PRESCRIPTIONS: {
+    LIST: '/prescriptions',
+    GET_BY_ID: (id: string) => `/prescriptions/${id}`,
+    UPLOAD: '/prescriptions/upload',
+    GET_MEDICINES: (id: string) => `/prescriptions/${id}/medicines`,
+    ADD_MEDICINE: (id: string) => `/prescriptions/${id}/medicines`,
+    UPDATE_MEDICINE: (prescriptionId: string, medicineId: string) => `/prescriptions/${prescriptionId}/medicines/${medicineId}`,
+    REMOVE_MEDICINE: (prescriptionId: string, medicineId: string) => `/prescriptions/${prescriptionId}/medicines/${medicineId}`,
   },
 };
 

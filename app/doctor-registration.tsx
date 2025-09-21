@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import { doctorService } from '../services/doctorService';
 
 const ACCENT = '#3498db';
 const SUCCESS = '#43e97b';
@@ -34,6 +36,7 @@ interface DoctorRegistration {
 export default function DoctorRegistrationScreen() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [formData, setFormData] = useState<DoctorRegistration>({
     firstName: '',
     lastName: '',
@@ -91,6 +94,31 @@ export default function DoctorRegistrationScreen() {
     }));
   };
 
+  const selectProfileImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant camera roll permissions to upload a profile image.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setProfileImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error selecting image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
   const handleSubmit = async () => {
     // Validation
     if (!formData.firstName.trim()) {
@@ -113,25 +141,61 @@ export default function DoctorRegistrationScreen() {
       Alert.alert('Error', 'Please enter license number');
       return;
     }
+    if (!formData.medicalSchool.trim()) {
+      Alert.alert('Error', 'Please enter medical school');
+      return;
+    }
+    if (!formData.graduationYear.trim()) {
+      Alert.alert('Error', 'Please enter graduation year');
+      return;
+    }
+    if (!formData.experience.trim()) {
+      Alert.alert('Error', 'Please enter years of experience');
+      return;
+    }
+    if (formData.specialties.length === 0) {
+      Alert.alert('Error', 'Please select at least one specialty');
+      return;
+    }
+    if (!formData.emergencyContact.trim()) {
+      Alert.alert('Error', 'Please enter emergency contact');
+      return;
+    }
+    if (formData.bio && formData.bio.length < 10) {
+      Alert.alert('Error', 'Bio must be at least 10 characters long');
+      return;
+    }
 
     setIsSubmitting(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('Submitting doctor registration:', formData);
       
-      Alert.alert(
-        'Registration Successful!',
-        'Your doctor registration has been submitted successfully. We will review your application and contact you within 3-5 business days.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.back()
-          }
-        ]
-      );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to submit registration. Please try again.');
+      // Add profile image to form data
+      const registrationData = {
+        ...formData,
+        profileImage: profileImage
+      };
+      
+      const response = await doctorService.registerDoctor(registrationData);
+      
+      if (response.success) {
+        Alert.alert(
+          'Registration Successful!',
+          'Your doctor registration has been completed successfully! Your login credentials have been sent to your email address. Please check your inbox and spam folder.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', response.message || 'Registration failed. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('Doctor registration error:', error);
+      Alert.alert('Error', error.message || 'Failed to submit registration. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -221,6 +285,20 @@ export default function DoctorRegistrationScreen() {
               placeholder="Enter phone number"
               keyboardType="phone-pad"
             />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Profile Image</Text>
+            <TouchableOpacity style={styles.imageUploadContainer} onPress={selectProfileImage}>
+              {profileImage ? (
+                <Image source={{ uri: profileImage }} style={styles.profileImage} />
+              ) : (
+                <View style={styles.imagePlaceholder}>
+                  <FontAwesome name="camera" size={24} color="#ccc" />
+                  <Text style={styles.imagePlaceholderText}>Tap to add profile image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -595,5 +673,32 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  imageUploadContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#ddd',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    padding: 20,
+    backgroundColor: '#f8f9fa',
+  },
+  profileImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 2,
+    borderColor: ACCENT,
+  },
+  imagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imagePlaceholderText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
   },
 }); 
