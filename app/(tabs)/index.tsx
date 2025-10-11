@@ -9,6 +9,7 @@ import * as Location from 'expo-location';
 import { facilitiesService, Facility } from '../../services/facilitiesService';
 import { medicinesService, Medicine } from '../../services/medicinesService';
 import { professionalsService, HealthcareProfessional } from '../../services/professionalsService';
+import { API_CONFIG } from '../../constants/API';
 
 type FontAwesomeIconName = keyof typeof FontAwesome.glyphMap;
 
@@ -349,16 +350,27 @@ export default function HomeScreen(props: any) {
 
   // Get facility image URL
   const getFacilityImageUrl = (facility: Facility) => {
+    console.log('🔍 getFacilityImageUrl called for facility:', facility?.name);
+    console.log('📊 Facility images:', facility?.images);
+    
     if (facility?.images && facility.images.length > 0) {
       // Return the first image from the array
       const imagePath = facility.images[0];
+      console.log('🖼️ Image path:', imagePath);
+      
       // Convert relative path to full URL
       if (imagePath.startsWith('/uploads/')) {
-        return `http://172.20.10.3:3000${imagePath}`;
+        // Remove /api from BASE_URL for static file serving
+        const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+        const fullUrl = `${baseUrl}${imagePath}`;
+        console.log('✅ Constructed URL:', fullUrl);
+        return fullUrl;
       }
+      console.log('🌐 External URL:', imagePath);
       return imagePath;
     }
     // Fallback to default pharmacy image
+    console.log('⚠️ No images found, using fallback');
     return 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80';
   };
 
@@ -491,6 +503,8 @@ export default function HomeScreen(props: any) {
                       source={{ uri: getFacilityImageUrl(facility) }}
                       style={styles.nearbyImage}
                       resizeMode="cover"
+                      onLoad={() => console.log('✅ Home page image loaded successfully for:', facility.name)}
+                      onError={(error) => console.error('❌ Home page image load error for:', facility.name, 'Error:', error.nativeEvent.error)}
                     />
                   </View>
                 <View style={styles.nearbyInfo}>

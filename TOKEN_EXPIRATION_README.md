@@ -189,20 +189,39 @@ await checkTokenExpiration();
 3. **Refresh Token Rotation**: New refresh tokens are issued on each refresh
 4. **Secure Communication**: All API calls use HTTPS
 
+## Recent Enhancements
+
+### ✅ **Enhanced Automatic Logout (Latest)**
+- **User Notification**: Users now receive an alert when automatically logged out
+- **Complete Data Cleanup**: All authentication data is properly cleared from storage
+- **Error Handling**: Robust error handling ensures logout even if cleanup fails
+- **Testing Component**: Added `TokenExpirationTest` component for easy testing
+- **Enhanced Test Script**: Comprehensive test script with performance testing
+
+### ✅ **Testing Features**
+- **Manual Test Button**: Test token expiration functionality with a single button
+- **Token Status Check**: Verify current token validity
+- **Confirmation Dialogs**: Safe testing with user confirmation
+- **Console Logging**: Detailed logging for debugging
+
 ## Future Enhancements
 
 1. **Token Blacklisting**: Implement server-side token blacklisting
 2. **Biometric Authentication**: Add biometric re-authentication for sensitive actions
 3. **Offline Support**: Handle token expiration when offline
 4. **Multiple Device Support**: Handle concurrent sessions across devices
+5. **Session Management**: Track and manage multiple active sessions
 
 ## Files Modified
 
 - `services/apiClient.ts` - Added token expiration handling
-- `context/AuthContext.tsx` - Added automatic logout and periodic checks
+- `context/AuthContext.tsx` - Enhanced automatic logout with user notifications
+- `components/TokenExpirationTest.tsx` - New testing component
 - `app/(tabs)/profile.tsx` - Added test button
 - `backend/routes/auth.js` - Refresh token endpoint (already existed)
-- `backend/test-token-expiration.js` - New test file
+- `backend/test-token-expiration.js` - Original test file
+- `backend/test-token-expiration-enhanced.js` - Enhanced test file with comprehensive testing
+- `TOKEN_EXPIRATION_README.md` - Updated documentation
 
 ## API Endpoints
 

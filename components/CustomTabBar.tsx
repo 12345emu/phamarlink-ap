@@ -5,13 +5,13 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useCart } from '../context/CartContext';
 import { useOrders } from '../context/OrdersContext';
+import { useAuth } from '../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 const TAB_HEIGHT = 80;
-const TAB_SPACING = width / 5; // Equal spacing for 5 tabs
 
-// All tabs including Home (removed cart)
-const sideTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label: string; route: string }[] = [
+// Patient tabs
+const patientTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label: string; route: string }[] = [
   { name: 'home', label: 'Home', route: 'index' },
   { name: 'map-marker', label: 'Pharmacies', route: 'pharmacies' },
   { name: 'list', label: 'Orders', route: 'orders' },
@@ -19,12 +19,29 @@ const sideTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label:
   { name: 'user', label: 'Profile', route: 'profile' },
 ];
 
+// Doctor tabs
+const doctorTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label: string; route: string }[] = [
+  { name: 'home', label: 'Home', route: 'index' },
+  { name: 'calendar', label: 'Appointments', route: 'appointments' },
+  { name: 'users', label: 'Patients', route: 'patients' },
+  { name: 'comments', label: 'Chat', route: 'chat' },
+  { name: 'user-md', label: 'Profile', route: 'profile' },
+];
+
 export default function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { cart } = useCart();
   const { orders } = useOrders();
+  const { user } = useAuth();
 
-  // Map sideTabs to their actual index in state.routes
+  // Determine which tabs to show based on user role
+  const isDoctor = user?.role === 'doctor';
+  const currentTabs = isDoctor ? doctorTabs : patientTabs;
+  const TAB_SPACING = width / currentTabs.length; // Dynamic spacing based on number of tabs
+
+  // Map currentTabs to their actual index in state.routes
   const getTabIndex = (routeName: string) => state.routes.findIndex(r => r.name === routeName);
+
+  const styles = createStyles(TAB_SPACING);
 
   return (
     <View style={styles.wrapper}>
@@ -34,7 +51,7 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
           <BlurView intensity={80} tint="light" style={StyleSheet.absoluteFill} />
         </View>
         {/* All Tabs with equal spacing */}
-        {sideTabs.map((tab, idx) => {
+        {currentTabs.map((tab, idx) => {
           const tabIndex = getTabIndex(tab.route);
           const isActive = state.index === tabIndex;
           
@@ -65,8 +82,8 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
                     size={22} 
                     color={isActive ? '#43e97b' : '#8e8e93'} 
                   />
-                  {/* Orders Badge */}
-                  {tab.route === 'orders' && orders.length > 0 && (
+                  {/* Orders Badge - Only for patients */}
+                  {!isDoctor && tab.route === 'orders' && orders.length > 0 && (
                     <View style={styles.ordersBadge}>
                       <Text style={styles.ordersBadgeText}>
                         {orders.length > 99 ? '99+' : orders.length}
@@ -88,7 +105,7 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (tabSpacing: number) => StyleSheet.create({
   wrapper: {
     flexDirection: 'row',
     height: TAB_HEIGHT + 10,
@@ -110,7 +127,7 @@ const styles = StyleSheet.create({
   tab: {
     position: 'absolute',
     top: 8,
-    width: TAB_SPACING,
+    width: tabSpacing,
     height: 64,
     alignItems: 'center',
     justifyContent: 'center',

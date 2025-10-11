@@ -1,4 +1,5 @@
 // Utility functions for handling profile images
+import { API_CONFIG } from '../constants/API';
 
 /**
  * Constructs the full URL for a profile image
@@ -15,8 +16,11 @@ export const constructProfileImageUrl = (imagePath: string | null | undefined): 
     return imagePath;
   }
   
+  // Extract the base URL from API_CONFIG (remove /api suffix)
+  const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+  
   // Construct full URL with the server base URL
-  return `http://172.20.10.3:3000${imagePath}`;
+  return `${baseUrl}${imagePath}`;
 };
 
 /**

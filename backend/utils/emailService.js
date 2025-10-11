@@ -3,12 +3,15 @@ const nodemailer = require('nodemailer');
 
 // Email configuration
 const emailConfig = {
-  host: 'smtp.gmail.com', // You can change this to your preferred email provider
-  port: 465,
-  secure: true, // true for 465, false for other ports
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.EMAIL_PORT) || 587, // Use 587 for TLS, 465 for SSL
+  secure: false, // true for 465, false for other ports (587 uses TLS)
   auth: {
-    user: process.env.EMAIL_USER || 'ericayesu99@gmail.com', // Set this in your .env file
-    pass: process.env.EMAIL_PASS || 'yrit wscg zzpk pesg' // Use app password for Gmail
+    user: process.env.EMAIL_USER || 'ericayesu99@gmail.com',
+    pass: process.env.EMAIL_PASS || 'sklo nuxl aqbg bzhz' // Use app password for Gmail
+  },
+  tls: {
+    rejectUnauthorized: false // Allow self-signed certificates in development
   }
 };
 

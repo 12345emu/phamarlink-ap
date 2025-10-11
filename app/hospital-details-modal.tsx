@@ -7,6 +7,7 @@ import { useAppointments } from '../context/AppointmentsContext';
 import { facilitiesService, Facility } from '../services/facilitiesService';
 import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
 import RateFacilityModal from './rate-facility-modal';
+import { API_CONFIG } from '../constants/API';
 
 const { width } = Dimensions.get('window');
 
@@ -48,7 +49,7 @@ export default function HospitalDetailsScreen() {
           const professionalsResponse = await professionalsService.getProfessionalsByFacility(facilityId, 10);
           if (professionalsResponse.success && professionalsResponse.data) {
             console.log('✅ Hospital professionals fetched:', professionalsResponse.data);
-            setFacilityProfessionals(professionalsResponse.data);
+            setFacilityProfessionals(professionalsResponse.data.professionals);
           } else {
             console.log('❌ Failed to fetch hospital professionals:', professionalsResponse.message);
           }
@@ -178,15 +179,33 @@ export default function HospitalDetailsScreen() {
 
   // Get all facility images
   const getFacilityImages = () => {
+    console.log('🔍 getFacilityImages called');
+    console.log('📊 Facility data:', {
+      hasFacility: !!facility,
+      facilityId: facility?.id,
+      facilityName: facility?.name,
+      hasImages: !!facility?.images,
+      imagesLength: facility?.images?.length,
+      images: facility?.images
+    });
+    
     if (facility?.images && facility.images.length > 0) {
-      return facility.images.map((imagePath, index) => {
+      const processedImages = facility.images.map((imagePath, index) => {
         if (imagePath.startsWith('/uploads/')) {
-          return `http://172.20.10.3:3000${imagePath}`;
+          // Remove /api from BASE_URL for static file serving
+          const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+          const fullUrl = `${baseUrl}${imagePath}`;
+          console.log(`🖼️ Image ${index + 1}: ${imagePath} -> ${fullUrl}`);
+          return fullUrl;
         }
+        console.log(`🖼️ Image ${index + 1}: ${imagePath} (external URL)`);
         return imagePath;
       });
+      console.log('✅ Returning processed images:', processedImages);
+      return processedImages;
     }
     // Fallback to default hospital image
+    console.log('⚠️ No facility images found, using fallback image');
     return ['https://images.unsplash.com/photo-1504439468489-c8920d796a29?auto=format&fit=crop&w=400&q=80'];
   };
 
@@ -300,7 +319,7 @@ export default function HospitalDetailsScreen() {
         pathname: '/(tabs)/chat',
         params: {
           professionalId: professional.id.toString(),
-          professionalName: professional.full_name,
+          professionalName: `${professional.first_name} ${professional.last_name}`,
           professionalRole: professional.specialty.toLowerCase().includes('pharmacist') ? 'pharmacist' : 'doctor',
           facilityName: facility?.name || facilityData.name,
           professionalSpecialty: professional.specialty,
@@ -310,7 +329,7 @@ export default function HospitalDetailsScreen() {
         }
       });
     } else {
-      Alert.alert('Doctor Unavailable', `${professional.full_name} is currently not available for chat.`);
+      Alert.alert('Doctor Unavailable', `${professional.first_name} ${professional.last_name} is currently not available for chat.`);
     }
   };
 
@@ -410,6 +429,8 @@ export default function HospitalDetailsScreen() {
                 source={{ uri: item }}
                 style={styles.facilityImage}
                 resizeMode="cover"
+                onLoad={() => console.log('✅ Image loaded successfully:', item)}
+                onError={(error) => console.error('❌ Image load error:', error.nativeEvent.error, 'URL:', item)}
               />
             )}
             keyExtractor={(item, index) => index.toString()}
@@ -532,9 +553,9 @@ export default function HospitalDetailsScreen() {
                     />
                   </View>
                   <View style={styles.professionalInfo}>
-                    <Text style={styles.professionalName}>{professional.full_name}</Text>
+                    <Text style={styles.professionalName}>{professional.first_name} {professional.last_name}</Text>
                     <Text style={styles.professionalSpecialty}>{professional.specialty}</Text>
-                    <Text style={styles.professionalExperience}>{professional.experience_text}</Text>
+                    <Text style={styles.professionalExperience}>{professional.experience_years} years experience</Text>
                     <View style={styles.professionalRating}>
                       <FontAwesome name="star" size={12} color="#f39c12" />
                       <Text style={styles.ratingText}>

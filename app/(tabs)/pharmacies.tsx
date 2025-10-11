@@ -8,6 +8,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { facilitiesService, Facility } from '../../services/facilitiesService';
 import { useFavorites } from '../../context/FavoritesContext';
+import { API_CONFIG } from '../../constants/API';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -18,16 +19,27 @@ type Pharmacy = Facility;
 
 // Get facility image URL
 const getFacilityImageUrl = (facility: Facility) => {
+  console.log('🔍 Pharmacies page - getFacilityImageUrl called for facility:', facility?.name);
+  console.log('📊 Pharmacies page - Facility images:', facility?.images);
+  
   if (facility?.images && facility.images.length > 0) {
     // Return the first image from the array
     const imagePath = facility.images[0];
+    console.log('🖼️ Pharmacies page - Image path:', imagePath);
+    
     // Convert relative path to full URL
     if (imagePath.startsWith('/uploads/')) {
-      return `http://172.20.10.3:3000${imagePath}`;
+      // Remove /api from BASE_URL for static file serving
+      const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+      const fullUrl = `${baseUrl}${imagePath}`;
+      console.log('✅ Pharmacies page - Constructed URL:', fullUrl);
+      return fullUrl;
     }
+    console.log('🌐 Pharmacies page - External URL:', imagePath);
     return imagePath;
   }
   // Fallback to default pharmacy image
+  console.log('⚠️ Pharmacies page - No images found, using fallback');
   return 'https://images.unsplash.com/photo-1559757148-5c350d0d3c56?auto=format&fit=crop&w=400&q=80';
 };
 
@@ -808,7 +820,7 @@ export default function PharmaciesScreen() {
                 <FontAwesome name="map-marker" size={14} color="#95a5a6" />
                 <Text style={styles.distanceText}>
                   {item.distance !== undefined && item.distance !== null 
-                    ? `${parseFloat(item.distance).toFixed(1)} km` 
+                    ? `${item.distance.toFixed(1)} km` 
                     : 'N/A'}
                 </Text>
               </View>

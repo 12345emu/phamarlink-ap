@@ -10,7 +10,7 @@ const { width, height } = Dimensions.get('window');
 
 export default function LogoPage() {
   const router = useRouter();
-  const { isAuthenticated, firstTimeUser } = useAuth();
+  const { isAuthenticated, firstTimeUser, user } = useAuth();
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -72,9 +72,32 @@ export default function LogoPage() {
         useNativeDriver: true,
       }).start(() => {
         // Check authentication state and navigate accordingly
-        if (isAuthenticated) {
-          console.log('LogoPage - User is authenticated, navigating to tabs');
-          router.replace('/(tabs)');
+        if (isAuthenticated && user) {
+          console.log('LogoPage - User is authenticated, navigating based on role:', user.role);
+          
+          // Role-based navigation
+          switch (user.role) {
+            case 'doctor':
+              console.log('LogoPage - Navigating doctor to doctor tabs');
+              router.replace("/(doctor-tabs)" as any);
+              break;
+            case 'patient':
+              console.log('LogoPage - Navigating patient to patient tabs');
+              router.replace('/(tabs)');
+              break;
+            case 'pharmacist':
+              console.log('LogoPage - Navigating pharmacist to patient tabs (temporary)');
+              router.replace('/(tabs)');
+              break;
+            case 'admin':
+              console.log('LogoPage - Navigating admin to patient tabs (temporary)');
+              router.replace('/(tabs)');
+              break;
+            default:
+              console.log('LogoPage - Unknown role, navigating to patient tabs');
+              router.replace('/(tabs)');
+              break;
+          }
         } else if (firstTimeUser) {
           console.log('LogoPage - User is first time, navigating to welcome');
           router.replace('/welcome');

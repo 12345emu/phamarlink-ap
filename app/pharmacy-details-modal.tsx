@@ -8,6 +8,7 @@ import { facilitiesService, Facility } from '../services/facilitiesService';
 import { professionalsService, HealthcareProfessional } from '../services/professionalsService';
 import { authService } from '../services/authService';
 import RateFacilityModal from './rate-facility-modal';
+import { API_CONFIG } from '../constants/API';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -203,7 +204,9 @@ export default function PharmacyDetailsScreen() {
       const imagePath = facility.images[index];
       // Convert relative path to full URL
       if (imagePath.startsWith('/uploads/')) {
-        return `http://172.20.10.3:3000${imagePath}`;
+        // Remove /api from BASE_URL for static file serving
+        const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+        return `${baseUrl}${imagePath}`;
       }
       return imagePath;
     }
@@ -216,7 +219,9 @@ export default function PharmacyDetailsScreen() {
     if (facility?.images && facility.images.length > 0) {
       return facility.images.map((imagePath, index) => {
         if (imagePath.startsWith('/uploads/')) {
-          return `http://172.20.10.3:3000${imagePath}`;
+          // Remove /api from BASE_URL for static file serving
+          const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+          return `${baseUrl}${imagePath}`;
         }
         return imagePath;
       });

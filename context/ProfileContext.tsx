@@ -25,8 +25,27 @@ interface ProfileProviderProps {
 export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) => {
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
-  // Note: Profile image is now loaded by AuthContext when user logs in
-  // This prevents conflicts between stored profile image and user data from database
+  // Load profile image from AsyncStorage on initialization
+  useEffect(() => {
+    const loadStoredProfileImage = async () => {
+      try {
+        const storedImage = await AsyncStorage.getItem('profileImage');
+        if (storedImage) {
+          console.log('🔍 ProfileContext - Loading stored profile image:', storedImage);
+          setProfileImage(storedImage);
+        } else {
+          console.log('🔍 ProfileContext - No stored profile image found');
+        }
+      } catch (error) {
+        console.error('❌ ProfileContext - Error loading stored profile image:', error);
+      }
+    };
+
+    loadStoredProfileImage();
+  }, []);
+
+  // Note: Profile image is also loaded by AuthContext when user logs in
+  // This provides a fallback and ensures consistency
 
   const updateProfileImage = async (imageUri: string) => {
     try {

@@ -1,7 +1,7 @@
 // API Configuration Constants
 export const API_CONFIG = {
   // Base URL for development (change this for production)
-  BASE_URL: 'http://172.20.10.3:3000/api',
+  BASE_URL: 'http://172.20.10.4:3000/api',
   
   // API Version
   VERSION: 'v1',
@@ -62,13 +62,14 @@ export const API_ENDPOINTS = {
   CHAT: {
     CONVERSATIONS: '/chat/conversations',
     CREATE_CONVERSATION: '/chat/conversations',
+    GET_MESSAGES: (conversationId: string) => `/chat/conversations/${conversationId}/messages`,
     SEND_MESSAGE: (conversationId: string) => `/chat/conversations/${conversationId}/messages`,
     MARK_AS_READ: (conversationId: string) => `/chat/conversations/${conversationId}/read`,
     UNREAD_COUNT: '/chat/unread-count',
   },
   
   // WebSocket
-  WEBSOCKET: 'ws://172.20.10.3:3000/ws/chat',
+  WEBSOCKET: 'ws://172.20.10.4:3000/ws/chat',
   
   // Medicines
   MEDICINES: {

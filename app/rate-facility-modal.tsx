@@ -50,9 +50,10 @@ export default function RateFacilityModal({ visible, onClose, facilityId, facili
       return;
     }
 
-    if (comment.trim().length < 10) {
+    // Comment is optional, but if provided, it should be at least 10 characters
+    if (comment.trim().length > 0 && comment.trim().length < 10) {
       console.log('❌ Comment too short:', comment.trim().length);
-      Alert.alert('Comment Required', 'Please provide a comment with at least 10 characters.');
+      Alert.alert('Comment Too Short', 'If you provide a comment, it should be at least 10 characters long.');
       return;
     }
 

@@ -13,7 +13,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
 
   const handleBackToWelcome = () => {
     router.push('/welcome');
@@ -53,9 +53,19 @@ export default function LoginScreen() {
     
     try {
       console.log('🔍 Frontend - Calling login with:', { email, password });
-      const success = await login(email, password);
-      if (success) {
-        router.push('/(tabs)');
+      const result = await login(email, password);
+      if (result.success && result.user) {
+        console.log('🔍 Login successful, user role:', result.user.role);
+        
+        // Navigate based on user role
+        if (result.user.role === 'doctor') {
+          console.log('🔍 Navigating doctor to doctor tabs');
+          console.log('🔍 About to navigate to: /(doctor-tabs)/');
+          router.replace('/(doctor-tabs)' as any);
+        } else {
+          console.log('🔍 Navigating patient to patient tabs');
+          router.replace('/(tabs)');
+        }
       } else {
         Alert.alert('Error', 'Invalid credentials. Please try again.');
       }

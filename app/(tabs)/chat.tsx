@@ -1,181 +1,198 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, Alert, View, Text, BackHandler, RefreshControl, Image } from 'react-native';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { LinearGradient } from 'expo-linear-gradient';
-import { StatusBar } from 'expo-status-bar';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  RefreshControl,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Dimensions,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FontAwesome } from '@expo/vector-icons';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useChat } from '../../context/ChatContext';
 import { useAuth } from '../../context/AuthContext';
-import { professionalsService, HealthcareProfessional } from '../../services/professionalsService';
-import { API_CONFIG } from '../../constants/API';
+import { ChatMessage, ChatConversation } from '../../services/chatService';
+import { constructProfileImageUrl } from '../../utils/imageUtils';
 
-// Base URL for static files (without /api)
-const STATIC_BASE_URL = API_CONFIG.BASE_URL.replace('/api', '');
-
-const ACCENT = '#3498db';
-const SUCCESS = '#43e97b';
-const BACKGROUND = '#f8f9fa';
-
-interface Message {
-  id: number;
-  text: string;
-  sender: 'user' | 'pharmacist' | 'doctor';
-  timestamp: Date;
-  isRead: boolean;
-}
+const { width } = Dimensions.get('window');
 
 export default function ChatScreen() {
-  const params = useLocalSearchParams();
   const router = useRouter();
+  const navigation = useNavigation();
   const { user } = useAuth();
-  const { 
-    conversations, 
-    currentConversation, 
-    messages, 
-    unreadCount,
-    isLoading, 
+  const insets = useSafeAreaInsets();
+  const {
+    conversations,
+    currentConversation,
+    messages,
+    isLoading,
     error,
-    loadConversations, 
-    loadConversation, 
-    sendMessage,
+    isConnected,
+    loadConversations,
     createConversation,
-    markAsRead
+    sendMessage,
+    markAsRead,
+    setCurrentConversation,
+    clearError,
   } = useChat();
-  
-  const [activeTab, setActiveTab] = useState<'contacts' | 'chat' | 'specialists'>('contacts');
+
+  const [activeTab, setActiveTab] = useState<'conversations' | 'chat'>('conversations');
   const [messageText, setMessageText] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [specialists, setSpecialists] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedSpecialist, setSelectedSpecialist] = useState<any>(null);
+  const [showSpecialists, setShowSpecialists] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Load conversations when component mounts
+  // Load data on mount
   useEffect(() => {
     if (user) {
       loadConversations();
+      loadSpecialists();
     }
   }, [user, loadConversations]);
 
-  // Handle incoming professional parameters and auto-start chat
+  // Hide/show tab bar based on active tab
   useEffect(() => {
-    // Only run if we have professional parameters and haven't already started a chat
-    if (params.professionalId && params.professionalName && !currentConversation) {
-      const facilityId = parseInt(params.professionalId as string);
-      const professionalName = params.professionalName as string;
-      const facilityName = params.facilityName as string || 'Unknown Facility';
-      
-      // Create a new conversation with the professional
-      const handleCreateConversation = async () => {
-        const success = await createConversation(
-          facilityId,
-          `Chat with ${professionalName}`,
-          `Hello! I'd like to chat with ${professionalName} from ${facilityName}.`
-        );
-        
-        if (success) {
-      setActiveTab('chat');
-        } else {
-          Alert.alert('Error', 'Failed to start conversation. Please try again.');
-        }
-      };
-      
-      handleCreateConversation();
+    if (activeTab === 'chat') {
+      // Hide tab bar when in chat
+      navigation.getParent()?.setOptions({
+        tabBarStyle: { display: 'none' }
+      });
+    } else {
+      // Show tab bar when in conversations or specialists
+      navigation.getParent()?.setOptions({
+        tabBarStyle: { display: 'flex' }
+      });
     }
-  }, [params.professionalId, params.professionalName, currentConversation, createConversation]);
+  }, [activeTab, navigation]);
 
-  // Handle back button/gesture
+  // Cleanup effect to show tab bar when component unmounts
   useEffect(() => {
-    const backAction = () => {
-      if (activeTab === 'chat' && currentConversation) {
-        goBackToContacts();
-        return true; // Prevent default back behavior
-      }
-      return false; // Allow default back behavior
+    return () => {
+      navigation.getParent()?.setOptions({
+        tabBarStyle: { display: 'flex' }
+      });
     };
+  }, [navigation]);
 
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages]);
 
-    return () => backHandler.remove();
-  }, [activeTab, currentConversation]);
+  // Mark messages as read when conversation is active
+  useEffect(() => {
+    if (currentConversation && messages.length > 0) {
+      markAsRead(currentConversation.id.toString());
+    }
+  }, [currentConversation, messages, markAsRead]);
 
-  // Function to go back to contacts view
-  const goBackToContacts = () => {
-    setActiveTab('contacts');
-    // Clear the URL parameters by navigating to the chat tab without params
-    router.replace('/(tabs)/chat');
-  };
-
-  // Load specialists data from database
   const loadSpecialists = async () => {
     try {
-      console.log('🔍 Loading specialists from database...');
-      const response = await professionalsService.getProfessionals({
-        is_available: true,
-        limit: 50
+      // Load specialists from the professionals API
+      // Use a high limit to get all verified specialists
+      const response = await fetch('http://172.20.10.4:3000/api/professionals?limit=100&is_available=true', {
+        headers: {
+          'Authorization': `Bearer ${await AsyncStorage.getItem('userToken')}`,
+          'Content-Type': 'application/json',
+        },
       });
       
-      if (response.success && response.data?.professionals) {
-        console.log('✅ Specialists loaded successfully:', response.data.professionals.length);
-        
-        // Transform database professionals to the format expected by the UI
-        const transformedSpecialists = response.data.professionals.map((professional: HealthcareProfessional) => ({
-          id: professional.id,
-          facility_id: professional.facility_id, // Add facility_id for creating conversations
-          name: `${professional.first_name} ${professional.last_name}`,
-          specialty: professional.specialty,
-          facility: professional.facility_name || 'Unknown Facility',
-          facilityType: professional.facility_type || 'clinic',
-          experience: `${professional.experience_years} years`,
-          rating: 4.5, // Default rating since we don't have this in the database yet
-          patients: Math.floor(Math.random() * 2000) + 500, // Random patient count for now
-          avatar: professional.user_type === 'pharmacist' ? 'user' : 'user-md',
-          isOnline: professional.is_available,
-          consultationFee: professional.consultation_fee ? `₵${professional.consultation_fee}` : 'Free',
-          languages: professional.languages || ['English'],
-          education: professional.education || 'Medical Degree',
-          description: professional.bio || `Experienced ${professional.specialty} professional.`,
-          profile_image: professional.profile_image // Add the processed profile image URL
-        }));
-        
-        setSpecialists(transformedSpecialists);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data && data.data.professionals) {
+          console.log('📊 Loaded specialists:', data.data.professionals.length);
+          console.log('👥 Specialists data:', data.data.professionals);
+          setSpecialists(data.data.professionals);
+        } else {
+          console.log('⚠️ No professionals data found in response:', data);
+          setSpecialists([]);
+        }
       } else {
-        console.log('❌ Failed to load specialists:', response.message);
-        // Fallback to empty array if loading fails
+        console.log('❌ Failed to fetch specialists, status:', response.status);
         setSpecialists([]);
       }
     } catch (error) {
-      console.error('❌ Error loading specialists:', error);
-      // Fallback to empty array if loading fails
-      setSpecialists([]);
+      console.error('Error loading specialists:', error);
+      setSpecialists([]); // Ensure specialists is always an array
     }
   };
 
-  // Load specialists data
-  useEffect(() => {
-    loadSpecialists();
-  }, []);
-
-  // Refresh conversations and specialists
   const onRefresh = async () => {
     setRefreshing(true);
     await loadConversations();
-    await loadSpecialists();
     setRefreshing(false);
   };
 
+  const startChatWithSpecialist = async (specialist: any) => {
+    try {
+      console.log('🚀 Starting chat with specialist:', specialist.first_name, specialist.last_name);
+      setSelectedSpecialist(specialist);
+      setActiveTab('chat');
+      console.log('📱 Chat state set - selectedSpecialist:', specialist.id, 'activeTab: chat');
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      Alert.alert('Error', 'Failed to start chat. Please try again.');
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (messageText.trim() && currentConversation) {
-      const success = await sendMessage(currentConversation.id.toString(), messageText.trim());
+    if (!messageText.trim()) return;
+
+    const messageToSend = messageText.trim();
+    setMessageText('');
+
+    if (currentConversation) {
+      // Send message to existing conversation
+      const success = await sendMessage(currentConversation.id.toString(), messageToSend);
+      if (!success) {
+        Alert.alert('Error', 'Failed to send message. Please try again.');
+        setMessageText(messageToSend); // Restore message
+      }
+    } else if (selectedSpecialist) {
+      // Create new conversation and send first message
+      const specialistName = `${selectedSpecialist.first_name} ${selectedSpecialist.last_name}`;
+      const success = await createConversation(
+        selectedSpecialist.id,
+        `Chat with ${specialistName}`,
+        messageToSend
+      );
+      
       if (success) {
-        setMessageText('');
+        // Find and set the new conversation
+        const newConversation = conversations.find(conv => 
+          conv.professional_id === selectedSpecialist.id
+        );
+        if (newConversation) {
+          setCurrentConversation(newConversation);
+        }
+        setSelectedSpecialist(null);
+      } else {
+        Alert.alert('Error', 'Failed to start conversation. Please try again.');
+        setMessageText(messageToSend); // Restore message
       }
     }
   };
 
-  // Handle typing indicator (simplified - no WebSocket typing for now)
-  const handleTyping = (isTyping: boolean) => {
-    // Typing indicator functionality removed for simplicity
+  const goBackToConversations = () => {
+    setActiveTab('conversations');
+    setCurrentConversation(null);
+    setSelectedSpecialist(null);
   };
 
   const formatTime = (dateString: string) => {
@@ -183,534 +200,380 @@ export default function ChatScreen() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const startChat = async (conversation: any) => {
-    await loadConversation(conversation.id.toString());
-    setActiveTab('chat');
-    // Clear any URL parameters when starting a chat from contacts
-    if (params.professionalId) {
-      router.replace('/(tabs)/chat');
-    }
-  };
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
-  const handleEmergencyCall = () => {
-    Alert.alert(
-      'Emergency Call',
-      'Would you like to make an emergency call?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Call', onPress: () => Alert.alert('Calling emergency services...') }
-      ]
-    );
-  };
-
-  // Filter specialists based on search and category
-  const filteredSpecialists = specialists.filter(specialist => {
-    const fullName = `${specialist.first_name} ${specialist.last_name}`;
-    const matchesSearch = searchQuery === '' || 
-      fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      specialist.specialty.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (specialist.facility_name || '').toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesCategory = selectedCategory === 'all' || 
-      specialist.facility_type === selectedCategory ||
-      (selectedCategory === 'doctor' && specialist.specialty.toLowerCase().includes('doctor')) ||
-      (selectedCategory === 'pharmacist' && specialist.specialty.toLowerCase().includes('pharmacist'));
-    
-    return matchesSearch && matchesCategory;
-  });
-
-  // Start chat with specialist
-  const startChatWithSpecialist = async (specialist: any) => {
-    console.log('🔍 Starting chat with specialist:', specialist);
-    console.log('🔍 Specialist properties:', Object.keys(specialist));
-    console.log('🔍 Using facility_id:', specialist.facility_id);
-    
-    // Handle freelancers (professionals without facility_id)
-    let facilityId = specialist.facility_id;
-    
-    if (!facilityId || facilityId < 1) {
-      console.log('🔍 Professional is a freelancer (no facility_id), using professional ID as facility ID');
-      // For freelancers, we'll use the professional's ID as a pseudo facility ID
-      // This allows the chat system to work with freelancers
-      facilityId = specialist.id;
-    }
-    
-    // First, check if there's already an active conversation with this professional
-    const existingConversation = conversations.find(conv => 
-      conv.facility_id === facilityId && conv.status === 'active'
-    );
-    
-    if (existingConversation) {
-      console.log('🔍 Found existing conversation, opening it:', existingConversation.id);
-      // Open the existing conversation
-      await loadConversation(existingConversation.id.toString());
-      setActiveTab('chat');
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
     } else {
-      console.log('🔍 No existing conversation found, creating new one');
-      // Create a new conversation
-      const specialistName = `${specialist.first_name} ${specialist.last_name}`;
-      const success = await createConversation(
-        facilityId,
-        `Chat with ${specialistName}`,
-        `Hello! I'd like to chat with ${specialistName} about ${specialist.specialty}.`
-      );
-      
-      if (success) {
-        setActiveTab('chat');
-      } else {
-        Alert.alert('Error', 'Failed to start conversation. Please try again.');
-      }
+      return date.toLocaleDateString();
     }
   };
 
-  const renderContactsTab = () => (
-    <ScrollView 
-      style={styles.contactsList} 
-      contentContainerStyle={{ paddingBottom: 120 }}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      <View style={styles.searchSection}>
-        <View style={styles.searchContainer}>
-          <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search conversations..."
-            placeholderTextColor="#95a5a6"
-          />
-        </View>
-      </View>
-      
-      {isLoading && conversations.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading conversations...</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadConversations}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : conversations.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <FontAwesome name="comments" size={48} color="#bdc3c7" />
-          <Text style={styles.emptyText}>No conversations yet</Text>
-          <Text style={styles.emptySubtext}>Start a conversation with a healthcare professional</Text>
-        <TouchableOpacity
-            style={styles.findSpecialistsButton}
-            onPress={() => setActiveTab('specialists')}
-            activeOpacity={0.8}
-          >
-            <FontAwesome name="search" size={16} color="white" />
-            <Text style={styles.findSpecialistsText}>Find Specialists</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        conversations.map(conversation => (
-          <TouchableOpacity
-            key={conversation.id}
-          style={styles.contactCard}
-            onPress={() => startChat(conversation)}
-          activeOpacity={0.7}
+  const renderSpecialistsList = () => (
+    <View style={styles.fullScreenSpecialistsContainer}>
+      {/* Header */}
+      <View style={styles.specialistsFullHeader}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => setShowSpecialists(false)}
         >
-          <View style={styles.contactAvatar}>
-            {conversation.professional_profile_image && conversation.professional_profile_image !== 'null' && conversation.professional_profile_image !== '' && 
-             (conversation.professional_profile_image.startsWith('/') || conversation.professional_profile_image.startsWith('http')) ? (
-              <Image 
-                source={{ uri: conversation.professional_profile_image.startsWith('http') ? conversation.professional_profile_image : `${STATIC_BASE_URL}${conversation.professional_profile_image}` }}
-                style={styles.avatarImage}
-                defaultSource={require('../../assets/images/icon.png')}
-                onError={() => console.log('Failed to load professional profile image')}
-              />
-            ) : (
-              <FontAwesome 
-                name="user-md" 
-                size={24} 
-                color={ACCENT} 
-              />
-            )}
-          </View>
-          <View style={styles.contactInfo}>
-            <View style={styles.contactHeader}>
-                <Text style={styles.contactName}>
-                  {conversation.facility_name || `${conversation.professional_first_name} ${conversation.professional_last_name}`}
-                </Text>
-                <Text style={styles.lastMessageTime}>
-                  {conversation.last_message_time ? formatTime(conversation.last_message_time) : 'Now'}
-                </Text>
-            </View>
-            <Text style={styles.contactRole}>
-                {conversation.facility_type === 'freelancer' ? 'Freelancer' : conversation.facility_type} • {conversation.subject}
-            </Text>
-            <Text style={styles.lastMessage} numberOfLines={1}>
-                {conversation.last_message || 'No messages yet'}
-            </Text>
-          </View>
-            {conversation.unread_count > 0 && (
-            <View style={styles.unreadBadge}>
-                <Text style={styles.unreadCount}>{conversation.unread_count}</Text>
-            </View>
-          )}
-          </TouchableOpacity>
-        ))
-      )}
-    </ScrollView>
-  );
-
-  const renderSpecialistsTab = () => (
-    <ScrollView 
-      style={styles.specialistsList} 
-      contentContainerStyle={{ paddingBottom: 120 }}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Search Bar */}
-      <View style={styles.searchSection}>
-        <View style={styles.searchContainer}>
-          <FontAwesome name="search" size={18} color="#95a5a6" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search specialists..."
-            placeholderTextColor="#95a5a6"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-      </View>
-
-      {/* Category Filters */}
-      <View style={styles.categoryContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
-          {['all', 'doctor', 'pharmacist', 'hospital', 'clinic', 'pharmacy'].map(category => (
-            <TouchableOpacity
-              key={category}
-              style={[
-                styles.categoryButton,
-                selectedCategory === category && styles.activeCategoryButton
-              ]}
-              onPress={() => setSelectedCategory(category)}
-            >
-              <Text style={[
-                styles.categoryButtonText,
-                selectedCategory === category && styles.activeCategoryButtonText
-              ]}>
-                {category.charAt(0).toUpperCase() + category.slice(1)}
-              </Text>
+          <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
         </TouchableOpacity>
-      ))}
-        </ScrollView>
+        <Text style={styles.specialistsFullTitle}>Start a new chat</Text>
+        <View style={styles.placeholder} />
       </View>
 
       {/* Specialists List */}
-      {filteredSpecialists.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <FontAwesome name="user-md" size={48} color="#bdc3c7" />
-          <Text style={styles.emptyText}>No specialists found</Text>
-          <Text style={styles.emptySubtext}>Try adjusting your search or category filter</Text>
-        </View>
-      ) : (
-        filteredSpecialists.map(specialist => (
-          <TouchableOpacity
-            key={specialist.id}
-            style={styles.specialistCard}
-            onPress={() => startChatWithSpecialist(specialist)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.specialistHeader}>
-              <View style={styles.specialistAvatar}>
-                {specialist.profile_image && specialist.profile_image !== 'null' && (specialist.profile_image.startsWith('http') || specialist.profile_image.startsWith('/')) ? (
-                  <Image 
-                    source={{ uri: specialist.profile_image.startsWith('http') ? specialist.profile_image : `${STATIC_BASE_URL}${specialist.profile_image}` }}
-                    style={styles.avatarImage}
-                    defaultSource={require('../../assets/images/icon.png')}
-                    onError={() => console.log('Failed to load specialist profile image')}
-                  />
-                ) : (
-                  <FontAwesome 
-                    name={specialist.specialty.toLowerCase().includes('doctor') ? 'user-md' : 'user'} 
-                    size={24} 
-                    color={specialist.specialty.toLowerCase().includes('doctor') ? '#e74c3c' : ACCENT} 
-                  />
-                )}
-                {specialist.is_available && (
-                  <View style={styles.onlineIndicator} />
-                )}
-              </View>
-              <View style={styles.specialistInfo}>
-                <Text style={styles.specialistName}>{specialist.first_name} {specialist.last_name}</Text>
-                <Text style={styles.specialistSpecialty}>{specialist.specialty}</Text>
-                <Text style={styles.specialistFacility}>{specialist.facility_name || 'Independent Practice'}</Text>
-              </View>
-              <View style={styles.specialistActions}>
-                <View style={styles.ratingContainer}>
-                  <FontAwesome name="star" size={12} color="#f39c12" />
-                  <Text style={styles.ratingText}>{specialist.rating || '4.5'}</Text>
-                </View>
-                <Text style={styles.consultationFee}>${specialist.consultation_fee || '50'}</Text>
-              </View>
-            </View>
-            
-            <View style={styles.specialistDetails}>
-              <View style={styles.detailRow}>
-                <FontAwesome name="clock-o" size={12} color="#7f8c8d" />
-                <Text style={styles.detailText}>{specialist.experience_years || 5} years experience</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <FontAwesome name="users" size={12} color="#7f8c8d" />
-                <Text style={styles.detailText}>{specialist.total_reviews || 0} reviews</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <FontAwesome name="graduation-cap" size={12} color="#7f8c8d" />
-                <Text style={styles.detailText}>{specialist.education || 'Medical Degree'}</Text>
-              </View>
-            </View>
-
-            <Text style={styles.specialistDescription} numberOfLines={2}>
-              {specialist.bio || `Experienced ${specialist.specialty} professional.`}
-            </Text>
-
-            <View style={styles.specialistFooter}>
-              <View style={styles.languagesContainer}>
-                {(specialist.languages || ['English']).map((language: string, index: number) => (
-                  <View key={index} style={styles.languageTag}>
-                    <Text style={styles.languageText}>{language}</Text>
-                  </View>
-                ))}
-              </View>
-              <TouchableOpacity
-                style={styles.chatButton}
-                onPress={() => startChatWithSpecialist(specialist)}
-              >
-                <FontAwesome name="comment" size={14} color="white" />
-                <Text style={styles.chatButtonText}>Chat</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        ))
-      )}
-    </ScrollView>
-  );
-
-  const renderChatTab = () => (
-    <View 
-      style={styles.chatContainer}
-      onTouchStart={(e) => {
-        // Store initial touch position for swipe detection
-        const touch = e.nativeEvent.touches[0];
-        if (touch) {
-          (renderChatTab as any).startX = touch.pageX;
-        }
-      }}
-      onTouchEnd={(e) => {
-        // Detect swipe gesture
-        const touch = e.nativeEvent.changedTouches[0];
-        if (touch && (renderChatTab as any).startX) {
-          const deltaX = touch.pageX - (renderChatTab as any).startX;
-          const deltaY = Math.abs(touch.pageY - (e.nativeEvent.touches[0]?.pageY || 0));
-          
-          // If it's a right swipe (deltaX > 50) and not too vertical (deltaY < 100)
-          if (deltaX > 50 && deltaY < 100) {
-            goBackToContacts();
-          }
-        }
-        (renderChatTab as any).startX = null;
-      }}
-    >
-      <View style={styles.chatHeader}>
-        <TouchableOpacity onPress={goBackToContacts} style={styles.backButton}>
-          <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
-        </TouchableOpacity>
-        <View style={styles.chatContactInfo}>
-          <View style={styles.chatAvatar}>
-            <FontAwesome 
-              name="user-md" 
-              size={20} 
-              color={ACCENT} 
-            />
-            <View style={styles.onlineIndicator} />
-          </View>
-          <View>
-            <Text style={styles.chatContactName}>{currentConversation?.facility_name}</Text>
-            <Text style={styles.chatContactStatus}>
-              🟢 Online • {currentConversation?.facility_type} • {currentConversation?.subject}
-            </Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.moreButton}>
-          <FontAwesome name="ellipsis-v" size={20} color="#2c3e50" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView 
-        ref={scrollViewRef}
-        style={styles.messagesContainer}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-        showsVerticalScrollIndicator={false}
-      >
-        {isLoading && messages.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Loading messages...</Text>
-          </View>
-        ) : error ? (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => currentConversation && loadConversation(currentConversation.id.toString())}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : messages.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <FontAwesome name="comment" size={48} color="#bdc3c7" />
-            <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>Start the conversation by sending a message</Text>
+      <ScrollView style={styles.fullScreenSpecialistsList}>
+        {!Array.isArray(specialists) || specialists.length === 0 ? (
+          <View style={styles.emptySpecialistsFull}>
+            <FontAwesome name="user-md" size={48} color="#bdc3c7" />
+            <Text style={styles.emptySpecialistsFullText}>No specialists available</Text>
+            <Text style={styles.emptySpecialistsFullSubtext}>Check back later for available healthcare professionals</Text>
           </View>
         ) : (
-          messages.map(message => {
-            const isUser = message.sender_id === parseInt(user?.id?.toString() || '0');
-            return (
-          <View
-            key={message.id}
-            style={[
-              styles.messageContainer,
-                  isUser ? styles.userMessage : styles.otherMessage
-            ]}
-          >
-            {!isUser && (
-              <View style={styles.messageAvatar}>
-                {message.user_profile_image && message.user_profile_image !== 'null' && message.user_profile_image.startsWith('/') ? (
-                  <Image 
-                    source={{ uri: `${STATIC_BASE_URL}${message.user_profile_image}` }}
-                    style={styles.messageAvatarImage}
-                    defaultSource={require('../../assets/images/icon.png')}
-                    onError={() => console.log('Failed to load message user profile image')}
+          specialists.map((specialist) => (
+            <TouchableOpacity
+              key={specialist.id}
+              style={styles.specialistItemFull}
+              onPress={() => {
+                startChatWithSpecialist(specialist);
+                setShowSpecialists(false);
+              }}
+            >
+              <View style={styles.specialistAvatarFull}>
+                {specialist.profile_image ? (
+                  <Image
+                    source={{ uri: constructProfileImageUrl(specialist.profile_image) || '' }}
+                    style={styles.avatarImageFull}
+                    onLoad={() => console.log('✅ Specialist image loaded:', specialist.first_name, specialist.profile_image)}
+                    onError={(error) => console.error('❌ Specialist image error:', error.nativeEvent.error, 'URL:', constructProfileImageUrl(specialist.profile_image))}
                   />
                 ) : (
-                  <FontAwesome 
-                    name="user-md" 
-                    size={16} 
-                    color={ACCENT} 
+                  <FontAwesome
+                    name="user-md"
+                    size={32}
+                    color="#3498db"
                   />
                 )}
               </View>
-            )}
-            <View style={[
-              styles.messageBubble,
-                  isUser ? styles.userBubble : styles.otherBubble
-            ]}>
-              <Text style={[
-                styles.messageText,
-                    isUser ? styles.userMessageText : styles.otherMessageText
-              ]}>
-                    {message.message}
-              </Text>
-              <Text style={[
-                styles.messageTime,
-                    isUser ? styles.userMessageTime : styles.otherMessageTime
-              ]}>
-                    {formatTime(message.created_at)}
-              </Text>
-            </View>
-            {isUser && (
-              <View style={styles.messageAvatar}>
-                {user?.profileImage && user.profileImage !== 'null' && user.profileImage.startsWith('/') ? (
-                  <Image 
-                    source={{ uri: `${STATIC_BASE_URL}${user.profileImage}` }}
-                    style={styles.messageAvatarImage}
-                    defaultSource={require('../../assets/images/icon.png')}
-                    onError={() => console.log('Failed to load user profile image')}
-                  />
-                ) : (
-                  <FontAwesome 
-                    name="user" 
-                    size={16} 
-                    color="#95a5a6" 
-                  />
+              
+              <View style={styles.specialistInfoFull}>
+                <Text style={styles.specialistNameFull}>
+                  {specialist.first_name} {specialist.last_name}
+                </Text>
+                <Text style={styles.specialistSpecialtyFull}>
+                  {specialist.specialty}
+                </Text>
+                {specialist.qualification && (
+                  <Text style={styles.specialistQualification}>
+                    {specialist.qualification}
+                  </Text>
+                )}
+                {specialist.experience_years && (
+                  <Text style={styles.specialistExperience}>
+                    {specialist.experience_years} years experience
+                  </Text>
+                )}
+                {specialist.facility_name && (
+                  <Text style={styles.specialistFacilityFull}>
+                    📍 {specialist.facility_name}
+                  </Text>
+                )}
+                {specialist.bio && (
+                  <Text style={styles.specialistBio} numberOfLines={2}>
+                    {specialist.bio}
+                  </Text>
                 )}
               </View>
-            )}
-          </View>
-            );
-          })
+              
+              <View style={styles.specialistActions}>
+                <TouchableOpacity style={styles.chatButtonFull}>
+                  <FontAwesome name="comment" size={16} color="white" />
+                  <Text style={styles.chatButtonText}>Chat</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          ))
         )}
       </ScrollView>
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.inputContainer}
-        keyboardVerticalOffset={150}
-      >
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.messageInput}
-            placeholder="Type a message..."
-            placeholderTextColor="#95a5a6"
-            value={messageText}
-            onChangeText={setMessageText}
-            onFocus={() => handleTyping(true)}
-            onBlur={() => handleTyping(false)}
-            multiline
-            maxLength={500}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, !messageText.trim() && styles.sendButtonDisabled]}
-            onPress={handleSendMessage}
-            disabled={!messageText.trim()}
-            activeOpacity={0.8}
-          >
-            <FontAwesome name="send" size={16} color="#2c3e50" />
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
     </View>
   );
 
-  return (
+  const renderConversationsTab = () => (
     <View style={styles.container}>
-      <StatusBar style="dark" />
-      
-      {/* Header with Navigation */}
-      {activeTab !== 'chat' && (
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>Chat</Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Chats</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.headerButton}>
+            <FontAwesome name="search" size={20} color="#2c3e50" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.headerButton}
+            onPress={() => {
+              setShowSpecialists(!showSpecialists);
+              if (!showSpecialists) {
+                loadSpecialists();
+              }
+            }}
+          >
+            <FontAwesome name="plus" size={20} color="#2c3e50" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Connection Status */}
+      <View style={[styles.statusBar, { backgroundColor: isConnected ? '#2ecc71' : '#e74c3c' }]}>
+        <FontAwesome name={isConnected ? 'wifi' : 'wifi'} size={12} color="white" />
+        <Text style={styles.statusText}>
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </Text>
+      </View>
+
+      {/* Conversations List */}
+      <ScrollView
+        style={styles.conversationsList}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {isLoading && conversations.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading conversations...</Text>
+          </View>
+        ) : conversations.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <FontAwesome name="comments" size={48} color="#bdc3c7" />
+            <Text style={styles.emptyText}>No conversations yet</Text>
+            <Text style={styles.emptySubtext}>Start a chat with a healthcare professional</Text>
+          </View>
+        ) : (
+          conversations.map((conversation) => (
             <TouchableOpacity
-              style={styles.findSpecialistsButton}
-              onPress={() => setActiveTab('specialists')}
-              activeOpacity={0.8}
+              key={conversation.id}
+              style={styles.conversationItem}
+              onPress={() => {
+                setCurrentConversation(conversation);
+                setActiveTab('chat');
+              }}
             >
-              <FontAwesome name="search" size={16} color="white" />
-              <Text style={styles.findSpecialistsText}>Find Specialists</Text>
+              <View style={styles.conversationAvatar}>
+                {conversation.professional_profile_image ? (
+                  <Image
+                    source={{ uri: constructProfileImageUrl(conversation.professional_profile_image) || '' }}
+                    style={styles.avatarImage}
+                    onLoad={() => console.log('✅ Conversation image loaded:', conversation.professional_first_name)}
+                    onError={(error) => console.error('❌ Conversation image error:', error.nativeEvent.error)}
+                  />
+                ) : (
+                  <FontAwesome
+                    name="user-md"
+                    size={24}
+                    color="#3498db"
+                  />
+                )}
+                {conversation.unread_count && conversation.unread_count > 0 && (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadText}>{conversation.unread_count}</Text>
+                  </View>
+                )}
+              </View>
+              
+              <View style={styles.conversationContent}>
+                <View style={styles.conversationHeader}>
+                  <Text style={styles.conversationName}>
+                    {conversation.professional_first_name} {conversation.professional_last_name}
+                  </Text>
+                  <Text style={styles.conversationTime}>
+                    {conversation.last_message_time ? formatTime(conversation.last_message_time) : ''}
+                  </Text>
+                </View>
+                
+                <View style={styles.conversationFooter}>
+                  <Text style={styles.conversationLastMessage} numberOfLines={1}>
+                    {conversation.last_message || 'No messages yet'}
+                  </Text>
+                  {conversation.unread_count && conversation.unread_count > 0 && (
+                    <View style={styles.unreadDot} />
+                  )}
+                </View>
+              </View>
             </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+
+  const renderChatTab = () => {
+    const displayName = currentConversation?.professional_first_name && currentConversation?.professional_last_name
+      ? `${currentConversation.professional_first_name} ${currentConversation.professional_last_name}`
+      : selectedSpecialist
+      ? `${selectedSpecialist.first_name} ${selectedSpecialist.last_name}`
+      : 'Unknown';
+
+    return (
+      <View style={styles.chatContainer}>
+        {/* Chat Header */}
+        <View style={styles.chatHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={goBackToConversations}
+          >
+            <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
+          </TouchableOpacity>
+          
+          <View style={styles.chatHeaderInfo}>
+            <View style={styles.chatAvatar}>
+              {currentConversation?.professional_profile_image ? (
+                <Image
+                  source={{ uri: constructProfileImageUrl(currentConversation.professional_profile_image) || '' }}
+                  style={styles.avatarImage}
+                  onLoad={() => console.log('✅ Chat header image loaded:', currentConversation.professional_first_name)}
+                  onError={(error) => console.error('❌ Chat header image error:', error.nativeEvent.error)}
+                />
+              ) : selectedSpecialist?.profile_image ? (
+                <Image
+                  source={{ uri: constructProfileImageUrl(selectedSpecialist.profile_image) || '' }}
+                  style={styles.avatarImage}
+                  onLoad={() => console.log('✅ Selected specialist image loaded:', selectedSpecialist.first_name)}
+                  onError={(error) => console.error('❌ Selected specialist image error:', error.nativeEvent.error)}
+                />
+              ) : (
+                <FontAwesome name="user-md" size={20} color="#3498db" />
+              )}
+            </View>
+            <View>
+              <Text style={styles.chatContactName}>{displayName}</Text>
+              <Text style={styles.chatContactStatus}>
+                {isConnected ? '🟢 Online' : '🔴 Offline'}
+              </Text>
+            </View>
           </View>
           
-          {/* Tab Navigation */}
-          <View style={styles.tabContainer}>
+          <TouchableOpacity style={styles.moreButton}>
+            <FontAwesome name="ellipsis-v" size={20} color="#2c3e50" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Messages */}
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.messagesContainer}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {isLoading && messages.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading messages...</Text>
+            </View>
+          ) : messages.length === 0 ? (
+            <View style={styles.emptyMessagesContainer}>
+              <Text style={styles.emptyMessagesText}>No messages yet</Text>
+              <Text style={styles.emptyMessagesSubtext}>Start the conversation!</Text>
+            </View>
+          ) : (
+            messages.map((message, index) => {
+              const isMe = message.sender_id === parseInt(user?.id?.toString() || '0');
+              const showAvatar = index === 0 || messages[index - 1].sender_id !== message.sender_id;
+              
+              return (
+                <View
+                  key={message.id}
+                  style={[
+                    styles.messageContainer,
+                    isMe ? styles.messageContainerMe : styles.messageContainerOther
+                  ]}
+                >
+                  {!isMe && showAvatar && (
+                    <View style={styles.messageAvatar}>
+                      {currentConversation?.professional_profile_image ? (
+                        <Image
+                          source={{ uri: constructProfileImageUrl(currentConversation.professional_profile_image) || '' }}
+                          style={styles.messageAvatarImage}
+                          onLoad={() => console.log('✅ Message avatar image loaded')}
+                          onError={(error) => console.error('❌ Message avatar image error:', error.nativeEvent.error)}
+                        />
+                      ) : (
+                        <FontAwesome name="user-md" size={16} color="#3498db" />
+                      )}
+                    </View>
+                  )}
+                  
+                  <View
+                    style={[
+                      styles.messageBubble,
+                      isMe ? styles.messageBubbleMe : styles.messageBubbleOther
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.messageText,
+                        isMe ? styles.messageTextMe : styles.messageTextOther
+                      ]}
+                    >
+                      {message.message}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.messageTime,
+                        isMe ? styles.messageTimeMe : styles.messageTimeOther
+                      ]}
+                    >
+                      {formatTime(message.created_at)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+
+        {/* Message Input */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.bottom : 0}
+          style={[styles.professionalInputContainer, { paddingBottom: insets.bottom + 10 }]}
+        >
+          <View style={styles.professionalInputWrapper}>
+            <TextInput
+              style={styles.professionalMessageInput}
+              placeholder="Type a message..."
+              placeholderTextColor="#95a5a6"
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+              maxLength={500}
+            />
             <TouchableOpacity
-              style={[styles.tab, activeTab === 'contacts' && styles.activeTab]}
-              onPress={() => setActiveTab('contacts')}
+              style={[styles.professionalSendButton, !messageText.trim() && styles.sendButtonDisabled]}
+              onPress={handleSendMessage}
+              disabled={!messageText.trim()}
             >
-              <Text style={[styles.tabText, activeTab === 'contacts' && styles.activeTabText]}>
-                Conversations
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'specialists' && styles.activeTab]}
-              onPress={() => setActiveTab('specialists')}
-            >
-              <Text style={[styles.tabText, activeTab === 'specialists' && styles.activeTabText]}>
-                Find Specialists
-              </Text>
+              <FontAwesome name="send" size={16} color="white" />
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      {showSpecialists ? (
+        renderSpecialistsList()
+      ) : activeTab === 'conversations' ? (
+        renderConversationsTab()
+      ) : (
+        renderChatTab()
       )}
-      
-      {activeTab === 'contacts' && renderContactsTab()}
-      {activeTab === 'specialists' && renderSpecialistsTab()}
-      {activeTab === 'chat' && currentConversation && renderChatTab()}
     </View>
   );
 }
@@ -718,343 +581,319 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BACKGROUND,
+    backgroundColor: '#f8f9fa',
   },
+  
+  // Header styles
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
+    paddingVertical: 15,
+    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderBottomColor: '#e9ecef',
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#2c3e50',
   },
-  emergencyButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(231, 76, 60, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  headerActions: {
+    flexDirection: 'row',
+    gap: 15,
   },
-  contactsList: {
-    flex: 1,
+  headerButton: {
+    padding: 8,
   },
-  searchSection: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-  },
-  searchContainer: {
+  
+  // Status bar
+  statusBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ecf0f1',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-  },
-  searchIcon: {
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#34495e',
-  },
-  contactCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    marginHorizontal: 20,
-    marginBottom: 12,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  contactAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-    position: 'relative',
-    borderWidth: 2,
-    borderColor: 'rgba(52, 152, 219, 0.1)',
+    paddingVertical: 8,
+    gap: 8,
   },
-  avatarImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-  },
-  onlineIndicator: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: SUCCESS,
-    borderWidth: 2,
-    borderColor: 'white',
-  },
-  contactInfo: {
-    flex: 1,
-  },
-  contactHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 5,
-  },
-  contactName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 2,
-  },
-  lastMessageTime: {
-    fontSize: 12,
-    color: '#95a5a6',
-    fontWeight: '500',
-  },
-  contactRole: {
-    fontSize: 13,
-    color: ACCENT,
-    marginBottom: 6,
-    fontWeight: '500',
-  },
-  lastMessage: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    lineHeight: 20,
-  },
-  unreadBadge: {
-    backgroundColor: '#e74c3c',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#e74c3c',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  unreadCount: {
+  statusText: {
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
   },
+  
+  // Conversations list
+  conversationsList: {
+    flex: 1,
+    paddingBottom: 20, // Add padding to prevent overlap with tab bar
+  },
+  conversationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f4',
+  },
+  conversationAvatar: {
+    position: 'relative',
+    marginRight: 15,
+  },
+  avatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#e74c3c',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  unreadText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  conversationContent: {
+    flex: 1,
+  },
+  conversationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  conversationName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  conversationTime: {
+    fontSize: 12,
+    color: '#7f8c8d',
+  },
+  conversationFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  conversationLastMessage: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    flex: 1,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#e74c3c',
+    marginLeft: 8,
+  },
+  
+  // Chat styles
   chatContainer: {
     flex: 1,
+    backgroundColor: '#f8f9fa',
   },
   chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
+    paddingVertical: 15,
+    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderBottomColor: '#e9ecef',
   },
   backButton: {
     marginRight: 15,
+    padding: 8,
   },
-  chatContactInfo: {
-    flex: 1,
+  chatHeaderInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
   chatAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
-    position: 'relative',
-    borderWidth: 2,
-    borderColor: 'rgba(52, 152, 219, 0.1)',
-  },
-  chatOnlineIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: SUCCESS,
-    borderWidth: 2,
-    borderColor: SUCCESS,
   },
   chatContactName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
-    marginBottom: 2,
   },
   chatContactStatus: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#7f8c8d',
-    fontWeight: '500',
   },
   moreButton: {
-    marginLeft: 15,
+    padding: 8,
   },
+  
+  // Messages
   messagesContainer: {
     flex: 1,
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingBottom: 120, // Add padding to account for absolutely positioned input
   },
   messageContainer: {
-    marginBottom: 10,
     flexDirection: 'row',
+    marginVertical: 4,
     alignItems: 'flex-end',
   },
-  userMessage: {
+  messageContainerMe: {
     justifyContent: 'flex-end',
   },
-  otherMessage: {
+  messageContainerOther: {
     justifyContent: 'flex-start',
   },
   messageAvatar: {
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  messageAvatarImage: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.05)',
-  },
-  messageAvatarImage: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
   },
   messageBubble: {
-    maxWidth: '80%',
+    maxWidth: width * 0.7,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 20,
   },
-  userBubble: {
-    backgroundColor: ACCENT,
-    borderBottomRightRadius: 6,
-    shadowColor: ACCENT,
+  messageBubbleMe: {
+    backgroundColor: '#007bff',
+    borderBottomRightRadius: 4,
+  },
+  messageBubbleOther: {
+    backgroundColor: 'white',
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  messageTextMe: {
+    color: 'white',
+  },
+  messageTextOther: {
+    color: '#2c3e50',
+  },
+  messageTime: {
+    fontSize: 11,
+    marginTop: 4,
+  },
+  messageTimeMe: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'right',
+  },
+  messageTimeOther: {
+    color: '#7f8c8d',
+  },
+  
+  // Input
+  inputContainer: {
+    backgroundColor: '#f0f8ff',
+    borderTopWidth: 3,
+    borderTopColor: '#e74c3c',
+    paddingBottom: 20,
+    paddingTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  professionalInputContainer: {
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#e1e8ed',
+  },
+  professionalInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  professionalMessageInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e1e8ed',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    maxHeight: 100,
+    backgroundColor: '#f7f9fa',
+    minHeight: 40,
+  },
+  professionalSendButton: {
+    backgroundColor: '#007bff',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#007bff',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
-  otherBubble: {
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.05)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  messageText: {
-    fontSize: 15,
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  userMessageText: {
-    color: 'white',
-    fontWeight: '500',
-  },
-  otherMessageText: {
-    color: '#2c3e50',
-    fontWeight: '500',
-  },
-  messageTime: {
-    fontSize: 11,
-  },
-  userMessageTime: {
-    color: 'white',
-    opacity: 0.8,
-  },
-  otherMessageTime: {
-    color: '#666',
-  },
-  inputContainer: {
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0, 0, 0, 0.05)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    paddingBottom: 120, // Reduced padding since keyboard will handle spacing
-    marginBottom: 80, // Reduced margin for better keyboard handling
-  },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 15,
+    gap: 12,
   },
   messageInput: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.1)',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginRight: 12,
+    borderWidth: 5,
+    borderColor: '#0000ff',
+    borderRadius: 30,
+    paddingHorizontal: 25,
+    paddingVertical: 20,
+    fontSize: 20,
     maxHeight: 100,
-    fontSize: 15,
-    color: '#2c3e50',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffff00',
+    minHeight: 70,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
   },
   sendButton: {
-    backgroundColor: '#43e97b', // Green color to match the app theme
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    backgroundColor: '#00ff00',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#43e97b',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
+    borderWidth: 3,
+    borderColor: '#000000',
   },
   sendButtonDisabled: {
     backgroundColor: '#bdc3c7',
-    shadowOpacity: 0,
-    elevation: 0,
   },
+  
+  // Loading and empty states
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1064,271 +903,210 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     color: '#7f8c8d',
-    fontWeight: '500',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#e74c3c',
-    textAlign: 'center',
-    marginBottom: 16,
-    fontWeight: '500',
-  },
-  retryButton: {
-    backgroundColor: ACCENT,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
-    paddingHorizontal: 20,
   },
   emptyText: {
     fontSize: 18,
-    color: '#2c3e50',
     fontWeight: '600',
+    color: '#2c3e50',
     marginTop: 16,
-    marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
     color: '#7f8c8d',
+    marginTop: 8,
     textAlign: 'center',
-    lineHeight: 20,
   },
-  // Header styles
-  headerContent: {
+  emptyMessagesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyMessagesText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginTop: 16,
+  },
+  emptyMessagesSubtext: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginTop: 8,
+  },
+  
+  // Specialists list styles
+  specialistsContainer: {
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+    maxHeight: 300,
+  },
+  specialistsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#2c3e50',
-  },
-  findSpecialistsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: ACCENT,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  findSpecialistsText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  activeTab: {
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#7f8c8d',
-  },
-  activeTabText: {
-    color: '#2c3e50',
-  },
-  // Specialists styles
-  specialistsList: {
-    flex: 1,
-  },
-  categoryContainer: {
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f4',
   },
-  categoryScroll: {
-    paddingRight: 20,
-  },
-  categoryButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#f8f9fa',
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  activeCategoryButton: {
-    backgroundColor: ACCENT,
-    borderColor: ACCENT,
-  },
-  categoryButtonText: {
-    fontSize: 12,
+  specialistsTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#7f8c8d',
+    color: '#2c3e50',
   },
-  activeCategoryButtonText: {
-    color: 'white',
+  closeButton: {
+    padding: 8,
   },
-  specialistCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginBottom: 16,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: '#f8f9fa',
+  specialistsList: {
+    maxHeight: 200,
   },
-  specialistHeader: {
+  specialistItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f4',
   },
   specialistAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f8f9fa',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-    position: 'relative',
-    borderWidth: 2,
-    borderColor: 'rgba(52, 152, 219, 0.1)',
+    marginRight: 15,
   },
   specialistInfo: {
     flex: 1,
   },
   specialistName: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
     color: '#2c3e50',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   specialistSpecialty: {
     fontSize: 14,
-    fontWeight: '600',
-    color: ACCENT,
+    color: '#3498db',
     marginBottom: 2,
   },
   specialistFacility: {
-    fontSize: 13,
-    color: '#7f8c8d',
-    fontWeight: '500',
-  },
-  specialistActions: {
-    alignItems: 'flex-end',
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  ratingText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginLeft: 4,
-  },
-  consultationFee: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: SUCCESS,
-  },
-  specialistDetails: {
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  detailText: {
     fontSize: 12,
     color: '#7f8c8d',
-    marginLeft: 8,
-    fontWeight: '500',
-  },
-  specialistDescription: {
-    fontSize: 14,
-    color: '#2c3e50',
-    lineHeight: 20,
-    marginBottom: 16,
-    fontWeight: '500',
-  },
-  specialistFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  languagesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    flex: 1,
-  },
-  languageTag: {
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  languageText: {
-    fontSize: 10,
-    color: '#7f8c8d',
-    fontWeight: '600',
   },
   chatButton: {
+    backgroundColor: '#007bff',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptySpecialists: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptySpecialistsText: {
+    fontSize: 14,
+    color: '#7f8c8d',
+  },
+  
+  // Full screen specialists styles
+  fullScreenSpecialistsContainer: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  specialistsFullHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: ACCENT,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  specialistsFullTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  placeholder: {
+    width: 40, // Same width as back button for centering
+  },
+  fullScreenSpecialistsList: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20, // Add padding to prevent overlap with tab bar
+  },
+  specialistItemFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  specialistAvatarFull: {
+    marginRight: 16,
+  },
+  avatarImageFull: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+  },
+  specialistInfoFull: {
+    flex: 1,
+  },
+  specialistNameFull: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  specialistSpecialtyFull: {
+    fontSize: 16,
+    color: '#3498db',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  specialistQualification: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  specialistExperience: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  specialistFacilityFull: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 4,
+  },
+  specialistBio: {
+    fontSize: 14,
+    color: '#95a5a6',
+    fontStyle: 'italic',
+  },
+  specialistActions: {
+    marginLeft: 12,
+  },
+  chatButtonFull: {
+    backgroundColor: '#007bff',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
   },
   chatButtonText: {
     color: 'white',
@@ -1336,4 +1114,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 6,
   },
-}); 
+  emptySpecialistsFull: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptySpecialistsFullText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginTop: 16,
+  },
+  emptySpecialistsFullSubtext: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+});

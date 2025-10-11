@@ -754,6 +754,7 @@ router.post('/register-doctor', upload.single('profileImage'), [
     );
 
     let finalUserId = userId || null;
+    let generatedPassword; // Store password for email sending
 
     if (existingUserResult.success && existingUserResult.data && existingUserResult.data.length > 0) {
       const existingUser = existingUserResult.data[0];
@@ -770,6 +771,7 @@ router.post('/register-doctor', upload.single('profileImage'), [
       if (existingUser.user_type === 'patient') {
         // Generate new secure password for converted user
         const { password, hash } = await generateSecurePassword();
+        generatedPassword = password; // Store for email sending
         console.log('🔐 Generated new password for converted doctor:', password);
         
         const updateUserResult = await executeQuery(
@@ -807,6 +809,7 @@ router.post('/register-doctor', upload.single('profileImage'), [
     } else {
       // Generate secure password for new user
       const { password, hash } = await generateSecurePassword();
+      generatedPassword = password; // Store for email sending
       console.log('🔐 Generated password for new doctor:', password);
       
       // Create new user if email doesn't exist
@@ -941,6 +944,26 @@ router.post('/register-doctor', upload.single('profileImage'), [
     const doctorId = insertResult.data.insertId;
 
     console.log('✅ Doctor registered successfully with ID:', doctorId);
+    console.log('🔍 About to send email - generatedPassword exists:', !!generatedPassword);
+    console.log('🔍 About to send email - email:', email);
+    console.log('🔍 About to send email - firstName:', firstName);
+
+    // Send email with credentials
+    try {
+      console.log('📧 Sending doctor credentials email to:', email);
+      console.log('📧 Email details:', { email, firstName, passwordLength: generatedPassword?.length });
+      const emailSent = await sendDoctorCredentials(email, firstName, generatedPassword);
+      
+      if (emailSent) {
+        console.log('✅ Doctor credentials email sent successfully to:', email);
+      } else {
+        console.log('⚠️ Failed to send doctor credentials email to:', email, 'but registration was successful');
+      }
+    } catch (emailError) {
+      console.error('❌ Error sending doctor credentials email to:', email, 'Error:', emailError.message);
+      console.error('❌ Full error details:', emailError);
+      // Don't fail the registration if email fails
+    }
 
     res.status(201).json({
       success: true,

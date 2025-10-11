@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from 'react-native';
 import { authService, User, LoginCredentials, SignupData } from '../services/authService';
 import { apiClient } from '../services/apiClient';
 import { useProfile } from './ProfileContext';
@@ -8,7 +9,7 @@ import { constructProfileImageUrl } from '../utils/imageUtils';
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<{ success: boolean; user?: User }>;
   signup: (userData: SignupData) => Promise<boolean>;
   logout: () => Promise<void>;
   loading: boolean;
@@ -17,6 +18,7 @@ interface AuthContextType {
   resetFirstTimeUser: () => void; // For testing purposes
   clearAllData: () => Promise<void>; // For testing purposes
   checkTokenExpiration: () => Promise<void>; // Check if token is expired
+  testTokenExpiration: () => Promise<void>; // Manually trigger token expiration for testing
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -62,6 +64,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleTokenExpired = async () => {
     console.log('🔍 AuthContext - Token expired, performing automatic logout');
     try {
+      // Show user notification about automatic logout
+      Alert.alert(
+        'Session Expired',
+        'Your session has expired for security reasons. Please log in again.',
+        [{ text: 'OK', style: 'default' }],
+        { cancelable: false }
+      );
+      
+      // Clear all authentication data from storage
+      await AsyncStorage.multiRemove(['userToken', 'refreshToken', 'userData']);
+      
       // Clear local state
       setIsAuthenticated(false);
       setUser(null);
@@ -70,9 +83,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Clear profile image from context and storage
       clearProfileImage();
       
-      console.log('🔍 AuthContext - Automatic logout completed');
+      console.log('🔍 AuthContext - Automatic logout completed - all data cleared');
     } catch (error) {
       console.error('❌ AuthContext - Error during automatic logout:', error);
+      // Even if there's an error, ensure local state is cleared
+      setIsAuthenticated(false);
+      setUser(null);
+      setFirstTimeUser(true);
+      clearProfileImage();
     }
   };
 
@@ -121,7 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; user?: User }> => {
     try {
       setLoading(true);
       console.log('🔍 AuthContext - Starting login for:', email);
@@ -152,7 +170,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         setIsAuthenticated(true);
         setUser(response.data.user);
-        setFirstTimeUser(false); // User is not new after successful login
+        markUserAsNotFirstTime(); // User is not new after successful login
         
         // Debug: Log the entire user object to see what fields are available
         console.log('🔍 AuthContext - Full user object from login:', response.data.user);
@@ -177,14 +195,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log('🔍 AuthContext - No profile image in login response (checked both camelCase and snake_case)');
         }
         
-        return true;
+        return { success: true, user: response.data.user };
       } else {
         console.error('❌ AuthContext - Login failed:', response.message);
-        return false;
+        return { success: false };
       }
     } catch (error) {
       console.error('❌ AuthContext - Login error:', error);
-      return false;
+      return { success: false };
     } finally {
       setLoading(false);
     }
@@ -200,7 +218,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (response.success && response.data) {
         setIsAuthenticated(true);
         setUser(response.data.user);
-        setFirstTimeUser(false); // User is not new after successful signup
+        markUserAsNotFirstTime(); // User is not new after successful signup
         return true;
       } else {
         console.error('Signup failed:', response.message);
@@ -302,6 +320,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Test token expiration functionality (for testing purposes)
+  const testTokenExpiration = async (): Promise<void> => {
+    console.log('🧪 Testing token expiration functionality...');
+    try {
+      // Show confirmation dialog
+      Alert.alert(
+        'Test Token Expiration',
+        'This will simulate a token expiration and log you out. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Test', 
+            style: 'destructive',
+            onPress: async () => {
+              console.log('🧪 User confirmed token expiration test');
+              await handleTokenExpired();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('❌ Error testing token expiration:', error);
+    }
+  };
+
   const value: AuthContextType = {
     isAuthenticated,
     user,
@@ -314,6 +357,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetFirstTimeUser,
     clearAllData,
     checkTokenExpiration,
+    testTokenExpiration,
   };
 
   return (

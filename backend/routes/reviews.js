@@ -10,7 +10,7 @@ router.post('/', [
   authenticateToken,
   body('facilityId').notEmpty().withMessage('Facility ID is required'),
   body('rating').isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
-  body('comment').isString().trim().isLength({ min: 10, max: 500 }).withMessage('Comment must be between 10 and 500 characters'),
+  body('comment').optional().isString().trim().isLength({ min: 0, max: 500 }).withMessage('Comment must be between 0 and 500 characters'),
   body('userId').notEmpty().withMessage('User ID is required'),
 ], async (req, res) => {
   try {
@@ -54,7 +54,7 @@ router.post('/', [
 
     // Create the review
     const createReview = await executeQuery(
-      'INSERT INTO facility_reviews (facility_id, user_id, rating, comment, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+      'INSERT INTO facility_reviews (facility_id, user_id, rating, review_text, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
       [facilityId, userId, rating, comment]
     );
 
@@ -73,7 +73,7 @@ router.post('/', [
         fr.facility_id,
         fr.user_id,
         fr.rating,
-        fr.comment,
+        fr.review_text as comment,
         fr.created_at,
         fr.updated_at,
         u.first_name,
@@ -95,7 +95,7 @@ router.post('/', [
     const review = getReview.data[0];
 
     console.log(`🎉 Review created successfully! ID: ${review.id}`);
-    console.log(`📝 Review details: Rating ${review.rating}/5, Comment: "${review.comment.substring(0, 50)}..."`);
+    console.log(`📝 Review details: Rating ${review.rating}/5, Comment: "${review.comment ? review.comment.substring(0, 50) + '...' : 'No comment'}"`);
     
     // Update facility average rating
     console.log(`🔄 Triggering facility rating update for facility ${facilityId}...`);
@@ -170,7 +170,7 @@ router.get('/facility/:facilityId', [
         fr.facility_id,
         fr.user_id,
         fr.rating,
-        fr.comment,
+        fr.review_text as comment,
         fr.created_at,
         fr.updated_at,
         u.first_name,
@@ -249,7 +249,7 @@ router.get('/user/:userId', [
         fr.facility_id,
         fr.user_id,
         fr.rating,
-        fr.comment,
+        fr.review_text as comment,
         fr.created_at,
         fr.updated_at,
         hf.name as facility_name,
@@ -369,7 +369,7 @@ router.get('/check/:facilityId/:userId', [
         fr.facility_id,
         fr.user_id,
         fr.rating,
-        fr.comment,
+        fr.review_text as comment,
         fr.created_at,
         fr.updated_at
       FROM facility_reviews fr
@@ -574,7 +574,7 @@ async function updateFacilityRating(facilityId) {
 
     if (getAverageRating.success) {
       const result = getAverageRating.data[0];
-      const averageRating = result.averageRating ? parseFloat(result.averageRating.toFixed(1)) : 0;
+      const averageRating = result.averageRating ? parseFloat(parseFloat(result.averageRating).toFixed(1)) : 0;
       const totalReviews = result.totalReviews || 0;
       const minRating = result.minRating || 0;
       const maxRating = result.maxRating || 0;
