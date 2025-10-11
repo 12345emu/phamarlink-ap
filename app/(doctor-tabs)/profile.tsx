@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,17 +7,47 @@ import {
   TouchableOpacity,
   Alert,
   Switch,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../context/AuthContext';
+import { useProfile } from '../../context/ProfileContext';
 import { useRouter } from 'expo-router';
+import DoctorEditProfileModal from '../doctor-edit-profile-modal';
+import ChangePasswordModal from '../change-password-modal';
+import NotificationsSettingsModal from '../notifications-settings-modal';
+import AvailabilitySettingsModal from '../availability-settings-modal';
+import { getSafeProfileImageUrl } from '../../utils/imageUtils';
 
 export default function DoctorProfile() {
   const { user, logout } = useAuth();
+  const { profileImage, testCurrentImageUrl, forceRefreshFromBackend } = useProfile();
   const router = useRouter();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [availabilityEnabled, setAvailabilityEnabled] = useState(true);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [changePasswordModalVisible, setChangePasswordModalVisible] = useState(false);
+  const [notificationsSettingsModalVisible, setNotificationsSettingsModalVisible] = useState(false);
+  const [availabilitySettingsModalVisible, setAvailabilitySettingsModalVisible] = useState(false);
+
+  // Debug profile image changes
+  useEffect(() => {
+    console.log('🔍 ProfilePage - profileImage changed:', profileImage);
+    console.log('🔍 ProfilePage - profileImage type:', typeof profileImage);
+    console.log('🔍 ProfilePage - profileImage length:', profileImage?.length);
+    if (profileImage) {
+      console.log('🔍 ProfilePage - profileImage starts with http:', profileImage.startsWith('http'));
+      console.log('🔍 ProfilePage - profileImage starts with /uploads:', profileImage.startsWith('/uploads'));
+    }
+  }, [profileImage]);
+
+  // Debug user object
+  useEffect(() => {
+    console.log('🔍 ProfilePage - user object:', user);
+    console.log('🔍 ProfilePage - user.profileImage:', user?.profileImage);
+    console.log('🔍 ProfilePage - user.role:', user?.role);
+  }, [user]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -37,6 +67,54 @@ export default function DoctorProfile() {
     );
   };
 
+  const handleNotificationsToggle = () => {
+    if (notificationsEnabled) {
+      // If turning off, show confirmation
+      Alert.alert(
+        'Disable Notifications',
+        'Are you sure you want to disable all notifications? You can customize specific notification types in the settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Disable',
+            style: 'destructive',
+            onPress: () => setNotificationsEnabled(false)
+          },
+          {
+            text: 'Customize',
+            onPress: () => setNotificationsSettingsModalVisible(true)
+          }
+        ]
+      );
+    } else {
+      setNotificationsEnabled(true);
+    }
+  };
+
+  const handleAvailabilityToggle = () => {
+    if (availabilityEnabled) {
+      // If turning off, show confirmation
+      Alert.alert(
+        'Set Unavailable',
+        'Are you sure you want to set yourself as unavailable? You can customize your availability schedule in the settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Set Unavailable',
+            style: 'destructive',
+            onPress: () => setAvailabilityEnabled(false)
+          },
+          {
+            text: 'Customize',
+            onPress: () => setAvailabilitySettingsModalVisible(true)
+          }
+        ]
+      );
+    } else {
+      setAvailabilityEnabled(true);
+    }
+  };
+
   const profileSections = [
     {
       title: 'Account Settings',
@@ -46,8 +124,7 @@ export default function DoctorProfile() {
           title: 'Edit Profile',
           subtitle: 'Update your personal information',
           onPress: () => {
-            // TODO: Navigate to edit profile screen
-            Alert.alert('Edit Profile', 'This will open the profile editing form');
+            setEditModalVisible(true);
           }
         },
         {
@@ -55,8 +132,7 @@ export default function DoctorProfile() {
           title: 'Change Password',
           subtitle: 'Update your account password',
           onPress: () => {
-            // TODO: Navigate to change password screen
-            Alert.alert('Change Password', 'This will open the password change form');
+            setChangePasswordModalVisible(true);
           }
         },
         {
@@ -64,8 +140,7 @@ export default function DoctorProfile() {
           title: 'Notifications',
           subtitle: 'Manage notification preferences',
           onPress: () => {
-            // TODO: Navigate to notification settings
-            Alert.alert('Notifications', 'This will open notification settings');
+            setNotificationsSettingsModalVisible(true);
           }
         },
       ]
@@ -78,8 +153,7 @@ export default function DoctorProfile() {
           title: 'Availability',
           subtitle: 'Set your working hours',
           onPress: () => {
-            // TODO: Navigate to availability settings
-            Alert.alert('Availability', 'This will open availability settings');
+            setAvailabilitySettingsModalVisible(true);
           }
         },
         {
@@ -132,6 +206,39 @@ export default function DoctorProfile() {
             Alert.alert('About PharmaLink', 'This will open the about section');
           }
         },
+        {
+          icon: 'bug',
+          title: 'Debug Image URL',
+          subtitle: 'Test current profile image URL',
+          onPress: () => {
+            testCurrentImageUrl();
+            Alert.alert('Debug', 'Check console for image URL test results');
+          }
+        },
+        {
+          icon: 'refresh',
+          title: 'Force Refresh Image',
+          subtitle: 'Clear and reload profile image from backend',
+          onPress: () => {
+            forceRefreshFromBackend();
+            Alert.alert('Debug', 'Profile image cleared. Logout and login again to reload from backend.');
+          }
+        },
+        {
+          icon: 'info',
+          title: 'Show Debug Info',
+          subtitle: 'Display current user and profile image data',
+          onPress: () => {
+            const debugInfo = {
+              user: user,
+              profileImage: profileImage,
+              userProfileImage: user?.profileImage,
+              userRole: user?.role
+            };
+            console.log('🔍 ProfilePage - Debug Info:', debugInfo);
+            Alert.alert('Debug Info', `User: ${JSON.stringify(user, null, 2)}\n\nProfileImage: ${profileImage}\n\nUser.profileImage: ${user?.profileImage}`);
+          }
+        },
       ]
     }
   ];
@@ -145,11 +252,35 @@ export default function DoctorProfile() {
       >
         <View style={styles.profileInfo}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {user?.firstName?.[0]}{user?.lastName?.[0]}
-              </Text>
-            </View>
+            {(() => {
+              const imageUrl = getSafeProfileImageUrl(profileImage);
+              console.log('🔍 ProfilePage - profileImage from context:', profileImage);
+              console.log('🔍 ProfilePage - imageUrl after getSafeProfileImageUrl:', imageUrl);
+              console.log('🔍 ProfilePage - Image URL type:', typeof imageUrl);
+              console.log('🔍 ProfilePage - Image URL length:', imageUrl?.length);
+              
+              return imageUrl ? (
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={styles.avatar}
+                  onError={(error) => {
+                    console.warn('❌ ProfilePage - Failed to load profile image:', error);
+                    console.warn('❌ ProfilePage - Image URL was:', imageUrl);
+                    console.warn('❌ ProfilePage - Error details:', error.nativeEvent);
+                  }}
+                  onLoad={() => {
+                    console.log('✅ ProfilePage - Profile image loaded successfully');
+                    console.log('✅ ProfilePage - Loaded image URL:', imageUrl);
+                  }}
+                />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {user?.firstName?.[0]}{user?.lastName?.[0]}
+                  </Text>
+                </View>
+              );
+            })()}
           </View>
           <View style={styles.userInfo}>
             <Text style={styles.doctorName}>Dr. {user?.firstName} {user?.lastName}</Text>
@@ -168,7 +299,7 @@ export default function DoctorProfile() {
           </View>
           <Switch
             value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
+            onValueChange={handleNotificationsToggle}
             trackColor={{ false: '#bdc3c7', true: '#3498db' }}
             thumbColor={notificationsEnabled ? '#fff' : '#f4f3f4'}
           />
@@ -180,7 +311,7 @@ export default function DoctorProfile() {
           </View>
           <Switch
             value={availabilityEnabled}
-            onValueChange={setAvailabilityEnabled}
+            onValueChange={handleAvailabilityToggle}
             trackColor={{ false: '#bdc3c7', true: '#2ecc71' }}
             thumbColor={availabilityEnabled ? '#fff' : '#f4f3f4'}
           />
@@ -226,6 +357,46 @@ export default function DoctorProfile() {
       <View style={styles.versionContainer}>
         <Text style={styles.versionText}>PharmaLink Doctor Portal v1.0.0</Text>
       </View>
+
+      {/* Edit Profile Modal */}
+      <DoctorEditProfileModal
+        visible={editModalVisible}
+        onClose={() => setEditModalVisible(false)}
+        onProfileUpdated={() => {
+          // Profile will be updated automatically through context
+          setEditModalVisible(false);
+        }}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        visible={changePasswordModalVisible}
+        onClose={() => setChangePasswordModalVisible(false)}
+        onPasswordChanged={() => {
+          // Password changed successfully
+          setChangePasswordModalVisible(false);
+        }}
+      />
+
+      {/* Notifications Settings Modal */}
+      <NotificationsSettingsModal
+        visible={notificationsSettingsModalVisible}
+        onClose={() => setNotificationsSettingsModalVisible(false)}
+        onSettingsUpdated={() => {
+          // Notification settings updated successfully
+          setNotificationsSettingsModalVisible(false);
+        }}
+      />
+
+      {/* Availability Settings Modal */}
+      <AvailabilitySettingsModal
+        visible={availabilitySettingsModalVisible}
+        onClose={() => setAvailabilitySettingsModalVisible(false)}
+        onSettingsUpdated={() => {
+          // Availability settings updated successfully
+          setAvailabilitySettingsModalVisible(false);
+        }}
+      />
     </ScrollView>
   );
 }

@@ -4,6 +4,7 @@ import { Link, Tabs, useRouter } from 'expo-router';
 import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
 import ProfileImage from '../../components/ProfileImage';
 import { useProfile } from '../../context/ProfileContext';
+import { getSafeProfileImageUrl } from '../../utils/imageUtils';
 
 import Colors from '../../constants/Colors';
 import { useColorScheme } from '../../components/useColorScheme';
@@ -86,6 +87,50 @@ function AppointmentsTabBarIcon({ focused }: { focused: boolean }) {
   );
 }
 
+// Custom header right component with user's profile image
+function HeaderRightComponent() {
+  const router = useRouter();
+  const { profileImage } = useProfile();
+  
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+      <TouchableOpacity 
+        style={{ 
+          width: 36, 
+          height: 36, 
+          borderRadius: 18, 
+          backgroundColor: '#e3f2fd', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          overflow: 'hidden'
+        }}
+        onPress={() => router.push('/(doctor-tabs)/profile')}
+        activeOpacity={0.7}
+      >
+        {(() => {
+          const imageUrl = getSafeProfileImageUrl(profileImage);
+          return imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+              }}
+              resizeMode="cover"
+              onError={(error) => {
+                console.warn('Failed to load header profile image:', error);
+              }}
+            />
+          ) : (
+            <FontAwesome name="user-md" size={20} color="#3498db" />
+          );
+        })()}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function DoctorTabLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
@@ -130,24 +175,7 @@ export default function DoctorTabLayout() {
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
-                <TouchableOpacity 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: '#e3f2fd', 
-                    alignItems: 'center', 
-                    justifyContent: 'center'
-                  }}
-                  onPress={() => router.push('/(doctor-tabs)/profile')}
-                  activeOpacity={0.7}
-                >
-                  <ProfileImage size={32} />
-                </TouchableOpacity>
-              </View>
-            ),
+            headerRight: () => <HeaderRightComponent />,
           }}
         />
 
@@ -179,24 +207,7 @@ export default function DoctorTabLayout() {
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
-                <TouchableOpacity 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: '#e3f2fd', 
-                    alignItems: 'center', 
-                    justifyContent: 'center'
-                  }}
-                  onPress={() => router.push('/(doctor-tabs)/profile')}
-                  activeOpacity={0.7}
-                >
-                  <ProfileImage size={32} />
-                </TouchableOpacity>
-              </View>
-            ),
+            headerRight: () => <HeaderRightComponent />,
           }}
         />
 
@@ -228,24 +239,7 @@ export default function DoctorTabLayout() {
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
-                <TouchableOpacity 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: '#e3f2fd', 
-                    alignItems: 'center', 
-                    justifyContent: 'center'
-                  }}
-                  onPress={() => router.push('/(doctor-tabs)/profile')}
-                  activeOpacity={0.7}
-                >
-                  <ProfileImage size={32} />
-                </TouchableOpacity>
-              </View>
-            ),
+            headerRight: () => <HeaderRightComponent />,
           }}
         />
 
@@ -277,24 +271,7 @@ export default function DoctorTabLayout() {
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
-                <TouchableOpacity 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: '#e3f2fd', 
-                    alignItems: 'center', 
-                    justifyContent: 'center'
-                  }}
-                  onPress={() => router.push('/(doctor-tabs)/profile')}
-                  activeOpacity={0.7}
-                >
-                  <ProfileImage size={32} />
-                </TouchableOpacity>
-              </View>
-            ),
+            headerRight: () => <HeaderRightComponent />,
           }}
         />
 
@@ -326,24 +303,7 @@ export default function DoctorTabLayout() {
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
-                <TouchableOpacity 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: '#e3f2fd', 
-                    alignItems: 'center', 
-                    justifyContent: 'center'
-                  }}
-                  onPress={() => router.push('/(doctor-tabs)/profile')}
-                  activeOpacity={0.7}
-                >
-                  <ProfileImage size={32} />
-                </TouchableOpacity>
-              </View>
-            ),
+            headerRight: () => <HeaderRightComponent />,
           }}
         />
 
@@ -375,24 +335,7 @@ export default function DoctorTabLayout() {
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
-                <TouchableOpacity 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 18, 
-                    backgroundColor: '#e3f2fd', 
-                    alignItems: 'center', 
-                    justifyContent: 'center'
-                  }}
-                  onPress={() => router.push('/(doctor-tabs)/profile')}
-                  activeOpacity={0.7}
-                >
-                  <ProfileImage size={32} />
-                </TouchableOpacity>
-              </View>
-            ),
+            headerRight: () => <HeaderRightComponent />,
           }}
         />
 

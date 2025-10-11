@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { authService, User, LoginCredentials, SignupData } from '../services/authService';
+import { updateUserProfile as updateProfileAPI, uploadProfileImage } from '../services/profileService';
 import { apiClient } from '../services/apiClient';
 import { useProfile } from './ProfileContext';
 import { constructProfileImageUrl } from '../utils/imageUtils';
@@ -19,6 +20,7 @@ interface AuthContextType {
   clearAllData: () => Promise<void>; // For testing purposes
   checkTokenExpiration: () => Promise<void>; // Check if token is expired
   testTokenExpiration: () => Promise<void>; // Manually trigger token expiration for testing
+  updateUserProfile: (profileData: Partial<User>) => Promise<void>; // Update user profile
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -116,10 +118,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Load profile image if available
         if (parsedUserData.profileImage) {
           console.log('🔍 AuthContext - Loading profile image from stored data:', parsedUserData.profileImage);
-          // Construct full URL for profile image
-          const fullImageUrl = constructProfileImageUrl(parsedUserData.profileImage);
-          console.log('🔍 AuthContext - Constructed full URL from stored data:', fullImageUrl);
-          updateProfileImage(fullImageUrl);
+          
+          // Check if the stored profile image is already a full URL or malformed
+          if (parsedUserData.profileImage.startsWith('http')) {
+            // Already a full URL, use it directly
+            console.log('🔍 AuthContext - Profile image is already a full URL:', parsedUserData.profileImage);
+            updateProfileImage(parsedUserData.profileImage);
+          } else {
+            // Construct full URL for profile image
+            const fullImageUrl = constructProfileImageUrl(parsedUserData.profileImage);
+            console.log('🔍 AuthContext - Constructed full URL from stored data:', fullImageUrl);
+            updateProfileImage(fullImageUrl);
+          }
         } else {
           console.log('🔍 AuthContext - No profile image in stored user data');
         }
@@ -181,16 +191,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Load profile image if available
         if (response.data.user.profileImage) {
           console.log('🔍 AuthContext - Loading profile image on login:', response.data.user.profileImage);
-          // Construct full URL for profile image
-          const fullImageUrl = constructProfileImageUrl(response.data.user.profileImage);
-          console.log('🔍 AuthContext - Constructed full URL:', fullImageUrl);
-          updateProfileImage(fullImageUrl);
+          
+          // Check if the profile image is already a full URL or malformed
+          if (response.data.user.profileImage.startsWith('http')) {
+            // Already a full URL, use it directly
+            console.log('🔍 AuthContext - Profile image is already a full URL:', response.data.user.profileImage);
+            updateProfileImage(response.data.user.profileImage);
+          } else {
+            // Construct full URL for profile image
+            const fullImageUrl = constructProfileImageUrl(response.data.user.profileImage);
+            console.log('🔍 AuthContext - Constructed full URL:', fullImageUrl);
+            updateProfileImage(fullImageUrl);
+          }
         } else if ((response.data.user as any).profile_image) {
           // Fallback: check for snake_case field name
           console.log('🔍 AuthContext - Found profile_image (snake_case):', (response.data.user as any).profile_image);
-          const fullImageUrl = constructProfileImageUrl((response.data.user as any).profile_image);
-          console.log('🔍 AuthContext - Constructed full URL from snake_case:', fullImageUrl);
-          updateProfileImage(fullImageUrl);
+          
+          // Check if the profile image is already a full URL or malformed
+          if ((response.data.user as any).profile_image.startsWith('http')) {
+            // Already a full URL, use it directly
+            console.log('🔍 AuthContext - Profile image (snake_case) is already a full URL:', (response.data.user as any).profile_image);
+            updateProfileImage((response.data.user as any).profile_image);
+          } else {
+            // Construct full URL for profile image
+            const fullImageUrl = constructProfileImageUrl((response.data.user as any).profile_image);
+            console.log('🔍 AuthContext - Constructed full URL from snake_case:', fullImageUrl);
+            updateProfileImage(fullImageUrl);
+          }
         } else {
           console.log('🔍 AuthContext - No profile image in login response (checked both camelCase and snake_case)');
         }
@@ -345,6 +372,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateUserProfile = async (profileData: Partial<User>): Promise<void> => {
+    try {
+      setLoading(true);
+      
+      console.log('🔍 AuthContext - Updating profile with data:', profileData);
+      console.log('🔍 AuthContext - Current user:', user);
+      
+      // Call backend API to update profile
+      const result = await updateProfileAPI({
+        firstName: profileData.firstName,
+        lastName: profileData.lastName,
+        phone: profileData.phone,
+        dateOfBirth: profileData.dateOfBirth,
+        address: profileData.address,
+      });
+      
+      console.log('🔍 AuthContext - ProfileService result:', result);
+      
+      if (!result.success) {
+        console.error('❌ AuthContext - ProfileService failed:', result.message);
+        throw new Error(result.message);
+      }
+      
+      // Update user data in context with backend response
+      if (user && result.data?.user) {
+        const updatedUser = { ...user, ...result.data.user };
+        setUser(updatedUser);
+        
+        // Store updated user data in AsyncStorage
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+        
+        console.log('✅ Profile updated successfully via backend API');
+      } else {
+        console.log('⚠️ AuthContext - No user data in response, updating locally');
+        // Fallback: update locally if no backend response
+        const updatedUser = { ...user, ...profileData };
+        setUser(updatedUser);
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+      }
+    } catch (error) {
+      console.error('❌ Error updating profile:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const value: AuthContextType = {
     isAuthenticated,
     user,
@@ -358,6 +432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clearAllData,
     checkTokenExpiration,
     testTokenExpiration,
+    updateUserProfile,
   };
 
   return (
