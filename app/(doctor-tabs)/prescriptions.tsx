@@ -7,94 +7,67 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
+import { doctorDashboardService } from '../../services/doctorDashboardService';
 
 interface Prescription {
   id: number;
+  patientId: number;
   patientName: string;
   patientEmail: string;
-  medications: Array<{
-    name: string;
-    dosage: string;
-    frequency: string;
-    duration: string;
-  }>;
-  date: string;
-  status: 'pending' | 'sent' | 'filled' | 'cancelled';
+  medicationName: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+  instructions?: string;
+  quantity?: number;
+  refills?: number;
   notes?: string;
+  date: string;
+  status: 'active' | 'completed' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export default function DoctorPrescriptions() {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'pending' | 'sent' | 'filled'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadPrescriptions();
   }, []);
 
   const loadPrescriptions = async () => {
-    // TODO: Replace with actual API call
-    const mockPrescriptions: Prescription[] = [
-      {
-        id: 1,
-        patientName: 'John Doe',
-        patientEmail: 'john@example.com',
-        medications: [
-          {
-            name: 'Amoxicillin',
-            dosage: '500mg',
-            frequency: '3 times daily',
-            duration: '7 days',
-          },
-          {
-            name: 'Ibuprofen',
-            dosage: '400mg',
-            frequency: 'As needed',
-            duration: '5 days',
-          },
-        ],
-        date: '2024-01-15',
-        status: 'sent',
-        notes: 'Take with food. Complete full course of antibiotics.',
-      },
-      {
-        id: 2,
-        patientName: 'Jane Smith',
-        patientEmail: 'jane@example.com',
-        medications: [
-          {
-            name: 'Paracetamol',
-            dosage: '500mg',
-            frequency: '4 times daily',
-            duration: '3 days',
-          },
-        ],
-        date: '2024-01-14',
-        status: 'pending',
-      },
-      {
-        id: 3,
-        patientName: 'Mike Johnson',
-        patientEmail: 'mike@example.com',
-        medications: [
-          {
-            name: 'Metformin',
-            dosage: '500mg',
-            frequency: 'Twice daily',
-            duration: '30 days',
-          },
-        ],
-        date: '2024-01-13',
-        status: 'filled',
-        notes: 'Continue as prescribed. Monitor blood sugar levels.',
-      },
-    ];
-    setPrescriptions(mockPrescriptions);
+    try {
+      setLoading(true);
+      setError(null);
+      console.log('🔍 DoctorPrescriptions - Loading prescriptions');
+      
+      const response = await doctorDashboardService.getAllPrescriptions(20, 1, selectedFilter === 'all' ? 'all' : selectedFilter);
+      
+      if (response.prescriptions) {
+        setPrescriptions(response.prescriptions);
+        console.log('✅ DoctorPrescriptions - Prescriptions loaded:', response.prescriptions.length);
+      } else {
+        setPrescriptions([]);
+      }
+    } catch (error) {
+      console.error('❌ DoctorPrescriptions - Error loading prescriptions:', error);
+      setError('Failed to load prescriptions. Please try again.');
+      setPrescriptions([]);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  // No mock data - using real API data
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -118,7 +91,7 @@ export default function DoctorPrescriptions() {
             // TODO: Implement API call
             setPrescriptions(prev => prev.map(pres => 
               pres.id === prescriptionId 
-                ? { ...pres, status: action === 'send' ? 'sent' : 'cancelled' }
+                ? { ...pres, status: action === 'send' ? 'completed' : 'cancelled' }
                 : pres
             ));
           }
@@ -139,9 +112,9 @@ export default function DoctorPrescriptions() {
 
   const filters = [
     { key: 'all', label: 'All' },
-    { key: 'pending', label: 'Pending' },
-    { key: 'sent', label: 'Sent' },
-    { key: 'filled', label: 'Filled' },
+    { key: 'active', label: 'Active' },
+    { key: 'completed', label: 'Completed' },
+    { key: 'cancelled', label: 'Cancelled' },
   ];
 
   return (
@@ -191,7 +164,20 @@ export default function DoctorPrescriptions() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {filteredPrescriptions.length === 0 ? (
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#3498db" />
+            <Text style={styles.loadingText}>Loading prescriptions...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <FontAwesome name="exclamation-triangle" size={60} color="#e74c3c" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={loadPrescriptions}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filteredPrescriptions.length === 0 ? (
           <View style={styles.emptyState}>
             <FontAwesome name="file-text-o" size={60} color="#bdc3c7" />
             <Text style={styles.emptyText}>No prescriptions found</Text>
@@ -221,15 +207,18 @@ export default function DoctorPrescriptions() {
               </View>
 
               <View style={styles.medicationsContainer}>
-                <Text style={styles.medicationsTitle}>Medications:</Text>
-                {prescription.medications.map((medication, index) => (
-                  <View key={index} style={styles.medicationItem}>
-                    <Text style={styles.medicationName}>{medication.name}</Text>
-                    <Text style={styles.medicationDetails}>
-                      {medication.dosage} - {medication.frequency} - {medication.duration}
+                <Text style={styles.medicationsTitle}>Medication:</Text>
+                <View style={styles.medicationItem}>
+                  <Text style={styles.medicationName}>{prescription.medicationName}</Text>
+                  <Text style={styles.medicationDetails}>
+                    {prescription.dosage} - {prescription.frequency} - {prescription.duration}
+                  </Text>
+                  {prescription.instructions && (
+                    <Text style={styles.medicationInstructions}>
+                      Instructions: {prescription.instructions}
                     </Text>
-                  </View>
-                ))}
+                  )}
+                </View>
               </View>
 
               {prescription.notes && (
@@ -242,7 +231,7 @@ export default function DoctorPrescriptions() {
               <View style={styles.prescriptionFooter}>
                 <Text style={styles.dateText}>Date: {prescription.date}</Text>
                 
-                {prescription.status === 'pending' && (
+                {prescription.status === 'active' && (
                   <View style={styles.actionButtons}>
                     <TouchableOpacity
                       style={[styles.actionButton, styles.sendButton]}
@@ -396,6 +385,12 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     marginTop: 2,
   },
+  medicationInstructions: {
+    fontSize: 14,
+    color: '#34495e',
+    marginTop: 5,
+    fontStyle: 'italic',
+  },
   notesContainer: {
     backgroundColor: '#e8f4fd',
     padding: 10,
@@ -461,5 +456,40 @@ const styles = StyleSheet.create({
     color: '#bdc3c7',
     textAlign: 'center',
     marginTop: 5,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginTop: 15,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#e74c3c',
+    textAlign: 'center',
+    marginTop: 15,
+  },
+  retryButton: {
+    backgroundColor: '#3498db',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 15,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

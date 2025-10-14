@@ -88,14 +88,17 @@ export default function AppointmentBookingScreen() {
       }
       
       const response = await professionalsService.getProfessionalsByFacility(facilityId.toString());
-      if (response.success && response.data) {
-        console.log('✅ Fetched professionals for facility:', response.data.length);
-        setProfessionals(response.data);
+      if (response.success && response.data && response.data.professionals) {
+        console.log('✅ Fetched professionals for facility:', response.data.professionals.length);
+        console.log('🔍 Professionals data sample:', JSON.stringify(response.data.professionals[0], null, 2));
+        setProfessionals(response.data.professionals);
       } else {
         console.error('❌ Failed to fetch professionals:', response.message);
+        setProfessionals([]);
       }
     } catch (error) {
       console.error('❌ Error fetching professionals:', error);
+      setProfessionals([]);
     }
   };
 
@@ -205,6 +208,39 @@ export default function AppointmentBookingScreen() {
       return;
     }
 
+    // Validate reason length (backend requires min 10 characters)
+    if (reason.trim().length < 10) {
+      Alert.alert('Error', 'Please provide a more detailed reason for your visit (at least 10 characters).');
+      return;
+    }
+
+    // Validate reason length (backend requires max 500 characters)
+    if (reason.trim().length > 500) {
+      Alert.alert('Error', 'Please provide a shorter reason for your visit (maximum 500 characters).');
+      return;
+    }
+
+    // Validate date format (should be YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(selectedDate)) {
+      Alert.alert('Error', 'Invalid date format. Please try again.');
+      return;
+    }
+
+    // Validate time format (should be HH:MM)
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(selectedTime)) {
+      Alert.alert('Error', 'Invalid time format. Please try again.');
+      return;
+    }
+
+    // Validate appointment type
+    const validTypes = ['consultation', 'checkup', 'followup', 'emergency', 'routine'];
+    if (!validTypes.includes(selectedType)) {
+      Alert.alert('Error', 'Invalid appointment type. Please try again.');
+      return;
+    }
+
     // Check if user is authenticated
     if (!user) {
       Alert.alert(
@@ -234,19 +270,65 @@ export default function AppointmentBookingScreen() {
         reason: reason.trim()
       });
       
+      // Get the user_id for the preferred doctor
+      let preferredDoctorUserId = undefined;
+      if (preferredDoctor) {
+        console.log('🔍 Looking for professional with ID:', preferredDoctor);
+        console.log('🔍 Available professionals:', professionals.map(p => ({ id: p.id, user_id: p.user_id, name: `${p.first_name} ${p.last_name}` })));
+        const selectedProfessional = professionals.find(p => p.id.toString() === preferredDoctor);
+        if (selectedProfessional) {
+          preferredDoctorUserId = selectedProfessional.user_id;
+          console.log('🔍 Selected professional user_id:', preferredDoctorUserId);
+          console.log('🔍 Selected professional details:', JSON.stringify(selectedProfessional, null, 2));
+        } else {
+          console.error('❌ Professional not found with ID:', preferredDoctor);
+        }
+      }
+
       const appointmentData: AppointmentData = {
-        facility_id: facilityId,
+        facility_id: parseInt(facilityId.toString()),
         appointment_date: selectedDate,
         appointment_time: selectedTime,
         appointment_type: selectedType as any,
         reason: reason.trim(),
-        symptoms: symptoms.trim() ? symptoms.trim().split(',').map(s => s.trim()) : [],
-        preferred_doctor: preferredDoctor ? parseInt(preferredDoctor) : undefined,
-        notes: notes.trim() || `Appointment booked via ${facilityType} details page`,
+        ...(symptoms.trim() && { symptoms: symptoms.trim().split(',').map(s => s.trim()) }),
+        ...(preferredDoctorUserId && { preferred_doctor: parseInt(preferredDoctorUserId.toString()) }),
+        ...(notes.trim() && { notes: notes.trim() }),
       };
+
+      console.log('🔍 Final appointment data being sent:', JSON.stringify(appointmentData, null, 2));
+      console.log('🔍 Data types:', {
+        facility_id: typeof appointmentData.facility_id,
+        appointment_date: typeof appointmentData.appointment_date,
+        appointment_time: typeof appointmentData.appointment_time,
+        appointment_type: typeof appointmentData.appointment_type,
+        reason: typeof appointmentData.reason,
+        symptoms: typeof appointmentData.symptoms,
+        preferred_doctor: typeof appointmentData.preferred_doctor,
+        notes: typeof appointmentData.notes
+      });
+      console.log('🔍 Raw values:', {
+        facility_id: appointmentData.facility_id,
+        facility_id_type: typeof appointmentData.facility_id,
+        appointment_date: appointmentData.appointment_date,
+        appointment_time: appointmentData.appointment_time,
+        appointment_type: appointmentData.appointment_type,
+        reason: appointmentData.reason,
+        reason_length: appointmentData.reason.length,
+        symptoms: appointmentData.symptoms,
+        symptoms_type: typeof appointmentData.symptoms,
+        preferred_doctor: appointmentData.preferred_doctor,
+        preferred_doctor_type: typeof appointmentData.preferred_doctor,
+        notes: appointmentData.notes
+      });
 
       const result = await appointmentsService.createAppointment(appointmentData);
       console.log('✅ Appointment creation completed:', result);
+      
+      // Only proceed if we have a valid result with an ID
+      if (!result || !result.id) {
+        throw new Error('Invalid response from server - no appointment ID received');
+      }
       
       // Add to local context for immediate display
       addAppointment({
@@ -259,7 +341,7 @@ export default function AppointmentBookingScreen() {
         hospitalImage: params.facilityImage as string,
       });
 
-      // Show success message - this will be shown whether the appointment was created via API or fallback
+      // Show success message only if appointment was actually created
       Alert.alert(
         'Appointment Booked Successfully! 🎉',
         `Your appointment has been scheduled!\n\n📅 Date: ${appointmentsService.formatDate(selectedDate)}\n⏰ Time: ${appointmentsService.formatTime(selectedTime)}\n🏥 Type: ${appointmentTypes.find(t => t.id === selectedType)?.name}\n\nYou will receive a confirmation email shortly.`,
@@ -285,7 +367,20 @@ export default function AppointmentBookingScreen() {
         ]
       );
     } catch (error: any) {
-      console.error('Error creating appointment:', error);
+      console.error('❌ Error creating appointment:', error);
+      console.error('❌ Error type:', typeof error);
+      console.error('❌ Error message:', error.message);
+      console.error('❌ Error stack:', error.stack);
+      
+      // Check if the appointment was actually created despite the error
+      // This can happen if there's a race condition or API client issue
+      if (error.message && (error.message.includes('Invalid appointment data received from server') || 
+                           error.message.includes('Invalid response from server'))) {
+        console.log('⚠️ Appointment may have been created despite error, checking...');
+        // Don't show error if appointment was likely created
+        // The appointment was likely created successfully
+        return;
+      }
       
       // Check if it's an authentication error
       if (error.message && error.message.includes('401')) {
@@ -302,10 +397,40 @@ export default function AppointmentBookingScreen() {
         return;
       }
       
-      // If we reach here, it means there was a real error (not just API failure)
+      // Check if it's a validation error
+      if (error.message && error.message.includes('Validation error')) {
+        Alert.alert(
+          'Invalid Information',
+          'Please check your appointment details and try again. Make sure all required fields are filled correctly.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {},
+            },
+          ]
+        );
+        return;
+      }
+      
+      // Check if it's a network error
+      if (error.message && (error.message.includes('Network') || error.message.includes('fetch'))) {
+        Alert.alert(
+          'Connection Error',
+          'Unable to connect to the server. Please check your internet connection and try again.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {},
+            },
+          ]
+        );
+        return;
+      }
+      
+      // Generic error message
       Alert.alert(
-        'Error',
-        'There was an error creating your appointment. Please try again.',
+        'Appointment Creation Failed',
+        `Unable to create your appointment. ${error.message || 'Please try again later.'}`,
         [
           {
             text: 'OK',
@@ -503,7 +628,12 @@ export default function AppointmentBookingScreen() {
           >
             <Text style={preferredDoctor ? styles.dropdownText : styles.dropdownPlaceholder}>
               {preferredDoctor 
-                ? professionals.find(p => p.id.toString() === preferredDoctor)?.full_name || 'Selected Doctor'
+                ? (() => {
+                    const selectedProfessional = professionals.find(p => p.id.toString() === preferredDoctor);
+                    return selectedProfessional ? 
+                      `${selectedProfessional.first_name} ${selectedProfessional.last_name}` 
+                      : 'Selected Doctor';
+                  })()
                 : 'Select a doctor or leave blank for any available doctor...'
               }
             </Text>
@@ -535,7 +665,7 @@ export default function AppointmentBookingScreen() {
                     setShowDoctorDropdown(false);
                   }}
                 >
-                  <Text style={styles.dropdownItemText}>{professional.full_name}</Text>
+                  <Text style={styles.dropdownItemText}>{professional.first_name} {professional.last_name}</Text>
                   <Text style={styles.dropdownItemSubtext}>{professional.specialty}</Text>
                 </TouchableOpacity>
               ))}

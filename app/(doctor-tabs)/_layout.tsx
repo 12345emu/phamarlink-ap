@@ -108,7 +108,21 @@ function HeaderRightComponent() {
         activeOpacity={0.7}
       >
         {(() => {
-          const imageUrl = getSafeProfileImageUrl(profileImage);
+          // Handle local file URIs directly, use getSafeProfileImageUrl for network URLs
+          let imageUrl: string | null = null;
+          
+          if (profileImage) {
+            if (profileImage.startsWith('file://')) {
+              // Local file URI - use directly
+              imageUrl = profileImage;
+              console.log('🔍 HeaderRightComponent - Using local file URI directly:', imageUrl);
+            } else {
+              // Network URL - use getSafeProfileImageUrl
+              imageUrl = getSafeProfileImageUrl(profileImage);
+              console.log('🔍 HeaderRightComponent - Using getSafeProfileImageUrl for network URL:', imageUrl);
+            }
+          }
+          
           return imageUrl ? (
             <Image
               source={{ uri: imageUrl }}

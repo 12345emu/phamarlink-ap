@@ -76,6 +76,7 @@ class ApiClient {
       return config;
     },
     (error: any) => {
+      console.error('❌ Request interceptor error:', error);
       return Promise.reject(error);
     }
   );
@@ -236,6 +237,8 @@ class ApiClient {
       const response: AxiosResponse<ApiResponse<T>> = await this.client(config);
       console.log('🔍 API Client - Response received:', response.status);
       console.log('🔍 API Client - Response data:', response.data);
+      console.log('🔍 API Client - Response success field:', response.data?.success);
+      console.log('🔍 API Client - Response data field:', response.data?.data);
       return response.data;
     } catch (error) {
       console.log('🔍 API Client - Request failed:', error);

@@ -36,7 +36,17 @@ const testConnection = async () => {
 // Execute query with error handling
 const executeQuery = async (query, params = []) => {
   try {
-    const [rows] = await pool.execute(query, params);
+
+    const [rows, fields] = await pool.execute(query, params);
+    
+    // For INSERT, UPDATE, DELETE operations, return the full result
+    if (query.trim().toUpperCase().startsWith('INSERT') || 
+        query.trim().toUpperCase().startsWith('UPDATE') || 
+        query.trim().toUpperCase().startsWith('DELETE')) {
+      return { success: true, data: rows, insertId: rows.insertId, affectedRows: rows.affectedRows };
+    }
+    
+    // For SELECT operations, return just the rows
     return { success: true, data: rows };
   } catch (error) {
     console.error('❌ Query execution failed:', error.message);

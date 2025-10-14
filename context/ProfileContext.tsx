@@ -11,6 +11,8 @@ interface ProfileContextType {
   clearMalformedImages: () => Promise<void>;
   testCurrentImageUrl: () => Promise<void>;
   forceRefreshFromBackend: () => Promise<void>;
+  profileImageUpdateCallback: (() => void) | null;
+  setProfileImageUpdateCallback: (callback: (() => void) | null) => void;
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
@@ -29,6 +31,7 @@ interface ProfileProviderProps {
 
 export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) => {
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [profileImageUpdateCallback, setProfileImageUpdateCallback] = useState<(() => void) | null>(null);
   
   console.log('🔍 ProfileProvider - Initialized with profileImage:', profileImage);
 
@@ -168,6 +171,14 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
       console.log('✅ ProfileContext - Profile image uploaded to backend and stored locally');
       console.log('✅ ProfileContext - Updated profileImage state to:', fullImageUrl);
       console.log('✅ ProfileContext - Stored in AsyncStorage as:', fullImageUrl);
+      
+      // Call the callback to notify components of the update
+      if (profileImageUpdateCallback) {
+        console.log('🔍 ProfileContext - Calling profileImageUpdateCallback');
+        profileImageUpdateCallback();
+      } else {
+        console.warn('⚠️ ProfileContext - No profileImageUpdateCallback registered');
+      }
     } catch (error) {
       console.error('❌ Error uploading profile image to backend:', error);
       console.error('❌ Error details:', error);
@@ -260,7 +271,9 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
       refreshProfileImage,
       clearMalformedImages,
       testCurrentImageUrl,
-      forceRefreshFromBackend
+      forceRefreshFromBackend,
+      profileImageUpdateCallback,
+      setProfileImageUpdateCallback
     }}>
       {children}
     </ProfileContext.Provider>

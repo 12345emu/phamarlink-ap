@@ -18,11 +18,16 @@ import DoctorEditProfileModal from '../doctor-edit-profile-modal';
 import ChangePasswordModal from '../change-password-modal';
 import NotificationsSettingsModal from '../notifications-settings-modal';
 import AvailabilitySettingsModal from '../availability-settings-modal';
+import SpecializationsModal from '../specializations-modal';
+import HospitalAffiliationsModal from '../hospital-affiliations-modal';
+import HelpFAQModal from '../help-faq-modal';
+import ContactSupportModal from '../contact-support-modal';
+import AboutPharmaLinkModal from '../about-pharmalink-modal';
 import { getSafeProfileImageUrl } from '../../utils/imageUtils';
 
 export default function DoctorProfile() {
   const { user, logout } = useAuth();
-  const { profileImage, testCurrentImageUrl, forceRefreshFromBackend } = useProfile();
+  const { profileImage, refreshProfileImage, setProfileImageUpdateCallback } = useProfile();
   const router = useRouter();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [availabilityEnabled, setAvailabilityEnabled] = useState(true);
@@ -30,24 +35,44 @@ export default function DoctorProfile() {
   const [changePasswordModalVisible, setChangePasswordModalVisible] = useState(false);
   const [notificationsSettingsModalVisible, setNotificationsSettingsModalVisible] = useState(false);
   const [availabilitySettingsModalVisible, setAvailabilitySettingsModalVisible] = useState(false);
+  const [specializationsModalVisible, setSpecializationsModalVisible] = useState(false);
+  const [hospitalAffiliationsModalVisible, setHospitalAffiliationsModalVisible] = useState(false);
+  const [helpFAQModalVisible, setHelpFAQModalVisible] = useState(false);
+  const [contactSupportModalVisible, setContactSupportModalVisible] = useState(false);
+  const [aboutPharmaLinkModalVisible, setAboutPharmaLinkModalVisible] = useState(false);
+  const [profileImageRefreshKey, setProfileImageRefreshKey] = useState(0);
+  const [forceImageRefresh, setForceImageRefresh] = useState(0);
 
-  // Debug profile image changes
+  // Debug profileImage changes and force refresh
   useEffect(() => {
-    console.log('🔍 ProfilePage - profileImage changed:', profileImage);
-    console.log('🔍 ProfilePage - profileImage type:', typeof profileImage);
-    console.log('🔍 ProfilePage - profileImage length:', profileImage?.length);
+    console.log('🔍 ProfilePage - profileImage changed to:', profileImage);
     if (profileImage) {
-      console.log('🔍 ProfilePage - profileImage starts with http:', profileImage.startsWith('http'));
-      console.log('🔍 ProfilePage - profileImage starts with /uploads:', profileImage.startsWith('/uploads'));
+      console.log('🔍 ProfilePage - Profile image detected, forcing refresh');
+      setProfileImageRefreshKey(prev => prev + 1);
+      setForceImageRefresh(prev => prev + 1);
     }
   }, [profileImage]);
 
-  // Debug user object
+  // Debug forceImageRefresh changes
   useEffect(() => {
-    console.log('🔍 ProfilePage - user object:', user);
-    console.log('🔍 ProfilePage - user.profileImage:', user?.profileImage);
-    console.log('🔍 ProfilePage - user.role:', user?.role);
-  }, [user]);
+    console.log('🔍 ProfilePage - forceImageRefresh changed to:', forceImageRefresh);
+  }, [forceImageRefresh]);
+
+  // Set up callback for profile image updates
+  useEffect(() => {
+    const handleProfileImageUpdate = () => {
+      console.log('🔍 ProfilePage - Profile image update callback triggered');
+      setProfileImageRefreshKey(prev => prev + 1);
+      setForceImageRefresh(prev => prev + 1);
+    };
+
+    setProfileImageUpdateCallback(() => handleProfileImageUpdate);
+
+    // Cleanup callback on unmount
+    return () => {
+      setProfileImageUpdateCallback(null);
+    };
+  }, [setProfileImageUpdateCallback]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -161,8 +186,7 @@ export default function DoctorProfile() {
           title: 'Specializations',
           subtitle: 'Manage your medical specializations',
           onPress: () => {
-            // TODO: Navigate to specializations
-            Alert.alert('Specializations', 'This will open specializations management');
+            setSpecializationsModalVisible(true);
           }
         },
         {
@@ -170,8 +194,7 @@ export default function DoctorProfile() {
           title: 'Hospital Affiliations',
           subtitle: 'Manage hospital partnerships',
           onPress: () => {
-            // TODO: Navigate to hospital affiliations
-            Alert.alert('Hospital Affiliations', 'This will open hospital management');
+            setHospitalAffiliationsModalVisible(true);
           }
         },
       ]
@@ -184,8 +207,7 @@ export default function DoctorProfile() {
           title: 'Help & FAQ',
           subtitle: 'Get help and find answers',
           onPress: () => {
-            // TODO: Navigate to help screen
-            Alert.alert('Help & FAQ', 'This will open the help section');
+            setHelpFAQModalVisible(true);
           }
         },
         {
@@ -193,8 +215,7 @@ export default function DoctorProfile() {
           title: 'Contact Support',
           subtitle: 'Get in touch with our support team',
           onPress: () => {
-            // TODO: Navigate to contact support
-            Alert.alert('Contact Support', 'This will open the support contact form');
+            setContactSupportModalVisible(true);
           }
         },
         {
@@ -202,41 +223,7 @@ export default function DoctorProfile() {
           title: 'About PharmaLink',
           subtitle: 'Learn more about the app',
           onPress: () => {
-            // TODO: Navigate to about screen
-            Alert.alert('About PharmaLink', 'This will open the about section');
-          }
-        },
-        {
-          icon: 'bug',
-          title: 'Debug Image URL',
-          subtitle: 'Test current profile image URL',
-          onPress: () => {
-            testCurrentImageUrl();
-            Alert.alert('Debug', 'Check console for image URL test results');
-          }
-        },
-        {
-          icon: 'refresh',
-          title: 'Force Refresh Image',
-          subtitle: 'Clear and reload profile image from backend',
-          onPress: () => {
-            forceRefreshFromBackend();
-            Alert.alert('Debug', 'Profile image cleared. Logout and login again to reload from backend.');
-          }
-        },
-        {
-          icon: 'info',
-          title: 'Show Debug Info',
-          subtitle: 'Display current user and profile image data',
-          onPress: () => {
-            const debugInfo = {
-              user: user,
-              profileImage: profileImage,
-              userProfileImage: user?.profileImage,
-              userRole: user?.role
-            };
-            console.log('🔍 ProfilePage - Debug Info:', debugInfo);
-            Alert.alert('Debug Info', `User: ${JSON.stringify(user, null, 2)}\n\nProfileImage: ${profileImage}\n\nUser.profileImage: ${user?.profileImage}`);
+            setAboutPharmaLinkModalVisible(true);
           }
         },
       ]
@@ -253,14 +240,29 @@ export default function DoctorProfile() {
         <View style={styles.profileInfo}>
           <View style={styles.avatarContainer}>
             {(() => {
-              const imageUrl = getSafeProfileImageUrl(profileImage);
+              // Handle local file URIs directly, use getSafeProfileImageUrl for network URLs
+              let imageUrl: string | null = null;
+              
+              if (profileImage) {
+                if (profileImage.startsWith('file://')) {
+                  // Local file URI - use directly
+                  imageUrl = profileImage;
+                  console.log('🔍 ProfilePage - Using local file URI directly:', imageUrl);
+                } else {
+                  // Network URL - use getSafeProfileImageUrl
+                  imageUrl = getSafeProfileImageUrl(profileImage);
+                  console.log('🔍 ProfilePage - Using getSafeProfileImageUrl for network URL:', imageUrl);
+                }
+              }
+              
               console.log('🔍 ProfilePage - profileImage from context:', profileImage);
-              console.log('🔍 ProfilePage - imageUrl after getSafeProfileImageUrl:', imageUrl);
+              console.log('🔍 ProfilePage - final imageUrl:', imageUrl);
               console.log('🔍 ProfilePage - Image URL type:', typeof imageUrl);
               console.log('🔍 ProfilePage - Image URL length:', imageUrl?.length);
               
               return imageUrl ? (
                 <Image
+                  key={`${profileImageRefreshKey}-${forceImageRefresh}`}
                   source={{ uri: imageUrl }}
                   style={styles.avatar}
                   onError={(error) => {
@@ -274,7 +276,7 @@ export default function DoctorProfile() {
                   }}
                 />
               ) : (
-                <View style={styles.avatar}>
+                <View key={`${profileImageRefreshKey}-${forceImageRefresh}`} style={styles.avatar}>
                   <Text style={styles.avatarText}>
                     {user?.firstName?.[0]}{user?.lastName?.[0]}
                   </Text>
@@ -362,8 +364,29 @@ export default function DoctorProfile() {
       <DoctorEditProfileModal
         visible={editModalVisible}
         onClose={() => setEditModalVisible(false)}
-        onProfileUpdated={() => {
-          // Profile will be updated automatically through context
+        onProfileUpdated={async () => {
+          console.log('🔍 ProfilePage - onProfileUpdated called');
+          
+          // Force immediate refresh
+          console.log('🔍 ProfilePage - Forcing immediate profile image refresh');
+          setProfileImageRefreshKey(prev => prev + 1);
+          setForceImageRefresh(prev => prev + 1);
+          
+          // Also try to refresh from context
+          try {
+            await refreshProfileImage();
+            console.log('✅ ProfilePage - Profile image refreshed from context');
+          } catch (error) {
+            console.error('❌ ProfilePage - Error refreshing profile image:', error);
+          }
+          
+          // Force another refresh after a short delay
+          setTimeout(() => {
+            console.log('🔍 ProfilePage - Delayed refresh triggered');
+            setProfileImageRefreshKey(prev => prev + 1);
+            setForceImageRefresh(prev => prev + 1);
+          }, 100);
+          
           setEditModalVisible(false);
         }}
       />
@@ -396,6 +419,44 @@ export default function DoctorProfile() {
           // Availability settings updated successfully
           setAvailabilitySettingsModalVisible(false);
         }}
+      />
+
+      {/* Specializations Modal */}
+      <SpecializationsModal
+        visible={specializationsModalVisible}
+        onClose={() => setSpecializationsModalVisible(false)}
+        onSpecializationsUpdated={() => {
+          // Specializations updated successfully
+          setSpecializationsModalVisible(false);
+        }}
+      />
+
+      {/* Hospital Affiliations Modal */}
+      <HospitalAffiliationsModal
+        visible={hospitalAffiliationsModalVisible}
+        onClose={() => setHospitalAffiliationsModalVisible(false)}
+        onAffiliationsUpdated={() => {
+          // Hospital affiliations updated successfully
+          setHospitalAffiliationsModalVisible(false);
+        }}
+      />
+
+      {/* Help & FAQ Modal */}
+      <HelpFAQModal
+        visible={helpFAQModalVisible}
+        onClose={() => setHelpFAQModalVisible(false)}
+      />
+
+      {/* Contact Support Modal */}
+      <ContactSupportModal
+        visible={contactSupportModalVisible}
+        onClose={() => setContactSupportModalVisible(false)}
+      />
+
+      {/* About PharmaLink Modal */}
+      <AboutPharmaLinkModal
+        visible={aboutPharmaLinkModalVisible}
+        onClose={() => setAboutPharmaLinkModalVisible(false)}
       />
     </ScrollView>
   );
@@ -533,6 +594,7 @@ const styles = StyleSheet.create({
   },
   logoutSection: {
     margin: 20,
+    marginBottom: 100, // Add extra bottom margin to avoid tab overlap
   },
   logoutButton: {
     flexDirection: 'row',
@@ -558,6 +620,7 @@ const styles = StyleSheet.create({
   versionContainer: {
     alignItems: 'center',
     paddingVertical: 20,
+    marginBottom: 50, // Add extra bottom margin to avoid tab overlap
   },
   versionText: {
     fontSize: 12,

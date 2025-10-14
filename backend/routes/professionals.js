@@ -242,7 +242,7 @@ router.get('/facility/:facilityId', async (req, res) => {
     
     const query = `
       SELECT 
-        p.id, p.first_name, p.last_name, p.specialty, p.qualification,
+        p.id, p.user_id, p.first_name, p.last_name, p.specialty, p.qualification,
         p.experience_years, p.rating, p.total_reviews, p.is_available,
         p.profile_image, p.bio, p.facility_id,
         f.name as facility_name, f.facility_type

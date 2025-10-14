@@ -284,6 +284,128 @@ async function sendPasswordResetEmail(email, firstName, resetToken) {
 }
 
 /**
+ * Send appointment confirmation email to patient
+ * @param {string} patientEmail - Patient's email address
+ * @param {string} patientName - Patient's full name
+ * @param {string} doctorName - Doctor's name
+ * @param {string} appointmentDate - Appointment date
+ * @param {string} appointmentTime - Appointment time
+ * @param {string} appointmentType - Type of appointment
+ * @param {string} facilityName - Healthcare facility name
+ * @param {string} facilityAddress - Healthcare facility address
+ * @returns {Promise<boolean>} Success status
+ */
+async function sendAppointmentConfirmationEmail(patientEmail, patientName, doctorName, appointmentDate, appointmentTime, appointmentType, facilityName, facilityAddress) {
+  try {
+    const mailOptions = {
+      from: `"PharmaLink" <${emailConfig.auth.user}>`,
+      to: patientEmail,
+      subject: 'Appointment Confirmed - PharmaLink',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Appointment Confirmed - PharmaLink</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .appointment-details { background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #2ecc71; margin: 20px 0; }
+            .appointment-details h3 { color: #2ecc71; margin-top: 0; }
+            .detail-row { display: flex; margin: 10px 0; }
+            .detail-label { font-weight: bold; width: 120px; color: #555; }
+            .detail-value { flex: 1; color: #333; }
+            .success-badge { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; text-align: center; margin: 20px 0; font-weight: bold; }
+            .reminder { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 4px; margin: 20px 0; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .button { display: inline-block; background: #2ecc71; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>✅ Appointment Confirmed!</h1>
+              <p>Your appointment has been confirmed by your doctor</p>
+            </div>
+            
+            <div class="content">
+              <h2>Hello ${patientName}!</h2>
+              
+              <div class="success-badge">
+                🎉 Great news! Your appointment has been confirmed by Dr. ${doctorName}
+              </div>
+              
+              <div class="appointment-details">
+                <h3>📅 Appointment Details</h3>
+                <div class="detail-row">
+                  <span class="detail-label">Doctor:</span>
+                  <span class="detail-value">Dr. ${doctorName}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Date:</span>
+                  <span class="detail-value">${new Date(appointmentDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Time:</span>
+                  <span class="detail-value">${appointmentTime}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Type:</span>
+                  <span class="detail-value">${appointmentType}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Facility:</span>
+                  <span class="detail-value">${facilityName}</span>
+                </div>
+                ${facilityAddress ? `
+                <div class="detail-row">
+                  <span class="detail-label">Address:</span>
+                  <span class="detail-value">${facilityAddress}</span>
+                </div>
+                ` : ''}
+              </div>
+              
+              <div class="reminder">
+                <strong>📋 Important Reminders:</strong>
+                <ul>
+                  <li>Please arrive 15 minutes before your scheduled appointment time</li>
+                  <li>Bring a valid ID and your insurance card (if applicable)</li>
+                  <li>If you need to reschedule or cancel, please contact us at least 24 hours in advance</li>
+                  <li>If you have any questions, don't hesitate to reach out to us</li>
+                </ul>
+              </div>
+              
+              <p>We look forward to seeing you at your appointment!</p>
+              
+              <p>If you have any questions or need to make changes to your appointment, please contact us as soon as possible.</p>
+              
+              <p>Best regards,<br>
+              The PharmaLink Team</p>
+            </div>
+            
+            <div class="footer">
+              <p>This email was sent from PharmaLink. Please do not reply to this email.</p>
+              <p>© 2024 PharmaLink. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Appointment confirmation email sent successfully:', info.messageId);
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending appointment confirmation email:', error);
+    return false;
+  }
+}
+
+/**
  * Test email configuration
  * @returns {Promise<boolean>} Success status
  */
@@ -302,5 +424,6 @@ module.exports = {
   sendPharmacistCredentials,
   sendDoctorCredentials,
   sendPasswordResetEmail,
+  sendAppointmentConfirmationEmail,
   testEmailConnection
 };

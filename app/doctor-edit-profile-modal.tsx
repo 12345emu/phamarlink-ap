@@ -32,7 +32,7 @@ export default function DoctorEditProfileModal({
   onProfileUpdated 
 }: DoctorEditProfileModalProps) {
   const { user, updateUserProfile } = useAuth();
-  const { profileImage, updateProfileImage, refreshProfileImage } = useProfile();
+  const { profileImage, updateProfileImage } = useProfile();
   
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -154,10 +154,6 @@ export default function DoctorEditProfileModal({
         console.log('🔍 EditProfileModal - Updating profile image...');
         await updateProfileImage(profileImageUri);
         console.log('✅ EditProfileModal - Profile image updated');
-        
-        // Refresh the profile image to ensure it's updated
-        await refreshProfileImage();
-        console.log('✅ EditProfileModal - Profile image refreshed');
       }
 
       Alert.alert('Success', 'Profile updated successfully');
@@ -198,7 +194,19 @@ export default function DoctorEditProfileModal({
     
     // Priority 3: Use profileImage from context (existing uploaded image)
     if (profileImage) {
-      const safeUrl = getSafeProfileImageUrl(profileImage);
+      // Handle local file URIs directly, use getSafeProfileImageUrl for network URLs
+      let safeUrl: string | null = null;
+      
+      if (profileImage.startsWith('file://')) {
+        // Local file URI - use directly
+        safeUrl = profileImage;
+        console.log('🔍 EditProfileModal - Using local file URI directly:', safeUrl);
+      } else {
+        // Network URL - use getSafeProfileImageUrl
+        safeUrl = getSafeProfileImageUrl(profileImage);
+        console.log('🔍 EditProfileModal - Using getSafeProfileImageUrl for network URL:', safeUrl);
+      }
+      
       console.log('🔍 EditProfileModal - Using profileImage with safe URL:', safeUrl);
       return safeUrl;
     }

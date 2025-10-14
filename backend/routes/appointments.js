@@ -22,14 +22,21 @@ router.get('/', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.user_type;
     
+    console.log('🔍 Appointments API - Full request user object:', JSON.stringify(req.user, null, 2));
+    console.log('🔍 Appointments API - Extracted userId:', userId, 'Type:', typeof userId);
+    console.log('🔍 Appointments API - Extracted userRole:', userRole);
+    
     let whereClause = 'WHERE 1=1';
     let params = [];
     
-    // Filter by user role
-    if (userRole === 'patient') {
+    // For doctors, show ALL appointments without any filtering
+    if (userRole === 'doctor') {
+      console.log('🔍 Doctor - Showing ALL appointments without filtering');
+      // Remove all filtering - show all appointments
+    } else if (userRole === 'patient') {
       whereClause += ' AND a.user_id = ?';
       params.push(userId);
-    } else if (userRole === 'doctor' || userRole === 'pharmacist') {
+    } else if (userRole === 'pharmacist') {
       whereClause += ' AND a.facility_id IN (SELECT id FROM healthcare_facilities WHERE user_id = ?)';
       params.push(userId);
     }
@@ -72,17 +79,29 @@ router.get('/', authenticateToken, async (req, res) => {
         u.first_name, u.last_name, u.email, u.phone,
         hf.name as facility_name, hf.address as facility_address,
         hf.phone as facility_phone, hf.email as facility_email,
-        hf.latitude, hf.longitude
+        hf.latitude, hf.longitude,
+        pd.first_name as preferred_doctor_first_name,
+        pd.last_name as preferred_doctor_last_name,
+        pd.email as preferred_doctor_email,
+        hp.specialty as preferred_doctor_specialty
       FROM appointments a
       JOIN users u ON a.user_id = u.id
       JOIN healthcare_facilities hf ON a.facility_id = hf.id
+      LEFT JOIN users pd ON a.preferred_doctor = pd.id
+      LEFT JOIN healthcare_professionals hp ON a.preferred_doctor = hp.user_id
       ${whereClause}
       ORDER BY a.appointment_date ASC, a.created_at DESC
       LIMIT ? OFFSET ?
     `;
     
+    console.log('🔍 Final count query:', countQuery);
+    console.log('🔍 Final count params:', params);
+    
     const countResult = await executeQuery(countQuery, params);
     const appointmentsResult = await executeQuery(appointmentsQuery, [...params, parseInt(limit), offset]);
+    
+    console.log('🔍 Count result:', JSON.stringify(countResult, null, 2));
+    console.log('🔍 Appointments result count:', appointmentsResult.data?.length || 0);
     
     if (!countResult.success || !appointmentsResult.success) {
       return res.status(500).json({ success: false, message: 'Database error' });
@@ -120,10 +139,16 @@ router.get('/:id', authenticateToken, async (req, res) => {
         a.status, a.created_at, a.updated_at,
         u.first_name, u.last_name, u.email, u.phone,
         hf.name as facility_name, hf.address as facility_address,
-        hf.phone as facility_phone, hf.latitude, hf.longitude
+        hf.phone as facility_phone, hf.latitude, hf.longitude,
+        pd.first_name as preferred_doctor_first_name,
+        pd.last_name as preferred_doctor_last_name,
+        pd.email as preferred_doctor_email,
+        hp.specialty as preferred_doctor_specialty
       FROM appointments a
       JOIN users u ON a.user_id = u.id
       JOIN healthcare_facilities hf ON a.facility_id = hf.id
+      LEFT JOIN users pd ON a.preferred_doctor = pd.id
+      LEFT JOIN healthcare_professionals hp ON a.preferred_doctor = hp.user_id
       WHERE a.id = ?
     `;
     
@@ -155,8 +180,27 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create new appointment
 router.post('/', authenticateToken, requireRole(['patient']), [
   body('facility_id').isInt({ min: 1 }),
-  body('appointment_date').isISO8601(),
-  body('appointment_time').matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/),
+  body('appointment_date').isISO8601().custom((value) => {
+    console.log('🔍 Validating appointment_date:', value, 'Type:', typeof value);
+    if (!value) {
+      throw new Error('Appointment date is required');
+    }
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      throw new Error('Invalid date format');
+    }
+    return true;
+  }),
+  body('appointment_time').matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/).custom((value) => {
+    console.log('🔍 Validating appointment_time:', value, 'Type:', typeof value);
+    if (!value) {
+      throw new Error('Appointment time is required');
+    }
+    if (!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+      throw new Error('Invalid time format. Expected HH:MM format');
+    }
+    return true;
+  }),
   body('appointment_type').isIn(['consultation', 'checkup', 'followup', 'emergency', 'routine']),
   body('reason').isLength({ min: 10, max: 500 }).trim(),
   body('symptoms').optional().isArray(),
@@ -171,6 +215,16 @@ router.post('/', authenticateToken, requireRole(['patient']), [
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       console.log('❌ Validation errors:', errors.array());
+      console.log('❌ Request body for debugging:', JSON.stringify(req.body, null, 2));
+      console.log('❌ Individual field validation:');
+      console.log('  - facility_id:', req.body.facility_id, 'Type:', typeof req.body.facility_id);
+      console.log('  - appointment_date:', req.body.appointment_date, 'Type:', typeof req.body.appointment_date);
+      console.log('  - appointment_time:', req.body.appointment_time, 'Type:', typeof req.body.appointment_time);
+      console.log('  - appointment_type:', req.body.appointment_type, 'Type:', typeof req.body.appointment_type);
+      console.log('  - reason:', req.body.reason, 'Type:', typeof req.body.reason, 'Length:', req.body.reason?.length);
+      console.log('  - symptoms:', req.body.symptoms, 'Type:', typeof req.body.symptoms, 'IsArray:', Array.isArray(req.body.symptoms));
+      console.log('  - preferred_doctor:', req.body.preferred_doctor, 'Type:', typeof req.body.preferred_doctor);
+      console.log('  - notes:', req.body.notes, 'Type:', typeof req.body.notes);
       return res.status(400).json({ 
         success: false, 
         message: 'Validation error', 
@@ -229,6 +283,34 @@ router.post('/', authenticateToken, requireRole(['patient']), [
     }
     
     console.log('🔍 Inserting appointment into database...');
+    
+    // If preferred_doctor is provided, validate that the user_id exists and is associated with the facility
+    let preferredDoctorUserId = null;
+    if (appointmentData.preferred_doctor) {
+      console.log('🔍 Validating preferred doctor user_id:', appointmentData.preferred_doctor);
+      console.log('🔍 Facility ID:', appointmentData.facility_id);
+      
+      const professionalResult = await executeQuery(
+        'SELECT user_id, first_name, last_name FROM healthcare_professionals WHERE user_id = ? AND facility_id = ?',
+        [appointmentData.preferred_doctor, appointmentData.facility_id]
+      );
+      
+      console.log('🔍 Professional query result:', JSON.stringify(professionalResult, null, 2));
+      
+      if (professionalResult.success && professionalResult.data && professionalResult.data.length > 0) {
+        preferredDoctorUserId = appointmentData.preferred_doctor;
+        console.log('✅ Preferred doctor user_id validated:', preferredDoctorUserId);
+        console.log('✅ Professional details:', professionalResult.data[0]);
+      } else {
+        console.log('❌ Preferred doctor not found or not associated with this facility');
+        console.log('❌ Query result:', professionalResult);
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Preferred doctor not found or not available at this facility' 
+        });
+      }
+    }
+    
     const insertQuery = `
       INSERT INTO appointments (
         user_id, facility_id, appointment_date, appointment_time, appointment_type,
@@ -244,7 +326,7 @@ router.post('/', authenticateToken, requireRole(['patient']), [
       appointmentData.appointment_type,
       appointmentData.reason,
       JSON.stringify(appointmentData.symptoms || []),
-      appointmentData.preferred_doctor || null,
+      preferredDoctorUserId,
       appointmentData.notes || null
     ];
     
@@ -664,3 +746,5 @@ function generateTimeSlots(date, operatingHours) {
 }
 
 module.exports = router; 
+
+

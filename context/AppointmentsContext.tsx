@@ -20,6 +20,11 @@ export interface Appointment {
   doctor_name?: string;
   facility_phone?: string;
   facility_email?: string;
+  // Preferred doctor information
+  preferred_doctor_first_name?: string;
+  preferred_doctor_last_name?: string;
+  preferred_doctor_email?: string;
+  preferred_doctor_specialty?: string;
   // Additional fields for display
   hospitalName?: string;
   doctorName?: string;

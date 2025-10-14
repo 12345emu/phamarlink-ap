@@ -7,74 +7,66 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
+import { doctorDashboardService } from '../../services/doctorDashboardService';
 
 interface Appointment {
   id: number;
-  patientName: string;
-  patientEmail: string;
-  date: string;
-  time: string;
-  type: string;
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  user_id: number;
+  facility_id: number;
+  appointment_date: string;
+  appointment_time: string;
+  appointment_type: string;
+  reason: string;
+  symptoms: string;
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'in_progress';
   notes?: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  facility_name: string;
+  facility_address: string;
+  created_at: string;
 }
 
 export default function DoctorAppointments() {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'today' | 'pending' | 'confirmed'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'today' | 'pending' | 'confirmed' | 'in_progress' | 'completed'>('all');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadAppointments();
   }, []);
 
   const loadAppointments = async () => {
-    // TODO: Replace with actual API call
-    const mockAppointments: Appointment[] = [
-      {
-        id: 1,
-        patientName: 'John Doe',
-        patientEmail: 'john@example.com',
-        date: '2024-01-15',
-        time: '09:00 AM',
-        type: 'Consultation',
-        status: 'confirmed',
-        notes: 'Regular check-up',
-      },
-      {
-        id: 2,
-        patientName: 'Jane Smith',
-        patientEmail: 'jane@example.com',
-        date: '2024-01-15',
-        time: '10:30 AM',
-        type: 'Follow-up',
-        status: 'pending',
-        notes: 'Post-surgery follow-up',
-      },
-      {
-        id: 3,
-        patientName: 'Mike Johnson',
-        patientEmail: 'mike@example.com',
-        date: '2024-01-15',
-        time: '02:00 PM',
-        type: 'Check-up',
-        status: 'confirmed',
-      },
-      {
-        id: 4,
-        patientName: 'Sarah Wilson',
-        patientEmail: 'sarah@example.com',
-        date: '2024-01-16',
-        time: '11:00 AM',
-        type: 'Consultation',
-        status: 'pending',
-      },
-    ];
-    setAppointments(mockAppointments);
+    try {
+      setLoading(true);
+      setError(null);
+      console.log('🔍 DoctorAppointments - Loading appointments from API...');
+      
+      const appointmentsData = await doctorDashboardService.getAppointments(100, 1);
+      console.log('🔍 DoctorAppointments - API Response:', JSON.stringify(appointmentsData, null, 2));
+      console.log('🔍 DoctorAppointments - Sample appointment dates:', appointmentsData.slice(0, 3).map(apt => ({
+        id: apt.id,
+        date: apt.appointment_date,
+        time: apt.appointment_time
+      })));
+      
+      setAppointments(appointmentsData);
+      console.log('✅ DoctorAppointments - Appointments loaded:', appointmentsData.length);
+    } catch (error) {
+      console.error('❌ DoctorAppointments - Error loading appointments:', error);
+      setError('Failed to load appointments. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onRefresh = async () => {
@@ -84,33 +76,133 @@ export default function DoctorAppointments() {
   };
 
   const filteredAppointments = appointments.filter(appointment => {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // More robust date comparison
+    const appointmentDate = new Date(appointment.appointment_date);
+    const todayDate = new Date(today);
+    const isToday = appointmentDate.toDateString() === todayDate.toDateString();
+    
+    console.log('🔍 Filtering appointment:', {
+      appointmentDate: appointment.appointment_date,
+      parsedAppointmentDate: appointmentDate.toDateString(),
+      today: today,
+      parsedToday: todayDate.toDateString(),
+      selectedFilter: selectedFilter,
+      isToday: isToday,
+      stringMatch: appointment.appointment_date === today
+    });
+    
     switch (selectedFilter) {
       case 'today':
-        return appointment.date === '2024-01-15'; // Today's date
+        return isToday;
       case 'pending':
         return appointment.status === 'pending';
       case 'confirmed':
         return appointment.status === 'confirmed';
+      case 'in_progress':
+        return appointment.status === 'in_progress';
+      case 'completed':
+        return appointment.status === 'completed';
       default:
         return true;
     }
   });
 
-  const handleAppointmentAction = (appointmentId: number, action: 'confirm' | 'cancel') => {
+  const handleStartConsultation = async (appointmentId: number) => {
     Alert.alert(
-      action === 'confirm' ? 'Confirm Appointment' : 'Cancel Appointment',
+      'Start Consultation',
+      'Are you ready to start the consultation with this patient?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start Consultation',
+          onPress: async () => {
+            try {
+              console.log(`🔍 DoctorAppointments - Starting consultation for appointment ${appointmentId}`);
+              
+              const consultationData = await doctorDashboardService.startConsultation(appointmentId);
+              
+              // Update the local state
+              setAppointments(prevAppointments => 
+                prevAppointments.map(apt => 
+                  apt.id === appointmentId 
+                    ? { ...apt, status: 'in_progress' }
+                    : apt
+                )
+              );
+              
+              Alert.alert(
+                'Consultation Started',
+                `Consultation with ${consultationData.patient.name} has started successfully!`,
+                [
+                  { 
+                    text: 'Go to Consultation', 
+                    onPress: () => {
+                      // TODO: Navigate to consultation screen
+                      console.log('Navigate to consultation screen');
+                    }
+                  }
+                ]
+              );
+              
+              console.log(`✅ DoctorAppointments - Consultation started successfully for appointment ${appointmentId}`);
+            } catch (error) {
+              console.error(`❌ DoctorAppointments - Error starting consultation:`, error);
+              Alert.alert(
+                'Error',
+                'Failed to start consultation. Please try again.',
+                [{ text: 'OK' }]
+              );
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleAppointmentAction = async (appointmentId: number, action: 'confirm' | 'cancel' | 'complete') => {
+    Alert.alert(
+      action === 'confirm' ? 'Confirm Appointment' : action === 'complete' ? 'Complete Appointment' : 'Cancel Appointment',
       `Are you sure you want to ${action} this appointment?`,
       [
         { text: 'No', style: 'cancel' },
         {
           text: 'Yes',
-          onPress: () => {
-            // TODO: Implement API call
-            setAppointments(prev => prev.map(apt => 
-              apt.id === appointmentId 
-                ? { ...apt, status: action === 'confirm' ? 'confirmed' : 'cancelled' }
-                : apt
-            ));
+          onPress: async () => {
+            try {
+              console.log(`🔍 DoctorAppointments - ${action}ing appointment ${appointmentId}`);
+              const newStatus = action === 'confirm' ? 'confirmed' : action === 'complete' ? 'completed' : 'cancelled';
+              const success = await doctorDashboardService.updateAppointmentStatus(appointmentId, newStatus);
+              
+              if (success) {
+                // Update the local state
+                setAppointments(prevAppointments => 
+                  prevAppointments.map(apt => 
+                    apt.id === appointmentId 
+                      ? { ...apt, status: newStatus }
+                      : apt
+                  )
+                );
+                
+                Alert.alert(
+                  'Success',
+                  `Appointment ${action === 'confirm' ? 'confirmed' : 'cancelled'} successfully!`,
+                  [{ text: 'OK' }]
+                );
+                
+                console.log(`✅ DoctorAppointments - Appointment ${appointmentId} ${action}ed successfully`);
+              } else {
+                Alert.alert(
+                  'Error',
+                  `Failed to ${action} appointment. Please try again.`,
+                  [{ text: 'OK' }]
+                );
+              }
+            } catch (error) {
+              console.error(`❌ DoctorAppointments - Error ${action}ing appointment:`, error);
+              Alert.alert('Error', `Failed to ${action} appointment. Please try again.`);
+            }
           }
         }
       ]
@@ -132,6 +224,8 @@ export default function DoctorAppointments() {
     { key: 'today', label: 'Today' },
     { key: 'pending', label: 'Pending' },
     { key: 'confirmed', label: 'Confirmed' },
+    { key: 'in_progress', label: 'In Progress' },
+    { key: 'completed', label: 'Completed' },
   ];
 
   return (
@@ -146,7 +240,10 @@ export default function DoctorAppointments() {
                 styles.filterButton,
                 selectedFilter === filter.key && styles.activeFilterButton
               ]}
-              onPress={() => setSelectedFilter(filter.key as any)}
+              onPress={() => {
+                console.log('🔍 Filter changed to:', filter.key);
+                setSelectedFilter(filter.key as any);
+              }}
             >
               <Text style={[
                 styles.filterText,
@@ -166,7 +263,21 @@ export default function DoctorAppointments() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {filteredAppointments.length === 0 ? (
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#3498db" />
+            <Text style={styles.loadingText}>Loading appointments...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <FontAwesome name="exclamation-triangle" size={48} color="#e74c3c" />
+            <Text style={styles.errorTitle}>Unable to Load Appointments</Text>
+            <Text style={styles.errorMessage}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={loadAppointments}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filteredAppointments.length === 0 ? (
           <View style={styles.emptyState}>
             <FontAwesome name="calendar-o" size={60} color="#bdc3c7" />
             <Text style={styles.emptyText}>No appointments found</Text>
@@ -179,11 +290,15 @@ export default function DoctorAppointments() {
           </View>
         ) : (
           filteredAppointments.map((appointment) => (
-            <View key={appointment.id} style={styles.appointmentCard}>
+            <TouchableOpacity 
+              key={appointment.id} 
+              style={styles.appointmentCard}
+              onPress={() => router.push(`/appointment-details?appointmentId=${appointment.id}`)}
+            >
               <View style={styles.appointmentHeader}>
                 <View style={styles.patientInfo}>
-                  <Text style={styles.patientName}>{appointment.patientName}</Text>
-                  <Text style={styles.patientEmail}>{appointment.patientEmail}</Text>
+                  <Text style={styles.patientName}>{appointment.first_name} {appointment.last_name}</Text>
+                  <Text style={styles.patientEmail}>{appointment.email}</Text>
                 </View>
                 <View style={[
                   styles.statusBadge,
@@ -198,15 +313,23 @@ export default function DoctorAppointments() {
               <View style={styles.appointmentDetails}>
                 <View style={styles.detailRow}>
                   <FontAwesome name="calendar" size={14} color="#7f8c8d" />
-                  <Text style={styles.detailText}>{appointment.date}</Text>
+                  <Text style={styles.detailText}>{appointment.appointment_date}</Text>
                 </View>
                 <View style={styles.detailRow}>
                   <FontAwesome name="clock-o" size={14} color="#7f8c8d" />
-                  <Text style={styles.detailText}>{appointment.time}</Text>
+                  <Text style={styles.detailText}>{appointment.appointment_time}</Text>
                 </View>
                 <View style={styles.detailRow}>
                   <FontAwesome name="stethoscope" size={14} color="#7f8c8d" />
-                  <Text style={styles.detailText}>{appointment.type}</Text>
+                  <Text style={styles.detailText}>{appointment.appointment_type}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <FontAwesome name="hospital-o" size={14} color="#7f8c8d" />
+                  <Text style={styles.detailText}>{appointment.facility_name}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <FontAwesome name="file-text-o" size={14} color="#7f8c8d" />
+                  <Text style={styles.detailText}>{appointment.reason}</Text>
                 </View>
               </View>
 
@@ -240,17 +363,36 @@ export default function DoctorAppointments() {
                 <View style={styles.actionButtons}>
                   <TouchableOpacity
                     style={[styles.actionButton, styles.startButton]}
-                    onPress={() => {
-                      // TODO: Navigate to consultation screen
-                      Alert.alert('Start Consultation', 'This will open the consultation interface');
-                    }}
+                    onPress={() => handleStartConsultation(appointment.id)}
                   >
                     <FontAwesome name="play" size={14} color="#fff" />
                     <Text style={styles.actionButtonText}>Start Consultation</Text>
                   </TouchableOpacity>
                 </View>
               )}
-            </View>
+
+              {appointment.status === 'in_progress' && (
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.inProgressButton]}
+                    onPress={() => {
+                      // TODO: Navigate to consultation screen
+                      console.log('Navigate to consultation screen');
+                    }}
+                  >
+                    <FontAwesome name="user-md" size={14} color="#fff" />
+                    <Text style={styles.actionButtonText}>Continue Consultation</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.completeButton]}
+                    onPress={() => handleAppointmentAction(appointment.id, 'complete')}
+                  >
+                    <FontAwesome name="check-circle" size={14} color="#fff" />
+                    <Text style={styles.actionButtonText}>End Consultation</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
@@ -383,6 +525,12 @@ const styles = StyleSheet.create({
   startButton: {
     backgroundColor: '#3498db',
   },
+  completeButton: {
+    backgroundColor: '#27ae60',
+  },
+  inProgressButton: {
+    backgroundColor: '#f39c12',
+  },
   actionButtonText: {
     color: '#fff',
     fontSize: 12,
@@ -405,5 +553,48 @@ const styles = StyleSheet.create({
     color: '#bdc3c7',
     textAlign: 'center',
     marginTop: 5,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginTop: 15,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#e74c3c',
+    marginTop: 15,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    marginTop: 5,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#3498db',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

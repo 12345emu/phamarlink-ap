@@ -1,288 +1,466 @@
-import React, { useState } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Modal, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { StatusBar } from 'expo-status-bar';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  Platform,
+  Linking,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-
-const ACCENT = '#3498db';
-const LIGHT_GRAY = '#f8f9fa';
-const DARK_GRAY = '#6c757d';
-const PRIMARY = '#2c3e50';
-const SUCCESS = '#27ae60';
-const WARNING = '#f39c12';
-const DANGER = '#e74c3c';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 interface FAQItem {
   id: string;
   question: string;
   answer: string;
   category: string;
+  isExpanded: boolean;
 }
 
-const faqData: FAQItem[] = [
-  // Account & Profile
+interface HelpFAQModalProps {
+  visible: boolean;
+  onClose: () => void;
+}
+
+const FAQ_CATEGORIES = [
+  'Getting Started',
+  'Account & Profile',
+  'Appointments',
+  'Patients',
+  'Prescriptions',
+  'Billing & Payments',
+  'Technical Support',
+  'Privacy & Security',
+];
+
+const FAQ_DATA: FAQItem[] = [
+  // Getting Started
   {
     id: '1',
-    question: 'How do I update my profile information?',
-    answer: 'Go to your Profile page and tap on any field you want to edit. You can update your name, email, phone number, and other personal details.',
-    category: 'Account & Profile'
+    question: 'How do I get started with PharmaLink?',
+    answer: 'To get started, create your account, complete your profile with your medical credentials, and verify your identity. Once verified, you can start managing appointments, patients, and prescriptions.',
+    category: 'Getting Started',
+    isExpanded: false,
   },
   {
     id: '2',
-    question: 'How do I change my password?',
-    answer: 'In your Profile page, go to the Account section and tap "Change Password". Enter your current password and new password to update it.',
-    category: 'Account & Profile'
+    question: 'What documents do I need for verification?',
+    answer: 'You need your medical license, DEA number (if applicable), NPI number, and a valid government-issued ID. We may also require additional documentation based on your specialty.',
+    category: 'Getting Started',
+    isExpanded: false,
   },
   {
     id: '3',
-    question: 'How do I delete my account?',
-    answer: 'To delete your account, please contact our support team. We\'ll guide you through the process and ensure your data is properly removed.',
-    category: 'Account & Profile'
+    question: 'How long does verification take?',
+    answer: 'Verification typically takes 1-3 business days. We review all documents carefully to ensure compliance with medical regulations.',
+    category: 'Getting Started',
+    isExpanded: false,
   },
 
-  // Orders & Prescriptions
+  // Account & Profile
   {
     id: '4',
-    question: 'How do I track my orders?',
-    answer: 'Go to the Orders tab to view all your orders. Tap on any order to see detailed tracking information and current status.',
-    category: 'Orders & Prescriptions'
+    question: 'How do I update my profile information?',
+    answer: 'Go to your profile page and tap "Edit Profile". You can update your personal information, medical credentials, specializations, and hospital affiliations.',
+    category: 'Account & Profile',
+    isExpanded: false,
   },
   {
     id: '5',
-    question: 'How do I upload a prescription?',
-    answer: 'In your Profile page, tap "Prescriptions" in the Account section. Then tap the "+" button to upload a prescription image from your device.',
-    category: 'Orders & Prescriptions'
+    question: 'How do I change my password?',
+    answer: 'In your profile settings, tap "Change Password". Enter your current password and create a new secure password. You\'ll need to log in again on all devices.',
+    category: 'Account & Profile',
+    isExpanded: false,
   },
   {
     id: '6',
-    question: 'Can I cancel an order?',
-    answer: 'You can cancel orders that are still being processed. Go to your Orders tab, select the order, and tap "Cancel Order" if available.',
-    category: 'Orders & Prescriptions'
-  },
-  {
-    id: '7',
-    question: 'How do I reorder medicines?',
-    answer: 'Go to your Orders tab, find a previous order, and tap "Reorder" to add the same medicines to your cart.',
-    category: 'Orders & Prescriptions'
+    question: 'How do I update my profile photo?',
+    answer: 'Go to your profile page, tap the camera icon on your profile photo, and select a new image from your device. The image will be automatically resized and optimized.',
+    category: 'Account & Profile',
+    isExpanded: false,
   },
 
   // Appointments
   {
+    id: '7',
+    question: 'How do I schedule an appointment?',
+    answer: 'Go to the Appointments tab, tap the "+" button, and fill in the appointment details including patient, date, time, and reason for visit.',
+    category: 'Appointments',
+    isExpanded: false,
+  },
+  {
     id: '8',
-    question: 'How do I book an appointment?',
-    answer: 'Go to the Appointments tab, tap "Book Appointment", select a doctor or hospital, choose a date and time, and confirm your booking.',
-    category: 'Appointments'
+    question: 'How do I reschedule an appointment?',
+    answer: 'Find the appointment in your schedule, tap on it, and select "Reschedule". Choose a new date and time that works for both you and the patient.',
+    category: 'Appointments',
+    isExpanded: false,
   },
   {
     id: '9',
-    question: 'Can I reschedule my appointment?',
-    answer: 'Yes, go to your Appointments tab, select the appointment you want to reschedule, and tap "Reschedule" to choose a new date and time.',
-    category: 'Appointments'
-  },
-  {
-    id: '10',
-    question: 'How do I cancel an appointment?',
-    answer: 'In your Appointments tab, select the appointment and tap "Cancel Appointment". Please cancel at least 24 hours in advance.',
-    category: 'Appointments'
+    question: 'Can patients book appointments directly?',
+    answer: 'Yes, patients can book appointments through the patient portal if you have enabled online booking in your availability settings.',
+    category: 'Appointments',
+    isExpanded: false,
   },
 
-  // Medicines & Pharmacy
+  // Patients
+  {
+    id: '10',
+    question: 'How do I add a new patient?',
+    answer: 'Go to the Patients tab, tap "Add Patient", and enter their information including name, date of birth, contact details, and medical history.',
+    category: 'Patients',
+    isExpanded: false,
+  },
   {
     id: '11',
-    question: 'How do I search for medicines?',
-    answer: 'Go to the Medicines tab and use the search bar to find medicines by name, generic name, or condition. You can also browse by categories.',
-    category: 'Medicines & Pharmacy'
+    question: 'How do I view patient medical history?',
+    answer: 'Tap on any patient in your patient list to view their complete medical history, previous appointments, prescriptions, and notes.',
+    category: 'Patients',
+    isExpanded: false,
   },
   {
     id: '12',
-    question: 'How do I find nearby pharmacies?',
-    answer: 'Go to the Pharmacies tab to see a list of nearby pharmacies. You can also use the map view to find pharmacies in your area.',
-    category: 'Medicines & Pharmacy'
-  },
-  {
-    id: '13',
-    question: 'Are the medicines authentic?',
-    answer: 'Yes, all medicines are sourced from licensed pharmacies and verified suppliers. We ensure authenticity and quality of all products.',
-    category: 'Medicines & Pharmacy'
+    question: 'Can I import patient data from other systems?',
+    answer: 'Yes, we support importing patient data from most EHR systems. Contact our support team for assistance with data migration.',
+    category: 'Patients',
+    isExpanded: false,
   },
 
-  // Payment & Delivery
+  // Prescriptions
+  {
+    id: '13',
+    question: 'How do I write a prescription?',
+    answer: 'Select a patient, tap "New Prescription", choose the medication, dosage, and instructions. The prescription will be sent electronically to the pharmacy.',
+    category: 'Prescriptions',
+    isExpanded: false,
+  },
   {
     id: '14',
-    question: 'What payment methods do you accept?',
-    answer: 'We accept credit cards, debit cards, mobile money, and cash on delivery. Payment options may vary by location.',
-    category: 'Payment & Delivery'
+    question: 'Can I prescribe controlled substances?',
+    answer: 'Yes, but you must have a valid DEA number and the patient must be in your system. All controlled substance prescriptions are tracked and reported as required by law.',
+    category: 'Prescriptions',
+    isExpanded: false,
   },
   {
     id: '15',
-    question: 'How long does delivery take?',
-    answer: 'Delivery times vary by location. Standard delivery is 1-3 business days, while express delivery is same-day or next-day in select areas.',
-    category: 'Payment & Delivery'
+    question: 'How do I check prescription history?',
+    answer: 'Go to the patient\'s profile and tap "Prescription History" to view all previous prescriptions, refills, and medication adherence.',
+    category: 'Prescriptions',
+    isExpanded: false,
   },
+
+  // Billing & Payments
   {
     id: '16',
-    question: 'Is delivery free?',
-    answer: 'Free delivery is available for orders above a certain amount. Check the delivery options during checkout for specific terms.',
-    category: 'Payment & Delivery'
+    question: 'How do I set up billing?',
+    answer: 'Go to Settings > Billing to add your payment information, set consultation fees, and configure billing preferences.',
+    category: 'Billing & Payments',
+    isExpanded: false,
+  },
+  {
+    id: '17',
+    question: 'How do I process payments?',
+    answer: 'Payments are processed automatically through our secure payment system. You can view payment history and generate invoices from the billing section.',
+    category: 'Billing & Payments',
+    isExpanded: false,
+  },
+  {
+    id: '18',
+    question: 'What are the platform fees?',
+    answer: 'We charge a small transaction fee for each consultation. The exact fee structure is available in your billing settings and varies based on your subscription plan.',
+    category: 'Billing & Payments',
+    isExpanded: false,
   },
 
   // Technical Support
   {
-    id: '17',
-    question: 'The app is not working properly. What should I do?',
-    answer: 'Try closing and reopening the app, or restart your device. If the problem persists, contact our support team for assistance.',
-    category: 'Technical Support'
-  },
-  {
-    id: '18',
-    question: 'How do I update the app?',
-    answer: 'Go to your device\'s app store (Google Play Store or Apple App Store) and check for updates. Install any available updates for the best experience.',
-    category: 'Technical Support'
-  },
-  {
     id: '19',
-    question: 'I forgot my password. How do I reset it?',
-    answer: 'On the login screen, tap "Forgot Password" and enter your email address. You\'ll receive instructions to reset your password.',
-    category: 'Technical Support'
-  }
+    question: 'The app is running slowly. What should I do?',
+    answer: 'Try closing and reopening the app, check your internet connection, or restart your device. If the problem persists, contact our technical support team.',
+    category: 'Technical Support',
+    isExpanded: false,
+  },
+  {
+    id: '20',
+    question: 'I\'m having trouble logging in. What should I do?',
+    answer: 'Check your internet connection, ensure you\'re using the correct email and password, or try resetting your password. Contact support if the issue continues.',
+    category: 'Technical Support',
+    isExpanded: false,
+  },
+  {
+    id: '21',
+    question: 'How do I update the app?',
+    answer: 'The app updates automatically on most devices. You can also check for updates in your device\'s app store.',
+    category: 'Technical Support',
+    isExpanded: false,
+  },
+
+  // Privacy & Security
+  {
+    id: '22',
+    question: 'How is my data protected?',
+    answer: 'We use end-to-end encryption, HIPAA-compliant security measures, and regular security audits to protect your data. All data is stored in secure, certified data centers.',
+    category: 'Privacy & Security',
+    isExpanded: false,
+  },
+  {
+    id: '23',
+    question: 'Can I export my data?',
+    answer: 'Yes, you can export your data at any time. Go to Settings > Data Export to download your information in a standard format.',
+    category: 'Privacy & Security',
+    isExpanded: false,
+  },
+  {
+    id: '24',
+    question: 'How do I delete my account?',
+    answer: 'Contact our support team to request account deletion. We\'ll guide you through the process and ensure all data is properly removed according to regulations.',
+    category: 'Privacy & Security',
+    isExpanded: false,
+  },
 ];
 
-
-export default function HelpFAQModal() {
-  const router = useRouter();
+export default function HelpFAQModal({ visible, onClose }: HelpFAQModalProps) {
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
-
-  const filteredFAQs = faqData.filter(faq => {
-    const matchesSearch = searchQuery === '' || 
-      faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      faq.answer.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesSearch;
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [faqItems, setFaqItems] = useState<FAQItem[]>(FAQ_DATA);
+  const [contactForm, setContactForm] = useState({
+    subject: '',
+    message: '',
+    priority: 'Medium',
   });
 
-  const toggleExpanded = (id: string) => {
-    const newExpanded = new Set(expandedItems);
-    if (newExpanded.has(id)) {
-      newExpanded.delete(id);
-    } else {
-      newExpanded.add(id);
-    }
-    setExpandedItems(newExpanded);
+  const categories = ['All', ...FAQ_CATEGORIES];
+
+  // Filter FAQ items based on search and category
+  const filteredFAQItems = faqItems.filter(item => {
+    const matchesSearch = item.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.answer.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  const handleToggleFAQ = (id: string) => {
+    setFaqItems(prev => 
+      prev.map(item => 
+        item.id === id ? { ...item, isExpanded: !item.isExpanded } : item
+      )
+    );
   };
 
-  const handleContactSupport = () => {
-    router.push('/contact-support-modal');
+  const handleContactSupport = async () => {
+    if (!contactForm.subject.trim() || !contactForm.message.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    try {
+      // TODO: Send support request to backend
+      console.log('🔍 HelpFAQModal - Sending support request:', contactForm);
+      
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      Alert.alert('Success', 'Your support request has been sent. We\'ll get back to you within 24 hours.', [
+        {
+          text: 'OK',
+          onPress: () => {
+            setContactForm({ subject: '', message: '', priority: 'Medium' });
+          }
+        }
+      ]);
+    } catch (error) {
+      console.error('❌ HelpFAQModal - Error sending support request:', error);
+      Alert.alert('Error', 'Failed to send support request. Please try again.');
+    }
   };
+
+  const handleCallSupport = () => {
+    const phoneNumber = '+1-800-PHARMALINK';
+    Linking.openURL(`tel:${phoneNumber}`);
+  };
+
+  const handleEmailSupport = () => {
+    const email = 'support@pharmalink.com';
+    const subject = 'Support Request';
+    Linking.openURL(`mailto:${email}?subject=${encodeURIComponent(subject)}`);
+  };
+
+  const renderFAQItem = (item: FAQItem) => (
+    <View key={item.id} style={styles.faqItem}>
+      <TouchableOpacity
+        style={styles.faqQuestion}
+        onPress={() => handleToggleFAQ(item.id)}
+      >
+        <Text style={styles.faqQuestionText}>{item.question}</Text>
+        <FontAwesome
+          name={item.isExpanded ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color="#3498db"
+        />
+      </TouchableOpacity>
+      {item.isExpanded && (
+        <View style={styles.faqAnswer}>
+          <Text style={styles.faqAnswerText}>{item.answer}</Text>
+        </View>
+      )}
+    </View>
+  );
 
   return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
     <View style={styles.container}>
-      <StatusBar style="light" />
-      
-      {/* Header with Gradient */}
+        {/* Header */}
       <LinearGradient
-        colors={[ACCENT, '#2980b9']}
+          colors={['#3498db', '#2980b9']}
         style={styles.header}
-      >
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
         >
-          <FontAwesome name="arrow-left" size={20} color="white" />
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <FontAwesome name="times" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Help & FAQ</Text>
-        <TouchableOpacity
-          onPress={handleContactSupport}
-          style={styles.supportButton}
-        >
-          <FontAwesome name="headphones" size={20} color="white" />
-        </TouchableOpacity>
+            <View style={styles.headerSpacer} />
+          </View>
       </LinearGradient>
 
-      {/* Search Bar */}
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {/* Search */}
       <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <FontAwesome name="search" size={16} color={ACCENT} style={styles.searchIcon} />
+            <View style={styles.searchInputContainer}>
+              <FontAwesome name="search" size={16} color="#95a5a6" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search FAQ..."
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholderTextColor={DARK_GRAY}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-              <FontAwesome name="times" size={14} color={DARK_GRAY} />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-
-      {/* FAQ List */}
-      <ScrollView style={styles.faqContainer} showsVerticalScrollIndicator={false}>
-        {filteredFAQs.length === 0 ? (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyStateIcon}>
-              <FontAwesome name="question-circle" size={48} color={ACCENT} />
+                placeholder="Search help topics..."
+                placeholderTextColor="#95a5a6"
+              />
             </View>
-            <Text style={styles.emptyStateText}>No FAQs found</Text>
-            <Text style={styles.emptyStateSubtext}>
-              Try adjusting your search or category filter
-            </Text>
           </View>
-        ) : (
-          filteredFAQs.map((faq) => (
-            <View key={faq.id} style={styles.faqItem}>
-              <TouchableOpacity
-                style={styles.faqQuestion}
-                onPress={() => toggleExpanded(faq.id)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.faqQuestionContent}>
-                  <View style={styles.faqIconContainer}>
-                    <FontAwesome name="question-circle" size={16} color={ACCENT} />
-                  </View>
-                  <Text style={styles.faqQuestionText}>{faq.question}</Text>
-                </View>
-                <FontAwesome
-                  name={expandedItems.has(faq.id) ? "chevron-up" : "chevron-down"}
-                  size={16}
-                  color={ACCENT}
-                />
-              </TouchableOpacity>
-              
-              {expandedItems.has(faq.id) && (
-                <View style={styles.faqAnswer}>
-                  <View style={styles.faqAnswerContent}>
-                    <View style={styles.faqAnswerIcon}>
-                      <FontAwesome name="lightbulb-o" size={14} color={SUCCESS} />
-                    </View>
-                    <Text style={styles.faqAnswerText}>{faq.answer}</Text>
-                  </View>
-                </View>
-              )}
-            </View>
-          ))
-        )}
-      </ScrollView>
 
-      {/* Contact Support Button */}
-      <View style={styles.contactContainer}>
+          {/* Category Filters */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryContainer}>
+            {categories.map(category => (
+              <TouchableOpacity
+                key={category}
+                style={[
+                  styles.categoryChip,
+                  selectedCategory === category && styles.activeCategoryChip
+                ]}
+                onPress={() => setSelectedCategory(category)}
+              >
+                <Text style={[
+                  styles.categoryChipText,
+                  selectedCategory === category && styles.activeCategoryChipText
+                ]}>
+                  {category}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* FAQ Section */}
+          <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
+          <View style={styles.faqContainer}>
+            {filteredFAQItems.map(renderFAQItem)}
+                  </View>
+
+          {/* Contact Support Section */}
+          <Text style={styles.sectionTitle}>Still Need Help?</Text>
+          <View style={styles.contactContainer}>
+            <View style={styles.contactCard}>
+              <FontAwesome name="phone" size={24} color="#3498db" />
+              <View style={styles.contactInfo}>
+                <Text style={styles.contactTitle}>Call Support</Text>
+                <Text style={styles.contactSubtitle}>+1-800-PHARMALINK</Text>
+                <Text style={styles.contactHours}>Mon-Fri: 8AM-6PM EST</Text>
+                </View>
+              <TouchableOpacity style={styles.contactButton} onPress={handleCallSupport}>
+                <FontAwesome name="phone" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.contactCard}>
+              <FontAwesome name="envelope" size={24} color="#3498db" />
+              <View style={styles.contactInfo}>
+                <Text style={styles.contactTitle}>Email Support</Text>
+                <Text style={styles.contactSubtitle}>support@pharmalink.com</Text>
+                <Text style={styles.contactHours}>24/7 Response</Text>
+                    </View>
+              <TouchableOpacity style={styles.contactButton} onPress={handleEmailSupport}>
+                <FontAwesome name="envelope" size={16} color="#fff" />
+              </TouchableOpacity>
+                  </View>
+                </View>
+
+          {/* Support Request Form */}
+          <Text style={styles.sectionTitle}>Send Support Request</Text>
+          <View style={styles.formContainer}>
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Subject *</Text>
+              <TextInput
+                style={styles.formInput}
+                value={contactForm.subject}
+                onChangeText={(value) => setContactForm(prev => ({ ...prev, subject: value }))}
+                placeholder="Brief description of your issue"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Priority</Text>
+              <View style={styles.priorityContainer}>
+                {['Low', 'Medium', 'High'].map(priority => (
         <TouchableOpacity
-          style={styles.contactButton}
-          onPress={handleContactSupport}
-        >
-          <LinearGradient
-            colors={[ACCENT, '#2980b9']}
-            style={styles.contactButtonGradient}
-          >
-            <FontAwesome name="headphones" size={20} color="white" />
-            <Text style={styles.contactButtonText}>Contact Support</Text>
-          </LinearGradient>
+                    key={priority}
+                    style={[
+                      styles.priorityButton,
+                      contactForm.priority === priority && styles.activePriorityButton
+                    ]}
+                    onPress={() => setContactForm(prev => ({ ...prev, priority }))}
+                  >
+                    <Text style={[
+                      styles.priorityButtonText,
+                      contactForm.priority === priority && styles.activePriorityButtonText
+                    ]}>
+                      {priority}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Message *</Text>
+              <TextInput
+                style={[styles.formInput, styles.textArea]}
+                value={contactForm.message}
+                onChangeText={(value) => setContactForm(prev => ({ ...prev, message: value }))}
+                placeholder="Describe your issue in detail..."
+                multiline
+                numberOfLines={4}
+              />
+            </View>
+
+            <TouchableOpacity style={styles.submitButton} onPress={handleContactSupport}>
+              <FontAwesome name="paper-plane" size={16} color="#fff" />
+              <Text style={styles.submitButtonText}>Send Support Request</Text>
         </TouchableOpacity>
+          </View>
+        </ScrollView>
       </View>
-    </View>
+    </Modal>
   );
 }
 
@@ -292,227 +470,251 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    paddingTop: 60,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
   },
-  backButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+  closeButton: {
+    padding: 8,
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: 'white',
-    textAlign: 'center',
-    letterSpacing: 0.5,
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
   },
-  supportButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+  headerSpacer: {
+    width: 40,
+  },
+  content: {
+    flex: 1,
+    padding: 20,
   },
   searchContainer: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 4,
+    marginBottom: 15,
   },
-  searchBar: {
+  searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingHorizontal: 24,
-    paddingVertical: 18,
-    borderWidth: 1.5,
+    borderRadius: 15,
+    borderWidth: 2,
     borderColor: '#e1e8ed',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
   },
   searchIcon: {
     marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    fontSize: 17,
-    color: PRIMARY,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+    fontSize: 16,
+    color: '#2c3e50',
   },
-  clearButton: {
-    padding: 6,
-    marginLeft: 8,
-    borderRadius: 12,
-    backgroundColor: '#f1f3f4',
+  categoryContainer: {
+    marginBottom: 20,
+    paddingVertical: 0,
+  },
+  categoryChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: '#f5f5f5',
+    marginRight: 6,
+    alignItems: 'center',
+    borderWidth: 0,
+    shadowOpacity: 0,
+    elevation: 0,
+    height: 36,
+    justifyContent: 'center',
+  },
+  activeCategoryChip: {
+    backgroundColor: '#3498db',
+  },
+  categoryChipText: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  activeCategoryChipText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 15,
+    marginTop: 20,
   },
   faqContainer: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 20,
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 100,
-  },
-  emptyStateIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(52, 152, 219, 0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  emptyStateText: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: PRIMARY,
-    marginBottom: 12,
-    letterSpacing: 0.5,
-  },
-  emptyStateSubtext: {
-    fontSize: 17,
-    color: DARK_GRAY,
-    textAlign: 'center',
-    lineHeight: 24,
-    fontWeight: '500',
-    paddingHorizontal: 40,
+    marginBottom: 20,
   },
   faqItem: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    marginVertical: 8,
+    borderRadius: 12,
+    marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 4,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#f8f9fa',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   faqQuestion: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
-  },
-  faqQuestionContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  faqIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(52, 152, 219, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+    padding: 16,
   },
   faqQuestionText: {
-    flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: PRIMARY,
-    lineHeight: 22,
-    letterSpacing: 0.2,
+    color: '#2c3e50',
+    flex: 1,
+    marginRight: 12,
   },
   faqAnswer: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
     borderTopWidth: 1,
-    borderTopColor: '#e9ecef',
-  },
-  faqAnswerContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  faqAnswerIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(39, 174, 96, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    marginTop: 2,
+    borderTopColor: '#f1f2f6',
   },
   faqAnswerText: {
-    flex: 1,
-    fontSize: 15,
-    color: DARK_GRAY,
-    lineHeight: 22,
-    fontWeight: '500',
-    letterSpacing: 0.1,
+    fontSize: 14,
+    color: '#5a6c7d',
+    lineHeight: 20,
   },
   contactContainer: {
-    padding: 24,
+    marginBottom: 20,
+  },
+  contactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  contactInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  contactTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  contactSubtitle: {
+    fontSize: 14,
+    color: '#3498db',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  contactHours: {
+    fontSize: 12,
+    color: '#7f8c8d',
   },
   contactButton: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    overflow: 'hidden',
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: '#3498db',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  contactButtonGradient: {
+  formContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  formInput: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e1e8ed',
+    color: '#2c3e50',
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  priorityContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  priorityButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e1e8ed',
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  activePriorityButton: {
+    backgroundColor: '#3498db',
+    borderColor: '#2980b9',
+  },
+  priorityButtonText: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    fontWeight: '500',
+  },
+  activePriorityButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  submitButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 40,
+    backgroundColor: '#3498db',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 10,
   },
-  contactButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '800',
-    marginLeft: 12,
-    letterSpacing: 0.5,
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });

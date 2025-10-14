@@ -27,6 +27,7 @@ const utilRoutes = require('./routes/utils');
 const cartRoutes = require('./routes/cart');
 const trackingRoutes = require('./routes/tracking');
 const prescriptionRoutes = require('./routes/prescriptions');
+const doctorDashboardRoutes = require('./routes/doctor-dashboard');
 
 const app = express();
 const server = http.createServer(app);
@@ -127,6 +128,7 @@ app.use('/api/utils', utilRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/doctor-dashboard', doctorDashboardRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -209,7 +211,7 @@ const startServer = async () => {
       console.log(`🔌 WebSocket status: http://localhost:${PORT}/ws/status`);
       console.log(`📊 API Base URL: http://172.20.10.3:${PORT}/api`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`⚡ WebSocket: ws://172.20.10.3:${PORT}/ws/chat`);
+      console.log(`⚡ WebSocket: ws://172.20.10.4:${PORT}/ws/chat`);
       console.log('⏰ Started at:', new Date().toLocaleString());
       console.log('🔧 Features: Real-time chat, Optimized queries, Rate limiting');
     });

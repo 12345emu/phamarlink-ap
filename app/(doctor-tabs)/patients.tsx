@@ -7,70 +7,85 @@ import {
   TouchableOpacity,
   RefreshControl,
   TextInput,
+  Alert,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
+import { doctorDashboardService } from '../../services/doctorDashboardService';
+import PatientHistoryModal from '../patient-history-modal';
+import PrescriptionModal from '../prescription-modal';
+import PatientChatModal from '../patient-chat-modal';
 
 interface Patient {
   id: number;
   name: string;
   email: string;
   phone: string;
-  lastVisit: string;
-  nextAppointment?: string;
+  lastVisit: string | null;
+  nextAppointment?: string | null;
+  totalAppointments: number;
   status: 'active' | 'inactive';
+  patientSince: string;
 }
 
 export default function DoctorPatients() {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [error, setError] = useState<string | null>(null);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 20,
+    pages: 0
+  });
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
+  const [prescriptionModalVisible, setPrescriptionModalVisible] = useState(false);
+  const [chatModalVisible, setChatModalVisible] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<{ id: number; name: string } | null>(null);
 
   useEffect(() => {
     loadPatients();
   }, []);
 
+  useEffect(() => {
+    // Debounce search
+    const timeoutId = setTimeout(() => {
+      loadPatients();
+    }, 500);
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, selectedFilter]);
+
   const loadPatients = async () => {
-    // TODO: Replace with actual API call
-    const mockPatients: Patient[] = [
-      {
-        id: 1,
-        name: 'John Doe',
-        email: 'john@example.com',
-        phone: '+233 24 123 4567',
-        lastVisit: '2024-01-10',
-        nextAppointment: '2024-01-20',
-        status: 'active',
-      },
-      {
-        id: 2,
-        name: 'Jane Smith',
-        email: 'jane@example.com',
-        phone: '+233 24 234 5678',
-        lastVisit: '2024-01-08',
-        status: 'active',
-      },
-      {
-        id: 3,
-        name: 'Mike Johnson',
-        email: 'mike@example.com',
-        phone: '+233 24 345 6789',
-        lastVisit: '2023-12-15',
-        status: 'inactive',
-      },
-      {
-        id: 4,
-        name: 'Sarah Wilson',
-        email: 'sarah@example.com',
-        phone: '+233 24 456 7890',
-        lastVisit: '2024-01-12',
-        nextAppointment: '2024-01-25',
-        status: 'active',
-      },
-    ];
-    setPatients(mockPatients);
+    try {
+      setLoading(true);
+      setError(null);
+      
+      console.log('🔍 DoctorPatients - Loading patients with filters:', { searchQuery, selectedFilter });
+      
+      const response = await doctorDashboardService.getPatients(20, 1, searchQuery, selectedFilter);
+      
+      console.log('🔍 DoctorPatients - API Response:', JSON.stringify(response, null, 2));
+      
+      if (response && response.patients) {
+        setPatients(response.patients);
+        setPagination(response.pagination);
+        console.log('✅ DoctorPatients - Patients loaded successfully:', response.patients.length);
+      } else {
+        setPatients([]);
+        setPagination({ total: 0, page: 1, limit: 20, pages: 0 });
+        console.log('⚠️ DoctorPatients - No patients data received');
+      }
+    } catch (error) {
+      console.error('❌ DoctorPatients - Error loading patients:', error);
+      setError('Failed to load patients. Please try again.');
+      setPatients([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onRefresh = async () => {
@@ -79,12 +94,33 @@ export default function DoctorPatients() {
     setRefreshing(false);
   };
 
-  const filteredPatients = patients.filter(patient => {
-    const matchesSearch = patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         patient.email.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = selectedFilter === 'all' || patient.status === selectedFilter;
-    return matchesSearch && matchesFilter;
-  });
+  const handlePatientAction = (patientId: number, action: 'history' | 'chat' | 'prescribe', patientName: string) => {
+    if (action === 'history') {
+      setSelectedPatient({ id: patientId, name: patientName });
+      setHistoryModalVisible(true);
+    } else if (action === 'prescribe') {
+      setSelectedPatient({ id: patientId, name: patientName });
+      setPrescriptionModalVisible(true);
+    } else if (action === 'chat') {
+      setSelectedPatient({ id: patientId, name: patientName });
+      setChatModalVisible(true);
+    }
+  };
+
+  const closeHistoryModal = () => {
+    setHistoryModalVisible(false);
+    setSelectedPatient(null);
+  };
+
+  const closePrescriptionModal = () => {
+    setPrescriptionModalVisible(false);
+    setSelectedPatient(null);
+  };
+
+  const closeChatModal = () => {
+    setChatModalVisible(false);
+    setSelectedPatient(null);
+  };
 
   const filters = [
     { key: 'all', label: 'All Patients' },
@@ -138,7 +174,21 @@ export default function DoctorPatients() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {filteredPatients.length === 0 ? (
+        {loading ? (
+          <View style={styles.loadingState}>
+            <FontAwesome name="spinner" size={40} color="#3498db" />
+            <Text style={styles.loadingText}>Loading patients...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorState}>
+            <FontAwesome name="exclamation-triangle" size={60} color="#e74c3c" />
+            <Text style={styles.errorText}>Error Loading Patients</Text>
+            <Text style={styles.errorSubtext}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={loadPatients}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : patients.length === 0 ? (
           <View style={styles.emptyState}>
             <FontAwesome name="users" size={60} color="#bdc3c7" />
             <Text style={styles.emptyText}>No patients found</Text>
@@ -150,7 +200,7 @@ export default function DoctorPatients() {
             </Text>
           </View>
         ) : (
-          filteredPatients.map((patient) => (
+          patients.map((patient) => (
             <TouchableOpacity
               key={patient.id}
               style={styles.patientCard}
@@ -184,46 +234,44 @@ export default function DoctorPatients() {
                 <View style={styles.detailRow}>
                   <FontAwesome name="calendar" size={14} color="#7f8c8d" />
                   <Text style={styles.detailLabel}>Last Visit:</Text>
-                  <Text style={styles.detailText}>{patient.lastVisit}</Text>
+                  <Text style={styles.detailText}>
+                    {patient.lastVisit ? new Date(patient.lastVisit).toLocaleDateString() : 'No visits yet'}
+                  </Text>
                 </View>
                 {patient.nextAppointment && (
                   <View style={styles.detailRow}>
                     <FontAwesome name="clock-o" size={14} color="#7f8c8d" />
                     <Text style={styles.detailLabel}>Next Appointment:</Text>
                     <Text style={[styles.detailText, { color: '#3498db' }]}>
-                      {patient.nextAppointment}
+                      {new Date(patient.nextAppointment).toLocaleDateString()}
                     </Text>
                   </View>
                 )}
+                <View style={styles.detailRow}>
+                  <FontAwesome name="stethoscope" size={14} color="#7f8c8d" />
+                  <Text style={styles.detailLabel}>Total Appointments:</Text>
+                  <Text style={styles.detailText}>{patient.totalAppointments}</Text>
+                </View>
               </View>
 
               <View style={styles.actionButtons}>
                 <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={() => {
-                    // TODO: Navigate to patient medical history
-                    console.log('View medical history:', patient.id);
-                  }}
+                  onPress={() => handlePatientAction(patient.id, 'history', patient.name)}
                 >
                   <FontAwesome name="file-text-o" size={14} color="#3498db" />
                   <Text style={styles.actionButtonText}>History</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={() => {
-                    // TODO: Navigate to chat with patient
-                    console.log('Chat with patient:', patient.id);
-                  }}
+                  onPress={() => handlePatientAction(patient.id, 'chat', patient.name)}
                 >
                   <FontAwesome name="comments" size={14} color="#2ecc71" />
                   <Text style={styles.actionButtonText}>Chat</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.actionButton}
-                  onPress={() => {
-                    // TODO: Create prescription for patient
-                    console.log('Create prescription:', patient.id);
-                  }}
+                  onPress={() => handlePatientAction(patient.id, 'prescribe', patient.name)}
                 >
                   <FontAwesome name="plus" size={14} color="#e74c3c" />
                   <Text style={styles.actionButtonText}>Prescribe</Text>
@@ -233,6 +281,36 @@ export default function DoctorPatients() {
           ))
         )}
       </ScrollView>
+
+        {/* Patient History Modal */}
+        {selectedPatient && (
+          <PatientHistoryModal
+            visible={historyModalVisible}
+            onClose={closeHistoryModal}
+            patientId={selectedPatient.id}
+            patientName={selectedPatient.name}
+          />
+        )}
+
+        {/* Prescription Modal */}
+        {selectedPatient && (
+          <PrescriptionModal
+            visible={prescriptionModalVisible}
+            onClose={closePrescriptionModal}
+            patientId={selectedPatient.id}
+            patientName={selectedPatient.name}
+          />
+        )}
+
+        {/* Chat Modal */}
+        {selectedPatient && (
+          <PatientChatModal
+            visible={chatModalVisible}
+            onClose={closeChatModal}
+            patientId={selectedPatient.id}
+            patientName={selectedPatient.name}
+          />
+        )}
     </View>
   );
 }
@@ -402,5 +480,47 @@ const styles = StyleSheet.create({
     color: '#bdc3c7',
     textAlign: 'center',
     marginTop: 5,
+  },
+  loadingState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#3498db',
+    marginTop: 15,
+    fontWeight: '500',
+  },
+  errorState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#e74c3c',
+    marginTop: 15,
+  },
+  errorSubtext: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    marginTop: 5,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#3498db',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
