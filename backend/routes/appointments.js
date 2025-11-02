@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, requireRole, requireOwnership } = require('../middleware/auth');
 const { executeQuery, executeTransaction } = require('../config/database');
+const pushNotificationService = require('../services/pushNotificationService');
 
 const router = express.Router();
 
@@ -343,6 +344,47 @@ router.post('/', authenticateToken, requireRole(['patient']), [
     }
     
     console.log('✅ Appointment created successfully, ID:', insertResult.data.insertId);
+    
+    // Send push notification to the preferred doctor if specified
+    if (appointmentData.preferred_doctor) {
+      try {
+        console.log('🔔 Sending appointment notification to doctor:', appointmentData.preferred_doctor);
+        
+        // Get patient information for the notification
+        const patientQuery = 'SELECT first_name, last_name FROM users WHERE id = ?';
+        const patientResult = await executeQuery(patientQuery, [userId]);
+        
+        if (patientResult.success && patientResult.data.length > 0) {
+          const patient = patientResult.data[0];
+          const patientName = `${patient.first_name} ${patient.last_name}`;
+          
+          // Create appointment notification
+          const notificationData = pushNotificationService.createAppointmentNotification(
+            patientName,
+            appointmentData.appointment_date,
+            appointmentData.appointment_time
+          );
+          
+          // Send notification to the doctor
+          const notificationResult = await pushNotificationService.sendNotificationToUser(
+            appointmentData.preferred_doctor,
+            notificationData
+          );
+          
+          if (notificationResult.success) {
+            console.log('✅ Appointment notification sent successfully to doctor');
+          } else {
+            console.log('⚠️ Failed to send appointment notification:', notificationResult.message);
+          }
+        } else {
+          console.log('⚠️ Could not fetch patient information for notification');
+        }
+      } catch (notificationError) {
+        console.error('❌ Error sending appointment notification:', notificationError);
+        // Don't fail the appointment creation if notification fails
+      }
+    }
+    
     res.status(201).json({ 
       success: true, 
       message: 'Appointment scheduled successfully',
@@ -439,6 +481,99 @@ router.patch('/:id/status', authenticateToken, requireRole(['doctor', 'pharmacis
          WHERE id = ?`,
         [status, notes, id]
       );
+    }
+    
+    // Send push notification to patient about status change
+    try {
+      console.log('🔔 Sending appointment status notification to patient:', appointment.user_id);
+      
+      // Get doctor information for the notification
+      const doctorQuery = 'SELECT first_name, last_name FROM users WHERE id = ?';
+      const doctorResult = await executeQuery(doctorQuery, [appointment.preferred_doctor]);
+      
+      if (doctorResult.success && doctorResult.data.length > 0) {
+        const doctor = doctorResult.data[0];
+        const doctorName = `Dr. ${doctor.first_name} ${doctor.last_name}`;
+        
+        // Create status notification based on the new status
+        let notificationData;
+        switch (status) {
+          case 'confirmed':
+            notificationData = {
+              title: 'Appointment Confirmed',
+              body: `Your appointment with ${doctorName} has been confirmed for ${appointment.appointment_date} at ${appointment.appointment_time}`,
+              data: {
+                type: 'appointment',
+                appointmentId: id,
+                status: 'confirmed',
+                doctorName
+              },
+              sound: true,
+              badge: 1
+            };
+            break;
+          case 'cancelled':
+            notificationData = {
+              title: 'Appointment Cancelled',
+              body: `Your appointment with ${doctorName} scheduled for ${appointment.appointment_date} has been cancelled`,
+              data: {
+                type: 'appointment',
+                appointmentId: id,
+                status: 'cancelled',
+                doctorName
+              },
+              sound: true,
+              badge: 1
+            };
+            break;
+          case 'rescheduled':
+            notificationData = {
+              title: 'Appointment Rescheduled',
+              body: `Your appointment with ${doctorName} has been rescheduled to ${newDate} at ${newTime}`,
+              data: {
+                type: 'appointment',
+                appointmentId: id,
+                status: 'rescheduled',
+                doctorName,
+                newDate,
+                newTime
+              },
+              sound: true,
+              badge: 1
+            };
+            break;
+          default:
+            notificationData = {
+              title: 'Appointment Update',
+              body: `Your appointment with ${doctorName} status has been updated to ${status}`,
+              data: {
+                type: 'appointment',
+                appointmentId: id,
+                status: status,
+                doctorName
+              },
+              sound: true,
+              badge: 1
+            };
+        }
+        
+        // Send notification to the patient
+        const notificationResult = await pushNotificationService.sendNotificationToUser(
+          appointment.user_id,
+          notificationData
+        );
+        
+        if (notificationResult.success) {
+          console.log('✅ Appointment status notification sent successfully to patient');
+        } else {
+          console.log('⚠️ Failed to send appointment status notification:', notificationResult.message);
+        }
+      } else {
+        console.log('⚠️ Could not fetch doctor information for notification');
+      }
+    } catch (notificationError) {
+      console.error('❌ Error sending appointment status notification:', notificationError);
+      // Don't fail the status update if notification fails
     }
     
     res.json({ success: true, message: 'Appointment status updated successfully' });
@@ -543,6 +678,56 @@ router.patch('/:id/reschedule', authenticateToken, requireRole(['patient']), [
     }
     
     console.log('✅ Appointment rescheduled successfully:', updateResult);
+    
+    // Send push notification to the doctor about rescheduling
+    if (appointment.preferred_doctor) {
+      try {
+        console.log('🔔 Sending reschedule notification to doctor:', appointment.preferred_doctor);
+        
+        // Get patient information for the notification
+        const patientQuery = 'SELECT first_name, last_name FROM users WHERE id = ?';
+        const patientResult = await executeQuery(patientQuery, [userId]);
+        
+        if (patientResult.success && patientResult.data.length > 0) {
+          const patient = patientResult.data[0];
+          const patientName = `${patient.first_name} ${patient.last_name}`;
+          
+          // Create reschedule notification
+          const notificationData = {
+            title: 'Appointment Rescheduled',
+            body: `${patientName} has rescheduled their appointment to ${rescheduled_date} at ${rescheduled_time}`,
+            data: {
+              type: 'appointment',
+              appointmentId: id,
+              status: 'rescheduled',
+              patientName,
+              newDate: rescheduled_date,
+              newTime: rescheduled_time
+            },
+            sound: true,
+            badge: 1
+          };
+          
+          // Send notification to the doctor
+          const notificationResult = await pushNotificationService.sendNotificationToUser(
+            appointment.preferred_doctor,
+            notificationData
+          );
+          
+          if (notificationResult.success) {
+            console.log('✅ Reschedule notification sent successfully to doctor');
+          } else {
+            console.log('⚠️ Failed to send reschedule notification:', notificationResult.message);
+          }
+        } else {
+          console.log('⚠️ Could not fetch patient information for reschedule notification');
+        }
+      } catch (notificationError) {
+        console.error('❌ Error sending reschedule notification:', notificationError);
+        // Don't fail the rescheduling if notification fails
+      }
+    }
+    
     res.json({ 
       success: true, 
       message: 'Appointment rescheduled successfully',
@@ -606,6 +791,55 @@ router.patch('/:id/cancel', authenticateToken, requireRole(['patient']), async (
     
     if (!updateResult.success) {
       return res.status(500).json({ success: false, message: 'Failed to update appointment status' });
+    }
+    
+    // Send push notification to the doctor about cancellation
+    if (appointment.preferred_doctor) {
+      try {
+        console.log('🔔 Sending cancellation notification to doctor:', appointment.preferred_doctor);
+        
+        // Get patient information for the notification
+        const patientQuery = 'SELECT first_name, last_name FROM users WHERE id = ?';
+        const patientResult = await executeQuery(patientQuery, [userId]);
+        
+        if (patientResult.success && patientResult.data.length > 0) {
+          const patient = patientResult.data[0];
+          const patientName = `${patient.first_name} ${patient.last_name}`;
+          
+          // Create cancellation notification
+          const notificationData = {
+            title: 'Appointment Cancelled',
+            body: `${patientName} has cancelled their appointment scheduled for ${appointment.appointment_date} at ${appointment.appointment_time}`,
+            data: {
+              type: 'appointment',
+              appointmentId: id,
+              status: 'cancelled',
+              patientName,
+              appointmentDate: appointment.appointment_date,
+              appointmentTime: appointment.appointment_time
+            },
+            sound: true,
+            badge: 1
+          };
+          
+          // Send notification to the doctor
+          const notificationResult = await pushNotificationService.sendNotificationToUser(
+            appointment.preferred_doctor,
+            notificationData
+          );
+          
+          if (notificationResult.success) {
+            console.log('✅ Cancellation notification sent successfully to doctor');
+          } else {
+            console.log('⚠️ Failed to send cancellation notification:', notificationResult.message);
+          }
+        } else {
+          console.log('⚠️ Could not fetch patient information for cancellation notification');
+        }
+      } catch (notificationError) {
+        console.error('❌ Error sending cancellation notification:', notificationError);
+        // Don't fail the cancellation if notification fails
+      }
     }
     
     res.json({ success: true, message: 'Appointment cancelled successfully' });

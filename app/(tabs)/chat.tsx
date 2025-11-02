@@ -2,579 +2,634 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  StyleSheet,
+  TouchableOpacity,
   ScrollView,
   TextInput,
-  TouchableOpacity,
-  StyleSheet,
   Alert,
-  RefreshControl,
-  Image,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
+  SafeAreaView,
+  Image,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FontAwesome } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { chatService } from '../../services/chatService';
+import { apiClient } from '../../services/apiClient';
+import { API_CONFIG } from '../../constants/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useChat } from '../../context/ChatContext';
-import { useAuth } from '../../context/AuthContext';
-import { ChatMessage, ChatConversation } from '../../services/chatService';
-import { constructProfileImageUrl } from '../../utils/imageUtils';
 
-const { width } = Dimensions.get('window');
+interface Message {
+  id: number;
+  sender_id: number;
+  receiver_id: number;
+  message: string;
+  timestamp: string;
+  is_read: boolean;
+  sender_name?: string;
+  is_doctor: boolean;
+}
 
-export default function ChatScreen() {
+interface ChatConversation {
+  id: number;
+  professionalId: number;
+  professionalName: string;
+  professionalEmail: string;
+  lastMessage: string;
+  lastMessageTime: string;
+  unreadCount: number;
+  status: 'online' | 'offline';
+  avatar?: string;
+}
+
+function PatientChatList() {
   const router = useRouter();
-  const navigation = useNavigation();
-  const { user } = useAuth();
-  const insets = useSafeAreaInsets();
-  const {
-    conversations,
-    currentConversation,
-    messages,
-    isLoading,
-    error,
-    isConnected,
-    loadConversations,
-    createConversation,
-    sendMessage,
-    markAsRead,
-    setCurrentConversation,
-    clearError,
-  } = useChat();
-
-  const [activeTab, setActiveTab] = useState<'conversations' | 'chat'>('conversations');
-  const [messageText, setMessageText] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
-  const [specialists, setSpecialists] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSpecialist, setSelectedSpecialist] = useState<any>(null);
-  const [showSpecialists, setShowSpecialists] = useState(false);
+
+  useEffect(() => {
+    loadConversations();
+  }, []);
+
+  const loadConversations = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Use chatService to get conversations
+      const response = await chatService.getConversations();
+      
+      if (response && response.data) {
+        const formattedConversations: ChatConversation[] = response.data.map((conv: any) => ({
+          id: conv.id,
+          professionalId: conv.professional_id,
+          professionalName: `${conv.professional_first_name} ${conv.professional_last_name}` || 'Healthcare Provider',
+          professionalEmail: conv.professional_email || '',
+          lastMessage: conv.last_message || 'No messages yet',
+          lastMessageTime: formatTimeAgo(conv.last_message_time || conv.updated_at),
+          unreadCount: conv.unread_count || 0,
+          status: conv.status || 'offline',
+          avatar: conv.professional_profile_image
+        }));
+        
+        setConversations(formattedConversations);
+      }
+    } catch (err: any) {
+      console.error('❌ Error loading conversations:', err);
+      setError('Failed to load conversations');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+    return date.toLocaleDateString();
+  };
+
+  const filteredConversations = conversations.filter(conv =>
+    conv.professionalName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    conv.professionalEmail.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#3498db" />
+        <Text style={styles.loadingText}>Loading conversations...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Chat with Healthcare Providers</Text>
+          <Text style={styles.headerSubtitle}>
+            {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <FontAwesome name="search" size={16} color="#7f8c8d" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search providers..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholderTextColor="#bdc3c7"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <FontAwesome name="times" size={16} color="#7f8c8d" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Conversations List */}
+      <ScrollView style={styles.conversationsList}>
+        {filteredConversations.length === 0 ? (
+          <View style={styles.emptyState}>
+            <FontAwesome name="comments" size={60} color="#bdc3c7" />
+            <Text style={styles.emptyTitle}>
+              {searchQuery ? 'No providers found' : 'No conversations yet'}
+            </Text>
+            <Text style={styles.emptySubtitle}>
+              {searchQuery 
+                ? 'Try adjusting your search terms'
+                : 'You have no conversations with healthcare providers yet'
+              }
+            </Text>
+          </View>
+        ) : (
+          filteredConversations.map((conversation) => (
+            <TouchableOpacity
+              key={conversation.id}
+              style={styles.conversationCard}
+              onPress={() => {
+                router.push({
+                  pathname: '/chat-screen',
+                  params: {
+                    conversationId: conversation.id.toString(),
+                    patientName: conversation.professionalName,
+                    patientEmail: conversation.professionalEmail,
+                    patientAvatar: conversation.avatar
+                  }
+                });
+              }}
+            >
+              <View style={styles.cardContent}>
+                <View style={styles.avatarContainer}>
+                  {conversation.avatar ? (
+                    <Image 
+                      source={{ uri: conversation.avatar }} 
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <View style={styles.defaultAvatar}>
+                      <FontAwesome name="user-md" size={20} color="#3498db" />
+                    </View>
+                  )}
+                  <View style={[
+                    styles.statusIndicator,
+                    { backgroundColor: conversation.status === 'online' ? '#27ae60' : '#95a5a6' }
+                  ]} />
+                </View>
+                
+                <View style={styles.conversationDetails}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.professionalName}>{conversation.professionalName}</Text>
+                    <Text style={styles.timestamp}>{conversation.lastMessageTime}</Text>
+                  </View>
+                  
+                  <View style={styles.messageRow}>
+                    <Text style={styles.lastMessage} numberOfLines={1}>
+                      {conversation.lastMessage}
+                    </Text>
+                    {conversation.unreadCount > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadText}>{conversation.unreadCount}</Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.statusRow}>
+                    <View style={styles.statusContainer}>
+                      <View style={[
+                        styles.statusDot,
+                        { backgroundColor: conversation.status === 'online' ? '#27ae60' : '#95a5a6' }
+                      ]} />
+                      <Text style={styles.statusText}>
+                        {conversation.status === 'online' ? 'Online' : 'Offline'}
+                      </Text>
+                    </View>
+                    <FontAwesome name="chevron-right" size={12} color="#bdc3c7" />
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+export default function PatientChat() {
+  const router = useRouter();
+  const { patientId, patientName, patientEmail, patientAvatar, conversationId: conversationIdParam } = useLocalSearchParams();
+  
+  // If no patient is selected, show the main chat page with conversations
+  if (!patientId && !conversationIdParam) {
+    return <PatientChatList />;
+  }
+  
+  const patientIdNum = patientId ? parseInt(patientId as string) : null;
+  const patientNameStr = patientName as string;
+  const patientEmailStr = patientEmail as string;
+  const patientAvatarStr = patientAvatar as string;
+  const conversationIdNum = conversationIdParam ? parseInt(conversationIdParam as string) : null;
+  
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
+  const [conversationId, setConversationId] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  const handleClose = () => {
+    router.back();
+  };
 
-  // Load data on mount
   useEffect(() => {
-    if (user) {
-      loadConversations();
-      loadSpecialists();
+    if (conversationIdNum) {
+      loadMessages();
+      initializeWebSocket();
     }
-  }, [user, loadConversations]);
 
-  // Hide/show tab bar based on active tab
-  useEffect(() => {
-    if (activeTab === 'chat') {
-      // Hide tab bar when in chat
-      navigation.getParent()?.setOptions({
-        tabBarStyle: { display: 'none' }
-      });
-    } else {
-      // Show tab bar when in conversations or specialists
-      navigation.getParent()?.setOptions({
-        tabBarStyle: { display: 'flex' }
-      });
-    }
-  }, [activeTab, navigation]);
-
-  // Cleanup effect to show tab bar when component unmounts
-  useEffect(() => {
     return () => {
-      navigation.getParent()?.setOptions({
-        tabBarStyle: { display: 'flex' }
-      });
+      if (wsConnection) {
+        console.log('🔌 PatientChat - Closing WebSocket on unmount');
+        wsConnection.close();
+        setWsConnection(null);
+      }
     };
-  }, [navigation]);
+  }, [conversationIdNum]);
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (messages.length > 0) {
+    // Auto-scroll to bottom when new messages arrive
+    if (scrollViewRef.current && messages.length > 0) {
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
   }, [messages]);
 
-  // Mark messages as read when conversation is active
-  useEffect(() => {
-    if (currentConversation && messages.length > 0) {
-      markAsRead(currentConversation.id.toString());
-    }
-  }, [currentConversation, messages, markAsRead]);
-
-  const loadSpecialists = async () => {
+  const initializeWebSocket = async () => {
     try {
-      // Load specialists from the professionals API
-      // Use a high limit to get all verified specialists
-      const response = await fetch('http://172.20.10.4:3000/api/professionals?limit=100&is_available=true', {
-        headers: {
-          'Authorization': `Bearer ${await AsyncStorage.getItem('userToken')}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      // Check if WebSocket is already connected
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        console.log('✅ PatientChat - WebSocket already connected');
+        return;
+      }
+
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        console.log('⚠️ PatientChat - No auth token found');
+        return;
+      }
+
+      const wsUrl = `ws://172.20.10.3:3000/ws/chat?token=${token}`;
+      console.log('🔍 PatientChat - Connecting to WebSocket:', wsUrl);
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data && data.data.professionals) {
-          console.log('📊 Loaded specialists:', data.data.professionals.length);
-          console.log('👥 Specialists data:', data.data.professionals);
-          setSpecialists(data.data.professionals);
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('✅ PatientChat - WebSocket connected');
+        setWsConnection(ws);
+        setIsConnected(true);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('🔍 PatientChat - WebSocket message received:', data);
+          
+          if (data.type === 'new_message' && data.data) {
+            const message = data.data;
+            if (message.conversation_id || message.receiver_id === patientIdNum || message.sender_id === patientIdNum) {
+              const processedMessage = {
+                ...message,
+                is_doctor: message.is_doctor !== undefined ? message.is_doctor : false
+              };
+              
+              setMessages(prev => {
+                const exists = prev.some(msg => msg.id === processedMessage.id);
+                if (!exists) {
+                  return [...prev, processedMessage];
+                }
+                return prev;
+              });
+            }
+          }
+        } catch (error) {
+          console.error('❌ PatientChat - Error parsing WebSocket message:', error);
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('🔍 PatientChat - WebSocket disconnected');
+        setWsConnection(null);
+        setIsConnected(false);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('❌ PatientChat - WebSocket error:', error);
+        setWsConnection(null);
+        setIsConnected(false);
+      };
+      
+    } catch (error) {
+      console.error('❌ PatientChat - Error initializing WebSocket:', error);
+    }
+  };
+
+  const loadMessages = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      console.log('🔍 PatientChat - Loading messages for conversation:', conversationIdNum);
+      
+      // Use chatService to load messages from conversation
+      const response = await chatService.getMessages(conversationIdNum!.toString());
+      
+      if (response && response.data) {
+        const processedMessages = response.data.map((msg: any) => ({
+          ...msg,
+          is_doctor: msg.is_doctor !== undefined ? msg.is_doctor : true // Default to doctor messages for patient view
+        }));
+        
+        setMessages(processedMessages);
+        console.log('✅ PatientChat - Messages loaded:', processedMessages.length);
+      } else {
+        setMessages([]);
+        console.log('⚠️ PatientChat - No messages found');
+      }
+    } catch (err: any) {
+      console.error('❌ PatientChat - Error loading messages:', err);
+      setError(err.message || 'Failed to load messages');
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!newMessage.trim()) {
+      return;
+    }
+
+    const messageToSend = newMessage.trim();
+
+    try {
+      setSending(true);
+      
+      console.log('🔍 PatientChat - Sending message:', newMessage);
+      
+      // Create a temporary message object for immediate UI update
+      const tempMessage = {
+        id: Date.now(),
+        sender_id: conversationIdNum,
+        receiver_id: conversationIdNum,
+        message: messageToSend,
+        timestamp: new Date().toISOString(),
+        is_doctor: false,
+        is_read: false
+      };
+      
+      // Add message to UI immediately
+      setMessages(prev => [...prev, tempMessage]);
+      setNewMessage('');
+      
+      // Use direct API call like the doctor does
+      await sendMessageViaAPI(messageToSend);
+      
+      console.log('✅ PatientChat - Message sent successfully');
+    } catch (err: any) {
+      console.error('❌ PatientChat - Error sending message:', err);
+      Alert.alert('Error', err.message || 'Failed to send message. Please try again.');
+      setNewMessage(messageToSend); // Restore message
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const sendMessageViaAPI = async (message: string) => {
+    try {
+      console.log('🔍 PatientChat - Sending message via API:', { message, conversationId: conversationIdNum });
+      
+      // If we already have a conversation ID, send message to it
+      if (conversationIdNum) {
+        console.log('📤 PatientChat - Sending to existing conversation:', conversationIdNum);
+        const response = await apiClient.post(`${API_CONFIG.BASE_URL}/chat/conversations/${conversationIdNum}/messages`, {
+          message: message,
+          message_type: 'text'
+        });
+        
+        if (response.success) {
+          console.log('✅ PatientChat - Message sent to existing conversation');
+          return response.data;
         } else {
-          console.log('⚠️ No professionals data found in response:', data);
-          setSpecialists([]);
+          console.log('⚠️ PatientChat - Failed to send to existing conversation, will create new one');
         }
-      } else {
-        console.log('❌ Failed to fetch specialists, status:', response.status);
-        setSpecialists([]);
       }
-    } catch (error) {
-      console.error('Error loading specialists:', error);
-      setSpecialists([]); // Ensure specialists is always an array
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadConversations();
-    setRefreshing(false);
-  };
-
-  const startChatWithSpecialist = async (specialist: any) => {
-    try {
-      console.log('🚀 Starting chat with specialist:', specialist.first_name, specialist.last_name);
-      setSelectedSpecialist(specialist);
-      setActiveTab('chat');
-      console.log('📱 Chat state set - selectedSpecialist:', specialist.id, 'activeTab: chat');
-    } catch (error) {
-      console.error('Error starting chat:', error);
-      Alert.alert('Error', 'Failed to start chat. Please try again.');
-    }
-  };
-
-  const handleSendMessage = async () => {
-    if (!messageText.trim()) return;
-
-    const messageToSend = messageText.trim();
-    setMessageText('');
-
-    if (currentConversation) {
-      // Send message to existing conversation
-      const success = await sendMessage(currentConversation.id.toString(), messageToSend);
-      if (!success) {
-        Alert.alert('Error', 'Failed to send message. Please try again.');
-        setMessageText(messageToSend); // Restore message
-      }
-    } else if (selectedSpecialist) {
-      // Create new conversation and send first message
-      const specialistName = `${selectedSpecialist.first_name} ${selectedSpecialist.last_name}`;
-      const success = await createConversation(
-        selectedSpecialist.id,
-        `Chat with ${specialistName}`,
-        messageToSend
-      );
       
-      if (success) {
-        // Find and set the new conversation
-        const newConversation = conversations.find(conv => 
-          conv.professional_id === selectedSpecialist.id
-        );
-        if (newConversation) {
-          setCurrentConversation(newConversation);
+      // Create new conversation if no conversation ID or sending failed
+      console.log('🆕 PatientChat - Creating new conversation');
+      const requestData = {
+        professional_id: conversationIdNum, // This should be the doctor/professional ID
+        subject: `Chat with Professional`,
+        initial_message: message
+      };
+      console.log('🔍 PatientChat - Request data:', requestData);
+      
+      const createConversationResponse = await apiClient.post(`${API_CONFIG.BASE_URL}/chat/conversations`, requestData);
+      
+      console.log('🔍 PatientChat - Create conversation response:', createConversationResponse);
+      
+      if (createConversationResponse.success) {
+        console.log('✅ PatientChat - New conversation created and message sent');
+        
+        // Store the new conversation ID for future messages
+        const newConversationId = (createConversationResponse.data as any)?.id || (createConversationResponse.data as any)?.conversation_id;
+        if (newConversationId) {
+          setConversationId(newConversationId);
+          console.log('💾 PatientChat - Stored conversation ID:', newConversationId);
         }
-        setSelectedSpecialist(null);
+        
+        return createConversationResponse.data;
       } else {
-        Alert.alert('Error', 'Failed to start conversation. Please try again.');
-        setMessageText(messageToSend); // Restore message
+        throw new Error(createConversationResponse.message || 'Failed to create conversation');
       }
+    } catch (apiError: any) {
+      console.error('❌ PatientChat - API send error:', apiError);
+      
+      // Handle validation errors specifically
+      if (apiError.response?.data?.message === 'Validation error') {
+        const validationErrors = apiError.response.data.errors;
+        console.error('❌ PatientChat - Validation errors:', validationErrors);
+        throw new Error(`Validation failed: ${validationErrors.map((err: any) => err.msg).join(', ')}`);
+      }
+      
+      throw apiError;
     }
   };
 
-  const goBackToConversations = () => {
-    setActiveTab('conversations');
-    setCurrentConversation(null);
-    setSelectedSpecialist(null);
-  };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    } else {
-      return date.toLocaleDateString();
+  const formatTime = (timestamp: string) => {
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) {
+        return 'Just now';
+      }
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (error) {
+      return 'Just now';
     }
   };
 
-  const renderSpecialistsList = () => (
-    <View style={styles.fullScreenSpecialistsContainer}>
-      {/* Header */}
-      <View style={styles.specialistsFullHeader}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => setShowSpecialists(false)}
-        >
-          <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
-        </TouchableOpacity>
-        <Text style={styles.specialistsFullTitle}>Start a new chat</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      {/* Specialists List */}
-      <ScrollView style={styles.fullScreenSpecialistsList}>
-        {!Array.isArray(specialists) || specialists.length === 0 ? (
-          <View style={styles.emptySpecialistsFull}>
-            <FontAwesome name="user-md" size={48} color="#bdc3c7" />
-            <Text style={styles.emptySpecialistsFullText}>No specialists available</Text>
-            <Text style={styles.emptySpecialistsFullSubtext}>Check back later for available healthcare professionals</Text>
-          </View>
-        ) : (
-          specialists.map((specialist) => (
-            <TouchableOpacity
-              key={specialist.id}
-              style={styles.specialistItemFull}
-              onPress={() => {
-                startChatWithSpecialist(specialist);
-                setShowSpecialists(false);
-              }}
-            >
-              <View style={styles.specialistAvatarFull}>
-                {specialist.profile_image ? (
-                  <Image
-                    source={{ uri: constructProfileImageUrl(specialist.profile_image) || '' }}
-                    style={styles.avatarImageFull}
-                    onLoad={() => console.log('✅ Specialist image loaded:', specialist.first_name, specialist.profile_image)}
-                    onError={(error) => console.error('❌ Specialist image error:', error.nativeEvent.error, 'URL:', constructProfileImageUrl(specialist.profile_image))}
-                  />
-                ) : (
-                  <FontAwesome
-                    name="user-md"
-                    size={32}
-                    color="#3498db"
-                  />
-                )}
-              </View>
-              
-              <View style={styles.specialistInfoFull}>
-                <Text style={styles.specialistNameFull}>
-                  {specialist.first_name} {specialist.last_name}
-                </Text>
-                <Text style={styles.specialistSpecialtyFull}>
-                  {specialist.specialty}
-                </Text>
-                {specialist.qualification && (
-                  <Text style={styles.specialistQualification}>
-                    {specialist.qualification}
-                  </Text>
-                )}
-                {specialist.experience_years && (
-                  <Text style={styles.specialistExperience}>
-                    {specialist.experience_years} years experience
-                  </Text>
-                )}
-                {specialist.facility_name && (
-                  <Text style={styles.specialistFacilityFull}>
-                    📍 {specialist.facility_name}
-                  </Text>
-                )}
-                {specialist.bio && (
-                  <Text style={styles.specialistBio} numberOfLines={2}>
-                    {specialist.bio}
-                  </Text>
-                )}
-              </View>
-              
-              <View style={styles.specialistActions}>
-                <TouchableOpacity style={styles.chatButtonFull}>
-                  <FontAwesome name="comment" size={16} color="white" />
-                  <Text style={styles.chatButtonText}>Chat</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-    </View>
-  );
-
-  const renderConversationsTab = () => (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Chats</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerButton}>
-            <FontAwesome name="search" size={20} color="#2c3e50" />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            onPress={() => {
-              setShowSpecialists(!showSpecialists);
-              if (!showSpecialists) {
-                loadSpecialists();
-              }
-            }}
-          >
-            <FontAwesome name="plus" size={20} color="#2c3e50" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Connection Status */}
-      <View style={[styles.statusBar, { backgroundColor: isConnected ? '#2ecc71' : '#e74c3c' }]}>
-        <FontAwesome name={isConnected ? 'wifi' : 'wifi'} size={12} color="white" />
-        <Text style={styles.statusText}>
-          {isConnected ? 'Connected' : 'Disconnected'}
-        </Text>
-      </View>
-
-      {/* Conversations List */}
-      <ScrollView
-        style={styles.conversationsList}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {isLoading && conversations.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Loading conversations...</Text>
-          </View>
-        ) : conversations.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <FontAwesome name="comments" size={48} color="#bdc3c7" />
-            <Text style={styles.emptyText}>No conversations yet</Text>
-            <Text style={styles.emptySubtext}>Start a chat with a healthcare professional</Text>
-          </View>
-        ) : (
-          conversations.map((conversation) => (
-            <TouchableOpacity
-              key={conversation.id}
-              style={styles.conversationItem}
-              onPress={() => {
-                setCurrentConversation(conversation);
-                setActiveTab('chat');
-              }}
-            >
-              <View style={styles.conversationAvatar}>
-                {conversation.professional_profile_image ? (
-                  <Image
-                    source={{ uri: constructProfileImageUrl(conversation.professional_profile_image) || '' }}
-                    style={styles.avatarImage}
-                    onLoad={() => console.log('✅ Conversation image loaded:', conversation.professional_first_name)}
-                    onError={(error) => console.error('❌ Conversation image error:', error.nativeEvent.error)}
-                  />
-                ) : (
-                  <FontAwesome
-                    name="user-md"
-                    size={24}
-                    color="#3498db"
-                  />
-                )}
-                {conversation.unread_count && conversation.unread_count > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{conversation.unread_count}</Text>
-                  </View>
-                )}
-              </View>
-              
-              <View style={styles.conversationContent}>
-                <View style={styles.conversationHeader}>
-                  <Text style={styles.conversationName}>
-                    {conversation.professional_first_name} {conversation.professional_last_name}
-                  </Text>
-                  <Text style={styles.conversationTime}>
-                    {conversation.last_message_time ? formatTime(conversation.last_message_time) : ''}
-                  </Text>
-                </View>
-                
-                <View style={styles.conversationFooter}>
-                  <Text style={styles.conversationLastMessage} numberOfLines={1}>
-                    {conversation.last_message || 'No messages yet'}
-                  </Text>
-                  {conversation.unread_count && conversation.unread_count > 0 && (
-                    <View style={styles.unreadDot} />
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-    </View>
-  );
-
-  const renderChatTab = () => {
-    const displayName = currentConversation?.professional_first_name && currentConversation?.professional_last_name
-      ? `${currentConversation.professional_first_name} ${currentConversation.professional_last_name}`
-      : selectedSpecialist
-      ? `${selectedSpecialist.first_name} ${selectedSpecialist.last_name}`
-      : 'Unknown';
-
+  const renderMessage = (message: Message) => {
+    // In patient chat: patient messages (is_doctor: false) go on right, doctor messages (is_doctor: true) go on left
+    const isFromCurrentUser = !message.is_doctor;
+    
     return (
-      <View style={styles.chatContainer}>
-        {/* Chat Header */}
-        <View style={styles.chatHeader}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={goBackToConversations}
-          >
-            <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
-          </TouchableOpacity>
-          
-          <View style={styles.chatHeaderInfo}>
-            <View style={styles.chatAvatar}>
-              {currentConversation?.professional_profile_image ? (
-                <Image
-                  source={{ uri: constructProfileImageUrl(currentConversation.professional_profile_image) || '' }}
-                  style={styles.avatarImage}
-                  onLoad={() => console.log('✅ Chat header image loaded:', currentConversation.professional_first_name)}
-                  onError={(error) => console.error('❌ Chat header image error:', error.nativeEvent.error)}
-                />
-              ) : selectedSpecialist?.profile_image ? (
-                <Image
-                  source={{ uri: constructProfileImageUrl(selectedSpecialist.profile_image) || '' }}
-                  style={styles.avatarImage}
-                  onLoad={() => console.log('✅ Selected specialist image loaded:', selectedSpecialist.first_name)}
-                  onError={(error) => console.error('❌ Selected specialist image error:', error.nativeEvent.error)}
-                />
-              ) : (
-                <FontAwesome name="user-md" size={20} color="#3498db" />
-              )}
-            </View>
-            <View>
-              <Text style={styles.chatContactName}>{displayName}</Text>
-              <Text style={styles.chatContactStatus}>
-                {isConnected ? '🟢 Online' : '🔴 Offline'}
-              </Text>
-            </View>
-          </View>
-          
-          <TouchableOpacity style={styles.moreButton}>
-            <FontAwesome name="ellipsis-v" size={20} color="#2c3e50" />
-          </TouchableOpacity>
+      <View key={message.id} style={[
+        styles.messageContainer,
+        isFromCurrentUser ? styles.patientMessage : styles.doctorMessage
+      ]}>
+        <View style={[
+          styles.messageBubble,
+          isFromCurrentUser ? styles.patientBubble : styles.doctorBubble
+        ]}>
+          <Text style={[
+            styles.messageText,
+            isFromCurrentUser ? styles.patientText : styles.doctorText
+          ]}>
+            {message.message}
+          </Text>
+          <Text style={[
+            styles.messageTime,
+            isFromCurrentUser ? styles.patientTime : styles.doctorTime
+          ]}>
+            {formatTime(message.timestamp)}
+          </Text>
         </View>
-
-        {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
-          showsVerticalScrollIndicator={false}
-        >
-          {isLoading && messages.length === 0 ? (
-            <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>Loading messages...</Text>
-            </View>
-          ) : messages.length === 0 ? (
-            <View style={styles.emptyMessagesContainer}>
-              <Text style={styles.emptyMessagesText}>No messages yet</Text>
-              <Text style={styles.emptyMessagesSubtext}>Start the conversation!</Text>
-            </View>
-          ) : (
-            messages.map((message, index) => {
-              const isMe = message.sender_id === parseInt(user?.id?.toString() || '0');
-              const showAvatar = index === 0 || messages[index - 1].sender_id !== message.sender_id;
-              
-              return (
-                <View
-                  key={message.id}
-                  style={[
-                    styles.messageContainer,
-                    isMe ? styles.messageContainerMe : styles.messageContainerOther
-                  ]}
-                >
-                  {!isMe && showAvatar && (
-                    <View style={styles.messageAvatar}>
-                      {currentConversation?.professional_profile_image ? (
-                        <Image
-                          source={{ uri: constructProfileImageUrl(currentConversation.professional_profile_image) || '' }}
-                          style={styles.messageAvatarImage}
-                          onLoad={() => console.log('✅ Message avatar image loaded')}
-                          onError={(error) => console.error('❌ Message avatar image error:', error.nativeEvent.error)}
-                        />
-                      ) : (
-                        <FontAwesome name="user-md" size={16} color="#3498db" />
-                      )}
-                    </View>
-                  )}
-                  
-                  <View
-                    style={[
-                      styles.messageBubble,
-                      isMe ? styles.messageBubbleMe : styles.messageBubbleOther
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.messageText,
-                        isMe ? styles.messageTextMe : styles.messageTextOther
-                      ]}
-                    >
-                      {message.message}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.messageTime,
-                        isMe ? styles.messageTimeMe : styles.messageTimeOther
-                      ]}
-                    >
-                      {formatTime(message.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
-
-        {/* Message Input */}
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.bottom : 0}
-          style={[styles.professionalInputContainer, { paddingBottom: insets.bottom + 10 }]}
-        >
-          <View style={styles.professionalInputWrapper}>
-            <TextInput
-              style={styles.professionalMessageInput}
-              placeholder="Type a message..."
-              placeholderTextColor="#95a5a6"
-              value={messageText}
-              onChangeText={setMessageText}
-              multiline
-              maxLength={500}
-            />
-            <TouchableOpacity
-              style={[styles.professionalSendButton, !messageText.trim() && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={!messageText.trim()}
-            >
-              <FontAwesome name="send" size={16} color="white" />
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
       </View>
     );
   };
 
   return (
-    <View style={styles.container}>
-      {showSpecialists ? (
-        renderSpecialistsList()
-      ) : activeTab === 'conversations' ? (
-        renderConversationsTab()
-      ) : (
-        renderChatTab()
-      )}
-    </View>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView 
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity style={styles.backButton} onPress={handleClose}>
+              <FontAwesome name="arrow-left" size={20} color="#2c3e50" />
+            </TouchableOpacity>
+            <View style={styles.headerAvatar}>
+              {patientAvatarStr ? (
+                <Image 
+                  source={{ uri: patientAvatarStr }} 
+                  style={styles.headerAvatarImage}
+                />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {patientNameStr ? patientNameStr.split(' ').map(n => n[0]).join('') : 'U'}
+                </Text>
+              )}
+            </View>
+            <View style={styles.headerInfo}>
+              <Text style={styles.headerTitle}>{patientNameStr || 'Patient'}</Text>
+              {isConnected && (
+                <View style={styles.connectionStatus}>
+                  <View style={[styles.statusDot, { backgroundColor: '#27ae60' }]} />
+                  <Text style={styles.statusText}>Live</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#3498db" />
+            <Text style={styles.loadingText}>Loading messages...</Text>
+          </View>
+        )}
+
+        {error && !loading && (
+          <View style={styles.errorContainer}>
+            <FontAwesome name="exclamation-triangle" size={50} color="#e74c3c" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={loadMessages} style={styles.retryButton}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {!loading && !error && (
+          <>
+            <ScrollView 
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.messagesContent}
+            >
+              {messages.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <FontAwesome name="comments" size={60} color="#bdc3c7" />
+                  <Text style={styles.emptyText}>No messages yet</Text>
+                  <Text style={styles.emptySubtext}>Start a conversation with {patientNameStr}</Text>
+                </View>
+              ) : (
+                messages.map(renderMessage)
+              )}
+            </ScrollView>
+
+            <View style={styles.inputContainer}>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.messageInput}
+                  value={newMessage}
+                  onChangeText={setNewMessage}
+                  placeholder="Type a message..."
+                  multiline
+                  maxLength={500}
+                  editable={!sending}
+                  returnKeyType="default"
+                  blurOnSubmit={false}
+                  textAlignVertical="top"
+                />
+                <TouchableOpacity
+                  style={[styles.sendButton, (!newMessage.trim() || sending) && styles.sendButtonDisabled]}
+                  onPress={sendMessage}
+                  disabled={!newMessage.trim() || sending}
+                >
+                  {sending ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <FontAwesome name="send" size={16} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -583,553 +638,416 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
-  
-  // Header styles
+  keyboardContainer: {
+    flex: 1,
+  },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
+    justifyContent: 'space-between',
+    padding: 15,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  backButton: {
+    marginRight: 15,
+    padding: 8,
+  },
+  headerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#3498db',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  headerAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  headerInfo: {
+    flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#2c3e50',
   },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 15,
-  },
-  headerButton: {
-    padding: 8,
-  },
-  
-  // Status bar
-  statusBar: {
+  connectionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    gap: 8,
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 4,
   },
   statusText: {
-    color: 'white',
     fontSize: 12,
+    color: '#27ae60',
     fontWeight: '600',
   },
-  
-  // Conversations list
-  conversationsList: {
+  loadingContainer: {
     flex: 1,
-    paddingBottom: 20, // Add padding to prevent overlap with tab bar
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
-  conversationItem: {
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#555',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#ffebee',
+    margin: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e74c3c',
+  },
+  errorText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#e74c3c',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#3498db',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  messagesContainer: {
+    flex: 1,
+    padding: 15,
+    paddingBottom: 200, // Add space for the input area positioned above tab bar
+  },
+  messagesContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 50,
+  },
+  emptyText: {
+    marginTop: 15,
+    fontSize: 18,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  emptySubtext: {
+    marginTop: 5,
+    fontSize: 14,
+    color: '#95a5a6',
+    textAlign: 'center',
+  },
+  messageContainer: {
+    marginBottom: 15,
+  },
+  doctorMessage: {
+    alignItems: 'flex-end',
+  },
+  patientMessage: {
+    alignItems: 'flex-start',
+  },
+  messageBubble: {
+    maxWidth: '80%',
+    padding: 14,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  doctorBubble: {
+    backgroundColor: '#3498db',
+    borderBottomRightRadius: 6,
+  },
+  patientBubble: {
+    backgroundColor: '#f1f3f4',
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e1e5e9',
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '400',
+  },
+  doctorText: {
+    color: '#fff',
+  },
+  patientText: {
+    color: '#2c3e50',
+  },
+  messageTime: {
+    fontSize: 11,
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  doctorTime: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'right',
+  },
+  patientTime: {
+    color: '#8e8e93',
+    textAlign: 'left',
+  },
+  inputContainer: {
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 24,
+    position: 'absolute',
+    bottom: 100, // Position above the tab bar with extra margin
+    left: 0,
+    right: 0,
+    zIndex: 9999,
+    elevation: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    minHeight: 85,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 28,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: '#e1e5e9',
+    minHeight: 56,
+    maxHeight: 120,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  messageInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#2c3e50',
+    maxHeight: 100,
+    minHeight: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    textAlignVertical: 'top',
+  },
+  sendButton: {
+    backgroundColor: '#3498db',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+    shadowColor: '#3498db',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#bdc3c7',
+  },
+  headerContent: {
+    flex: 1,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginTop: 4,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 40,
+  },
+  // Patient Chat List Styles
+  searchContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f3f4',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
-  conversationAvatar: {
+  searchInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+  },
+  conversationsList: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  conversationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  cardContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  avatarContainer: {
     position: 'relative',
-    marginRight: 15,
+    marginRight: 16,
   },
   avatarImage: {
     width: 50,
     height: 50,
     borderRadius: 25,
   },
-  unreadBadge: {
+  defaultAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#e9ecef',
+  },
+  statusIndicator: {
     position: 'absolute',
-    top: -5,
-    right: -5,
+    bottom: 2,
+    right: 2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  conversationDetails: {
+    flex: 1,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  professionalName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    flex: 1,
+  },
+  timestamp: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginLeft: 8,
+  },
+  messageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  lastMessage: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    flex: 1,
+  },
+  unreadBadge: {
     backgroundColor: '#e74c3c',
     borderRadius: 10,
     minWidth: 20,
     height: 20,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  unreadText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  conversationContent: {
-    flex: 1,
-  },
-  conversationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  conversationName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-  },
-  conversationTime: {
-    fontSize: 12,
-    color: '#7f8c8d',
-  },
-  conversationFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  conversationLastMessage: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    flex: 1,
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#e74c3c',
     marginLeft: 8,
   },
-  
-  // Chat styles
-  chatContainer: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-  },
-  backButton: {
-    marginRight: 15,
-    padding: 8,
-  },
-  chatHeaderInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  chatAvatar: {
-    marginRight: 12,
-  },
-  chatContactName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2c3e50',
-  },
-  chatContactStatus: {
+  unreadText: {
+    color: '#fff',
     fontSize: 12,
-    color: '#7f8c8d',
+    fontWeight: 'bold',
   },
-  moreButton: {
-    padding: 8,
-  },
-  
-  // Messages
-  messagesContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 120, // Add padding to account for absolutely positioned input
-  },
-  messageContainer: {
-    flexDirection: 'row',
-    marginVertical: 4,
-    alignItems: 'flex-end',
-  },
-  messageContainerMe: {
-    justifyContent: 'flex-end',
-  },
-  messageContainerOther: {
-    justifyContent: 'flex-start',
-  },
-  messageAvatar: {
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  messageAvatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  messageBubble: {
-    maxWidth: width * 0.7,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-  },
-  messageBubbleMe: {
-    backgroundColor: '#007bff',
-    borderBottomRightRadius: 4,
-  },
-  messageBubbleOther: {
-    backgroundColor: 'white',
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  messageTextMe: {
-    color: 'white',
-  },
-  messageTextOther: {
-    color: '#2c3e50',
-  },
-  messageTime: {
-    fontSize: 11,
-    marginTop: 4,
-  },
-  messageTimeMe: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    textAlign: 'right',
-  },
-  messageTimeOther: {
-    color: '#7f8c8d',
-  },
-  
-  // Input
-  inputContainer: {
-    backgroundColor: '#f0f8ff',
-    borderTopWidth: 3,
-    borderTopColor: '#e74c3c',
-    paddingBottom: 20,
-    paddingTop: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  professionalInputContainer: {
-    backgroundColor: 'white',
-    borderTopWidth: 1,
-    borderTopColor: '#e1e8ed',
-  },
-  professionalInputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  professionalMessageInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#e1e8ed',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    maxHeight: 100,
-    backgroundColor: '#f7f9fa',
-    minHeight: 40,
-  },
-  professionalSendButton: {
-    backgroundColor: '#007bff',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#007bff',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    gap: 12,
-  },
-  messageInput: {
-    flex: 1,
-    borderWidth: 5,
-    borderColor: '#0000ff',
-    borderRadius: 30,
-    paddingHorizontal: 25,
-    paddingVertical: 20,
-    fontSize: 20,
-    maxHeight: 100,
-    backgroundColor: '#ffff00',
-    minHeight: 70,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 5,
-  },
-  sendButton: {
-    backgroundColor: '#00ff00',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 8,
-    borderWidth: 3,
-    borderColor: '#000000',
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#bdc3c7',
-  },
-  
-  // Loading and empty states
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#7f8c8d',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  emptyMessagesContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyMessagesText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginTop: 16,
-  },
-  emptyMessagesSubtext: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginTop: 8,
-  },
-  
-  // Specialists list styles
-  specialistsContainer: {
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-    maxHeight: 300,
-  },
-  specialistsHeader: {
+  statusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f3f4',
   },
-  specialistsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  specialistsList: {
-    maxHeight: 200,
-  },
-  specialistItem: {
+  statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f3f4',
-  },
-  specialistAvatar: {
-    marginRight: 15,
-  },
-  specialistInfo: {
-    flex: 1,
-  },
-  specialistName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 2,
-  },
-  specialistSpecialty: {
-    fontSize: 14,
-    color: '#3498db',
-    marginBottom: 2,
-  },
-  specialistFacility: {
-    fontSize: 12,
-    color: '#7f8c8d',
-  },
-  chatButton: {
-    backgroundColor: '#007bff',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptySpecialists: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptySpecialistsText: {
-    fontSize: 14,
-    color: '#7f8c8d',
-  },
-  
-  // Full screen specialists styles
-  fullScreenSpecialistsContainer: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  specialistsFullHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-  },
-  specialistsFullTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  placeholder: {
-    width: 40, // Same width as back button for centering
-  },
-  fullScreenSpecialistsList: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 20, // Add padding to prevent overlap with tab bar
-  },
-  specialistItemFull: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  specialistAvatarFull: {
-    marginRight: 16,
-  },
-  avatarImageFull: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
-  specialistInfoFull: {
-    flex: 1,
-  },
-  specialistNameFull: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 4,
-  },
-  specialistSpecialtyFull: {
-    fontSize: 16,
-    color: '#3498db',
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  specialistQualification: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 2,
-  },
-  specialistExperience: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 2,
-  },
-  specialistFacilityFull: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 4,
-  },
-  specialistBio: {
-    fontSize: 14,
-    color: '#95a5a6',
-    fontStyle: 'italic',
-  },
-  specialistActions: {
-    marginLeft: 12,
-  },
-  chatButtonFull: {
-    backgroundColor: '#007bff',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  chatButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  emptySpecialistsFull: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptySpecialistsFullText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginTop: 16,
-  },
-  emptySpecialistsFullSubtext: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginTop: 8,
-    textAlign: 'center',
   },
 });

@@ -28,6 +28,8 @@ const cartRoutes = require('./routes/cart');
 const trackingRoutes = require('./routes/tracking');
 const prescriptionRoutes = require('./routes/prescriptions');
 const doctorDashboardRoutes = require('./routes/doctor-dashboard');
+const pushNotificationRoutes = require('./routes/push-notifications');
+const testAppointmentNotificationRoutes = require('./routes/test-appointment-notifications');
 
 const app = express();
 const server = http.createServer(app);
@@ -129,6 +131,8 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/doctor-dashboard', doctorDashboardRoutes);
+app.use('/api/push-notifications', pushNotificationRoutes);
+app.use('/api/test-appointment-notifications', testAppointmentNotificationRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

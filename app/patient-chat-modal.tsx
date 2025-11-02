@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Modal,
   View,
   Text,
   StyleSheet,
@@ -12,17 +11,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  SafeAreaView,
+  Image,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doctorDashboardService } from '../services/doctorDashboardService';
+import { chatService } from '../services/chatService';
+import { apiClient } from '../services/apiClient';
+import { API_CONFIG } from '../constants/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-interface PatientChatModalProps {
-  visible: boolean;
-  onClose: () => void;
-  patientId: number;
-  patientName: string;
-}
 
 interface Message {
   id: number;
@@ -35,32 +33,41 @@ interface Message {
   is_doctor: boolean;
 }
 
-export default function PatientChatModal({ 
-  visible, 
-  onClose, 
-  patientId, 
-  patientName 
-}: PatientChatModalProps) {
+export default function PatientChatModal() {
+  const router = useRouter();
+  const { patientId, patientName } = useLocalSearchParams();
+  
+  const patientIdNum = parseInt(patientId as string);
+  const patientNameStr = patientName as string;
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
+  const [conversationId, setConversationId] = useState<number | null>(null);
+  const [patientProfileImage, setPatientProfileImage] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  const handleClose = () => {
+    router.back();
+  };
 
   useEffect(() => {
-    if (visible) {
-      loadMessages();
-      initializeWebSocket();
-    } else {
-      closeWebSocket();
-    }
+    // Always reload messages when screen opens to ensure we have the latest data
+    loadMessages();
+    loadPatientProfile();
+    initializeWebSocket();
 
     return () => {
-      closeWebSocket();
+      // Close WebSocket when component unmounts
+      if (wsConnection) {
+        console.log('🔌 PatientChatModal - Closing WebSocket on unmount');
+        wsConnection.close();
+        setWsConnection(null);
+      }
     };
-  }, [visible]);
+  }, []);
 
 
   useEffect(() => {
@@ -74,13 +81,19 @@ export default function PatientChatModal({
 
   const initializeWebSocket = async () => {
     try {
-      const token = await AsyncStorage.getItem('authToken');
+      // Check if WebSocket is already connected
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        console.log('✅ PatientChatModal - WebSocket already connected');
+        return;
+      }
+
+      const token = await AsyncStorage.getItem('userToken');
       if (!token) {
         console.log('⚠️ PatientChatModal - No auth token found');
         return;
       }
 
-      const wsUrl = `ws://172.20.10.4:3000/ws/chat?token=${token}`;
+      const wsUrl = `ws://172.20.10.3:3000/ws/chat?token=${token}`;
       console.log('🔍 PatientChatModal - Connecting to WebSocket:', wsUrl);
       
       const ws = new WebSocket(wsUrl);
@@ -95,14 +108,38 @@ export default function PatientChatModal({
           const data = JSON.parse(event.data);
           console.log('🔍 PatientChatModal - WebSocket message received:', data);
           
-          if (data.type === 'message' && data.message) {
-            // Check if this message is for the current patient
-            if (data.message.receiver_id === patientId || data.message.sender_id === patientId) {
+          if (data.type === 'new_message' && data.data) {
+            // Handle new message from WebSocket
+            const message = data.data;
+            if (message.conversation_id || message.receiver_id === patientId || message.sender_id === patientId) {
+              // Ensure the message has the correct is_doctor field
+              const processedMessage = {
+                ...message,
+                is_doctor: message.is_doctor !== undefined ? message.is_doctor : true
+              };
+              
               setMessages(prev => {
                 // Check if message already exists to avoid duplicates
-                const exists = prev.some(msg => msg.id === data.message.id);
+                const exists = prev.some(msg => msg.id === processedMessage.id);
                 if (!exists) {
-                  return [...prev, data.message];
+                  return [...prev, processedMessage];
+                }
+                return prev;
+              });
+            }
+          } else if (data.type === 'message' && data.message) {
+            // Handle legacy message format
+            if (data.message.receiver_id === patientId || data.message.sender_id === patientId) {
+              // Ensure the message has the correct is_doctor field
+              const processedMessage = {
+                ...data.message,
+                is_doctor: data.message.is_doctor !== undefined ? data.message.is_doctor : true
+              };
+              
+              setMessages(prev => {
+                const exists = prev.some(msg => msg.id === processedMessage.id);
+                if (!exists) {
+                  return [...prev, processedMessage];
                 }
                 return prev;
               });
@@ -136,21 +173,74 @@ export default function PatientChatModal({
     }
   };
 
+  // Cleanup function that only runs when component unmounts
+  useEffect(() => {
+    return () => {
+      // Only close WebSocket when component is completely unmounted
+      closeWebSocket();
+    };
+  }, []); // Empty dependency array means this only runs on mount/unmount
+
   const loadMessages = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      console.log('🔍 PatientChatModal - Loading messages for patient:', patientId);
+      console.log('🔍 PatientChatModal - Loading messages for patient:', patientIdNum);
       
-      const response = await doctorDashboardService.getChatMessages(patientId);
+      // Try to get conversations first
+      const conversationResponse = await doctorDashboardService.getChatConversations();
       
-      if (response && response.messages) {
-        setMessages(response.messages);
-        console.log('✅ PatientChatModal - Messages loaded:', response.messages.length);
+      // Service now returns { conversations: [...], pagination: {...} }
+      const conversations = conversationResponse?.conversations;
+      
+      if (conversations && Array.isArray(conversations)) {
+        // Find conversation with this patient
+        const existingConversation = conversations.find(
+          (conv: any) => conv.user_id === patientIdNum
+        );
+        
+        if (existingConversation) {
+          // Store conversation ID for future messages
+          setConversationId(existingConversation.id);
+          console.log('💾 PatientChatModal - Found existing conversation:', existingConversation.id);
+          
+          // Extract profile image from conversation data if available
+          if (existingConversation.user_profile_image) {
+            setPatientProfileImage(existingConversation.user_profile_image);
+            console.log('✅ PatientChatModal - Profile image from conversation:', existingConversation.user_profile_image);
+          }
+          
+          // Get messages for this conversation
+          const messagesResponse = await apiClient.get(`${API_CONFIG.BASE_URL}/chat/conversations/${existingConversation.id}/messages`);
+          
+          if (messagesResponse.success && messagesResponse.data) {
+            const messages = Array.isArray(messagesResponse.data) ? messagesResponse.data : [];
+            
+            // Process messages to ensure correct is_doctor field
+            // We need to determine if the message is from the current doctor
+            // For now, we'll use the is_doctor field from the database if available
+            // In a real implementation, we'd compare sender_id with the current doctor's ID
+            const processedMessages = messages.map((msg: any) => ({
+              ...msg,
+              is_doctor: msg.is_doctor !== undefined ? msg.is_doctor : true // Use database value or default to doctor
+            }));
+            
+            setMessages(processedMessages);
+            console.log('✅ PatientChatModal - Messages loaded:', processedMessages.length);
+          } else {
+            setMessages([]);
+            console.log('⚠️ PatientChatModal - No messages found in conversation');
+          }
+        } else {
+          // No conversation exists yet - this is normal for new chats
+          setMessages([]);
+          setConversationId(null);
+          console.log('ℹ️ PatientChatModal - No conversation found with this patient - conversation will be created when first message is sent');
+        }
       } else {
         setMessages([]);
-        console.log('⚠️ PatientChatModal - No messages found');
+        console.log('⚠️ PatientChatModal - No conversations found');
       }
     } catch (err: any) {
       console.error('❌ PatientChatModal - Error loading messages:', err);
@@ -158,6 +248,45 @@ export default function PatientChatModal({
       setMessages([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPatientProfile = async () => {
+    try {
+      console.log('🔍 PatientChatModal - Loading patient profile for:', patientIdNum);
+      
+      // First try to get from patients list
+      const response = await doctorDashboardService.getPatients(100, 1, '', 'all');
+      
+      if (response.patients && Array.isArray(response.patients)) {
+        const patient = response.patients.find((p: any) => p.id === patientIdNum);
+        
+        if (patient && patient.profile_image) {
+          setPatientProfileImage(patient.profile_image);
+          console.log('✅ PatientChatModal - Patient profile image from patients list:', patient.profile_image);
+          return;
+        }
+      }
+      
+      // Fallback: try to get from conversations
+      console.log('🔍 PatientChatModal - Trying to get profile image from conversations...');
+      const conversationResponse = await doctorDashboardService.getChatConversations();
+      const conversations = conversationResponse?.conversations;
+      
+      if (conversations && Array.isArray(conversations)) {
+        const conversation = conversations.find((conv: any) => conv.user_id === patientIdNum);
+        
+        if (conversation && conversation.user_profile_image) {
+          setPatientProfileImage(conversation.user_profile_image);
+          console.log('✅ PatientChatModal - Patient profile image from conversation:', conversation.user_profile_image);
+        } else {
+          console.log('⚠️ PatientChatModal - No profile image found in conversations either');
+        }
+      } else {
+        console.log('⚠️ PatientChatModal - No conversations found');
+      }
+    } catch (err: any) {
+      console.error('❌ PatientChatModal - Error loading patient profile:', err);
     }
   };
 
@@ -171,34 +300,93 @@ export default function PatientChatModal({
       
       console.log('🔍 PatientChatModal - Sending message:', newMessage);
       
-      const response = await doctorDashboardService.sendChatMessage(patientId, newMessage.trim());
+      // Create a temporary message object for immediate UI update
+      const tempMessage = {
+        id: Date.now(), // Temporary ID
+        sender_id: patientIdNum,
+        receiver_id: patientIdNum,
+        message: newMessage.trim(),
+        timestamp: new Date().toISOString(),
+        is_doctor: true,
+        is_read: false
+      };
       
-      if (response && response.message) {
-        // Add the new message to the list immediately for better UX
-        setMessages(prev => [...prev, response.message]);
-        setNewMessage('');
-        console.log('✅ PatientChatModal - Message sent successfully');
-        
-        // Also send via WebSocket if connected for real-time delivery
-        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-          try {
-            wsConnection.send(JSON.stringify({
-              type: 'send_message',
-              receiver_id: patientId,
-              message: newMessage.trim()
-            }));
-          } catch (wsError) {
-            console.log('⚠️ PatientChatModal - WebSocket send failed, but message was sent via API');
-          }
-        }
-      } else {
-        throw new Error('Failed to send message');
-      }
+      // Add message to UI immediately
+      setMessages(prev => [...prev, tempMessage]);
+      const messageToSend = newMessage.trim();
+      setNewMessage('');
+      
+      // Always use API for message sending to ensure conversation creation
+      // WebSocket will be used for receiving messages, not sending
+      await sendMessageViaAPI(messageToSend);
+      
+      console.log('✅ PatientChatModal - Message sent successfully');
     } catch (err: any) {
       console.error('❌ PatientChatModal - Error sending message:', err);
       Alert.alert('Error', err.message || 'Failed to send message. Please try again.');
     } finally {
       setSending(false);
+    }
+  };
+
+  const sendMessageViaAPI = async (message: string) => {
+    try {
+      console.log('🔍 PatientChatModal - Sending message via API:', { message, patientId: patientIdNum });
+      
+      // If we already have a conversation ID, send message to it
+      if (conversationId) {
+        console.log('📤 PatientChatModal - Sending to existing conversation:', conversationId);
+        const response = await apiClient.post(`${API_CONFIG.BASE_URL}/chat/conversations/${conversationId}/messages`, {
+          message: message,
+          message_type: 'text'
+        });
+        
+        if (response.success) {
+          console.log('✅ PatientChatModal - Message sent to existing conversation');
+          return response.data;
+        } else {
+          console.log('⚠️ PatientChatModal - Failed to send to existing conversation, will create new one');
+        }
+      }
+      
+      // Create new conversation if no conversation ID or sending failed
+      console.log('🆕 PatientChatModal - Creating new conversation');
+      const requestData = {
+        patient_id: patientIdNum,
+        subject: `Chat with ${patientNameStr}`,
+        initial_message: message
+      };
+      console.log('🔍 PatientChatModal - Request data:', requestData);
+      
+      const createConversationResponse = await apiClient.post(`${API_CONFIG.BASE_URL}/chat/doctor-conversations`, requestData);
+      
+      console.log('🔍 PatientChatModal - Create conversation response:', createConversationResponse);
+      
+      if (createConversationResponse.success) {
+        console.log('✅ PatientChatModal - New conversation created and message sent');
+        
+        // Store the new conversation ID for future messages
+        const newConversationId = (createConversationResponse.data as any)?.id || (createConversationResponse.data as any)?.conversation_id;
+        if (newConversationId) {
+          setConversationId(newConversationId);
+          console.log('💾 PatientChatModal - Stored conversation ID:', newConversationId);
+        }
+        
+        return createConversationResponse.data;
+      } else {
+        throw new Error(createConversationResponse.message || 'Failed to create conversation');
+      }
+    } catch (apiError: any) {
+      console.error('❌ PatientChatModal - API send error:', apiError);
+      
+      // Handle validation errors specifically
+      if (apiError.response?.data?.message === 'Validation error') {
+        const validationErrors = apiError.response.data.errors;
+        console.error('❌ PatientChatModal - Validation errors:', validationErrors);
+        throw new Error(`Validation failed: ${validationErrors.map((err: any) => err.msg).join(', ')}`);
+      }
+      
+      throw apiError;
     }
   };
 
@@ -208,26 +396,29 @@ export default function PatientChatModal({
   };
 
   const renderMessage = (message: Message) => {
-    const isDoctor = message.is_doctor;
+    // Check if the current user (doctor) sent this message
+    // We need to get the current doctor's ID to compare with sender_id
+    // For now, we'll use the is_doctor field but we should improve this logic
+    const isFromCurrentUser = message.is_doctor;
     
     return (
       <View key={message.id} style={[
         styles.messageContainer,
-        isDoctor ? styles.doctorMessage : styles.patientMessage
+        isFromCurrentUser ? styles.doctorMessage : styles.patientMessage
       ]}>
         <View style={[
           styles.messageBubble,
-          isDoctor ? styles.doctorBubble : styles.patientBubble
+          isFromCurrentUser ? styles.doctorBubble : styles.patientBubble
         ]}>
           <Text style={[
             styles.messageText,
-            isDoctor ? styles.doctorText : styles.patientText
+            isFromCurrentUser ? styles.doctorText : styles.patientText
           ]}>
             {message.message}
           </Text>
           <Text style={[
             styles.messageTime,
-            isDoctor ? styles.doctorTime : styles.patientTime
+            isFromCurrentUser ? styles.doctorTime : styles.patientTime
           ]}>
             {formatTime(message.timestamp)}
           </Text>
@@ -237,21 +428,34 @@ export default function PatientChatModal({
   };
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
+    <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
-        style={styles.modalContainer}
+        style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <FontAwesome name="user-md" size={20} color="#3498db" />
-            <Text style={styles.headerTitle}>Chat with {patientName}</Text>
+            <View style={styles.headerAvatar}>
+              {patientProfileImage ? (
+                <Image 
+                  source={{ uri: patientProfileImage }} 
+                  style={styles.headerAvatarImage}
+                  onError={(error) => {
+                    console.log('❌ PatientChatModal - Image load error:', error);
+                    console.log('❌ PatientChatModal - Failed to load image:', patientProfileImage);
+                  }}
+                  onLoad={() => {
+                    console.log('✅ PatientChatModal - Image loaded successfully:', patientProfileImage);
+                  }}
+                />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {patientNameStr.split(' ').map(n => n[0]).join('')}
+                </Text>
+              )}
+            </View>
+            <Text style={styles.headerTitle}>{patientNameStr}</Text>
             {wsConnection && (
               <View style={styles.connectionStatus}>
                 <View style={[styles.statusDot, { backgroundColor: '#27ae60' }]} />
@@ -259,8 +463,14 @@ export default function PatientChatModal({
               </View>
             )}
           </View>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <FontAwesome name="times-circle" size={24} color="#7f8c8d" />
+          <TouchableOpacity 
+            onPress={handleClose} 
+            style={styles.closeButton}
+            activeOpacity={0.7}
+            accessibilityLabel="Close chat"
+            accessibilityRole="button"
+          >
+            <FontAwesome name="times-circle" size={24} color="#e74c3c" />
           </TouchableOpacity>
         </View>
 
@@ -331,15 +541,17 @@ export default function PatientChatModal({
           </>
         )}
       </KeyboardAvoidingView>
-    </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
+  container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
-    paddingBottom: 0,
+  },
+  keyboardContainer: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
@@ -360,6 +572,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  headerAvatar: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+    backgroundColor: '#3498db',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarImage: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -367,7 +597,11 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   closeButton: {
-    padding: 5,
+    padding: 8,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   loadingContainer: {
     flex: 1,

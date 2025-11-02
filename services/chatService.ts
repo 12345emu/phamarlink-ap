@@ -59,9 +59,9 @@ class WebSocketManager {
         this.ws.onerror = (error) => {
           console.error('❌ WebSocket connection error:', error);
           console.error('❌ WebSocket error details:', {
-            type: error.type,
-            target: error.target?.url,
-            readyState: error.target?.readyState
+            type: (error as any).type,
+            target: (error as any).target?.url,
+            readyState: (error as any).target?.readyState
           });
           this.isConnecting = false;
           reject(new Error('WebSocket connection failed'));
@@ -117,12 +117,22 @@ class WebSocketManager {
     this.messageHandlers.get(type)!.push(handler);
   }
 
+  // Alias for onMessage for easier use
+  on(type: string, handler: Function) {
+    this.onMessage(type, handler);
+  }
+
   offMessage(type: string, handler: Function) {
     const handlers = this.messageHandlers.get(type) || [];
     const index = handlers.indexOf(handler);
     if (index > -1) {
       handlers.splice(index, 1);
     }
+  }
+
+  // Alias for offMessage for easier use
+  off(type: string, handler: Function) {
+    this.offMessage(type, handler);
   }
 
   disconnect() {
@@ -136,6 +146,39 @@ class WebSocketManager {
 
   isConnected(): boolean {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  // Send a message through WebSocket
+  sendMessage(conversationId: number, message: string, messageType: string = 'text'): boolean {
+    return this.send({
+      type: 'send_message',
+      data: {
+        conversationId,
+        message,
+        messageType
+      }
+    });
+  }
+
+  // Send typing indicator
+  sendTyping(conversationId: number, isTyping: boolean): boolean {
+    return this.send({
+      type: 'typing',
+      data: {
+        conversationId,
+        isTyping
+      }
+    });
+  }
+
+  // Mark messages as read
+  markAsRead(conversationId: number): boolean {
+    return this.send({
+      type: 'mark_read',
+      data: {
+        conversationId
+      }
+    });
   }
 }
 
@@ -205,17 +248,39 @@ class ChatService {
   }
 
   // WebSocket methods
+  async connect(token: string): Promise<void> {
+    return this.wsManager.connect(token);
+  }
+
   async connectWebSocket(token: string): Promise<void> {
     return this.wsManager.connect(token);
+  }
+
+  disconnect() {
+    this.wsManager.disconnect();
   }
 
   disconnectWebSocket() {
     this.wsManager.disconnect();
   }
 
+  isConnected(): boolean {
+    return this.wsManager.isConnected();
+  }
+
   isWebSocketConnected(): boolean {
     return this.wsManager.isConnected();
   }
+
+  // Event handling methods
+  on(type: string, handler: Function) {
+    this.wsManager.on(type, handler);
+  }
+
+  off(type: string, handler: Function) {
+    this.wsManager.off(type, handler);
+  }
+
 
   // Message event handlers
   onNewMessage(handler: (message: ChatMessage) => void) {

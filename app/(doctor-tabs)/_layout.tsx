@@ -1,10 +1,12 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs, useRouter } from 'expo-router';
 import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
 import ProfileImage from '../../components/ProfileImage';
 import { useProfile } from '../../context/ProfileContext';
 import { getSafeProfileImageUrl } from '../../utils/imageUtils';
+import { notificationService } from '../../services/notificationService';
+import NotificationIcon from '../../components/NotificationIcon';
 
 import Colors from '../../constants/Colors';
 import { useColorScheme } from '../../components/useColorScheme';
@@ -87,13 +89,23 @@ function AppointmentsTabBarIcon({ focused }: { focused: boolean }) {
   );
 }
 
-// Custom header right component with user's profile image
+
+// Custom header right component with notification icon and user's profile image
 function HeaderRightComponent() {
   const router = useRouter();
   const { profileImage } = useProfile();
   
+  const handleNotificationPress = () => {
+    // Navigate to notification settings or notifications screen
+    router.push('/(doctor-tabs)/notifications');
+  };
+  
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15, gap: 12 }}>
+      {/* Notification Icon */}
+      <NotificationIcon onPress={handleNotificationPress} />
+      
+      {/* Profile Image */}
       <TouchableOpacity 
         style={{ 
           width: 36, 

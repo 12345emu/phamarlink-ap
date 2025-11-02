@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Modal,
   View,
   Text,
   StyleSheet,
@@ -11,17 +10,11 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doctorDashboardService } from '../services/doctorDashboardService';
-
-interface PrescriptionModalProps {
-  visible: boolean;
-  onClose: () => void;
-  patientId: number;
-  patientName: string;
-  appointmentId?: number;
-}
 
 interface PrescriptionFormData {
   medicationName: string;
@@ -33,13 +26,17 @@ interface PrescriptionFormData {
   refills: string;
 }
 
-export default function PrescriptionModal({ 
-  visible, 
-  onClose, 
-  patientId, 
-  patientName, 
-  appointmentId 
-}: PrescriptionModalProps) {
+export default function PrescriptionModal() {
+  const router = useRouter();
+  const { patientId, patientName, appointmentId } = useLocalSearchParams();
+  
+  const patientIdNum = parseInt(patientId as string);
+  const patientNameStr = patientName as string;
+  const appointmentIdNum = appointmentId ? parseInt(appointmentId as string) : undefined;
+  
+  const handleClose = () => {
+    router.back();
+  };
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<PrescriptionFormData>({
     medicationName: '',
@@ -55,20 +52,18 @@ export default function PrescriptionModal({
   const scrollViewRef = React.useRef<ScrollView>(null);
 
   useEffect(() => {
-    if (visible) {
-      // Reset form when modal opens
-      setFormData({
-        medicationName: '',
-        dosage: '',
-        frequency: '',
-        duration: '',
-        instructions: '',
-        quantity: '1',
-        refills: '0'
-      });
-      setErrors({});
-    }
-  }, [visible]);
+    // Reset form when screen opens
+    setFormData({
+      medicationName: '',
+      dosage: '',
+      frequency: '',
+      duration: '',
+      instructions: '',
+      quantity: '1',
+      refills: '0'
+    });
+    setErrors({});
+  }, []);
 
   const validateForm = (): boolean => {
     const newErrors: Partial<PrescriptionFormData> = {};
@@ -116,8 +111,8 @@ export default function PrescriptionModal({
       setLoading(true);
       
       const prescriptionData = {
-        patientId,
-        appointmentId,
+        patientId: patientIdNum,
+        appointmentId: appointmentIdNum,
         medicationName: formData.medicationName.trim(),
         dosage: formData.dosage.trim(),
         frequency: formData.frequency.trim(),
@@ -140,7 +135,7 @@ export default function PrescriptionModal({
           {
             text: 'OK',
             onPress: () => {
-              onClose();
+              handleClose();
             }
           }
         ]
@@ -191,12 +186,7 @@ export default function PrescriptionModal({
   );
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
+    <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
         style={styles.modalContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -204,15 +194,15 @@ export default function PrescriptionModal({
       >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Create Prescription</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
             <FontAwesome name="times-circle" size={24} color="#7f8c8d" />
           </TouchableOpacity>
         </View>
 
         <View style={styles.patientInfo}>
-          <Text style={styles.patientName}>For: {patientName}</Text>
-          {appointmentId && (
-            <Text style={styles.appointmentInfo}>Appointment ID: {appointmentId}</Text>
+          <Text style={styles.patientName}>For: {patientNameStr}</Text>
+          {appointmentIdNum && (
+            <Text style={styles.appointmentInfo}>Appointment ID: {appointmentIdNum}</Text>
           )}
         </View>
 
@@ -276,7 +266,7 @@ export default function PrescriptionModal({
         <View style={styles.footer}>
           <TouchableOpacity
             style={[styles.button, styles.cancelButton]}
-            onPress={onClose}
+            onPress={handleClose}
             disabled={loading}
           >
             <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -295,11 +285,15 @@ export default function PrescriptionModal({
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: '#f8f9fa',

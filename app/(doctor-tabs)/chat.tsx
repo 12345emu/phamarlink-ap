@@ -7,71 +7,136 @@ import {
   TouchableOpacity,
   RefreshControl,
   TextInput,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Dimensions,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
+import { doctorDashboardService } from '../../services/doctorDashboardService';
+import { chatService } from '../../services/chatService';
+import { notificationService } from '../../services/notificationService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const { width } = Dimensions.get('window');
 
 interface ChatConversation {
   id: number;
+  patientId: number;
   patientName: string;
   patientEmail: string;
   lastMessage: string;
   lastMessageTime: string;
   unreadCount: number;
   status: 'online' | 'offline';
+  avatar?: string;
 }
 
-export default function DoctorChat() {
+export default function ProfessionalChat() {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     loadConversations();
+    initializeWebSocket();
+    initializeNotifications();
+    
+    return () => {
+      chatService.disconnect();
+    };
   }, []);
 
+  const initializeWebSocket = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+
+      const wsUrl = `ws://172.20.10.3:3000/ws/chat?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected');
+        setIsConnected(true);
+      };
+      
+      ws.onclose = () => {
+        console.log('🔌 WebSocket disconnected');
+        setIsConnected(false);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error);
+        setIsConnected(false);
+      };
+    } catch (error) {
+      console.error('❌ WebSocket initialization error:', error);
+    }
+  };
+
+  const initializeNotifications = async () => {
+    try {
+      console.log('🔔 Doctor Chat - Initializing notifications...');
+      
+      // Get user info from AsyncStorage
+      const userInfo = await AsyncStorage.getItem('userInfo');
+      if (!userInfo) {
+        console.log('❌ Doctor Chat - No user info found');
+        return;
+      }
+
+      const user = JSON.parse(userInfo);
+      
+      // Initialize notification service
+      const initialized = await notificationService.initialize();
+      if (!initialized) {
+        console.log('❌ Doctor Chat - Failed to initialize notifications');
+        return;
+      }
+
+      // Register device for push notifications
+      await notificationService.registerDevice(user.id, user.user_type);
+      await notificationService.registerWithBackend(user.id, user.user_type);
+
+      console.log('✅ Doctor Chat - Notifications initialized successfully');
+    } catch (error) {
+      console.error('❌ Doctor Chat - Error initializing notifications:', error);
+    }
+  };
+
   const loadConversations = async () => {
-    // TODO: Replace with actual API call
-    const mockConversations: ChatConversation[] = [
-      {
-        id: 1,
-        patientName: 'John Doe',
-        patientEmail: 'john@example.com',
-        lastMessage: 'Thank you for the prescription, doctor.',
-        lastMessageTime: '2 hours ago',
-        unreadCount: 0,
-        status: 'online',
-      },
-      {
-        id: 2,
-        patientName: 'Jane Smith',
-        patientEmail: 'jane@example.com',
-        lastMessage: 'I have a question about my medication...',
-        lastMessageTime: '4 hours ago',
-        unreadCount: 2,
-        status: 'offline',
-      },
-      {
-        id: 3,
-        patientName: 'Mike Johnson',
-        patientEmail: 'mike@example.com',
-        lastMessage: 'When should I schedule my next appointment?',
-        lastMessageTime: '1 day ago',
-        unreadCount: 1,
-        status: 'offline',
-      },
-      {
-        id: 4,
-        patientName: 'Sarah Wilson',
-        patientEmail: 'sarah@example.com',
-        lastMessage: 'The medication is working well, thank you!',
-        lastMessageTime: '2 days ago',
-        unreadCount: 0,
-        status: 'online',
-      },
-    ];
-    setConversations(mockConversations);
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await doctorDashboardService.getChatConversations();
+      
+      if (response && response.conversations) {
+        const formattedConversations: ChatConversation[] = response.conversations.map((conv: any) => ({
+          id: conv.id,
+          patientId: conv.user_id,
+          patientName: `${conv.first_name} ${conv.last_name}` || 'Unknown Patient',
+          patientEmail: conv.email || '',
+          lastMessage: conv.last_message || 'No messages yet',
+          lastMessageTime: formatTimeAgo(conv.last_message_time || conv.updated_at),
+          unreadCount: conv.unread_count || 0,
+          status: conv.status || 'offline',
+          avatar: conv.user_profile_image
+        }));
+        
+        setConversations(formattedConversations);
+      }
+    } catch (err: any) {
+      console.error('❌ Error loading conversations:', err);
+      setError('Failed to load conversations');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onRefresh = async () => {
@@ -80,23 +145,63 @@ export default function DoctorChat() {
     setRefreshing(false);
   };
 
-  const filteredConversations = conversations.filter(conversation => {
-    return conversation.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           conversation.patientEmail.toLowerCase().includes(searchQuery.toLowerCase());
-  });
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+    return date.toLocaleDateString();
+  };
 
-  const totalUnreadMessages = conversations.reduce((total, conv) => total + conv.unreadCount, 0);
+  const filteredConversations = conversations.filter(conv =>
+    conv.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    conv.patientEmail.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const totalUnreadCount = conversations.reduce((total, conv) => total + conv.unreadCount, 0);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#3498db" />
+        <Text style={styles.loadingText}>Loading conversations...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* Professional Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Patient Messages</Text>
-        {totalUnreadMessages > 0 && (
-          <View style={styles.unreadBadge}>
-            <Text style={styles.unreadText}>{totalUnreadMessages}</Text>
-          </View>
-        )}
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Patient Communications</Text>
+          <Text style={styles.headerSubtitle}>
+            {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
+            {totalUnreadCount > 0 && ` • ${totalUnreadCount} unread`}
+          </Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => router.push('/(doctor-tabs)/patients')}
+          >
+            <FontAwesome name="users" size={16} color="#3498db" />
+            <Text style={styles.actionButtonText}>Patients</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Connection Status */}
+      <View style={[styles.statusBar, { backgroundColor: isConnected ? '#27ae60' : '#e74c3c' }]}>
+        <View style={styles.statusContent}>
+          <View style={[styles.statusDot, { backgroundColor: '#fff' }]} />
+        <Text style={styles.statusBarText}>
+          {isConnected ? 'Live Connection' : 'Connection Lost'}
+        </Text>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -105,11 +210,16 @@ export default function DoctorChat() {
           <FontAwesome name="search" size={16} color="#7f8c8d" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search conversations..."
+            placeholder="Search patients..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#bdc3c7"
           />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <FontAwesome name="times" size={16} color="#7f8c8d" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -119,17 +229,31 @@ export default function DoctorChat() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        showsVerticalScrollIndicator={false}
       >
         {filteredConversations.length === 0 ? (
           <View style={styles.emptyState}>
-            <FontAwesome name="comments" size={60} color="#bdc3c7" />
-            <Text style={styles.emptyText}>No conversations found</Text>
-            <Text style={styles.emptySubtext}>
+            <View style={styles.emptyIcon}>
+              <FontAwesome name="comments" size={48} color="#bdc3c7" />
+            </View>
+            <Text style={styles.emptyTitle}>
+              {searchQuery ? 'No patients found' : 'No conversations yet'}
+            </Text>
+            <Text style={styles.emptySubtitle}>
               {searchQuery 
                 ? 'Try adjusting your search terms'
-                : 'You have no patient conversations yet'
+                : 'Start a conversation with a patient to begin'
               }
             </Text>
+            {!searchQuery && (
+              <TouchableOpacity
+                style={styles.startChatButton}
+                onPress={() => router.push('/(doctor-tabs)/patients')}
+              >
+                <FontAwesome name="plus" size={16} color="#fff" />
+                <Text style={styles.startChatButtonText}>View All Patients</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           filteredConversations.map((conversation) => (
@@ -137,77 +261,65 @@ export default function DoctorChat() {
               key={conversation.id}
               style={styles.conversationCard}
               onPress={() => {
-                // TODO: Navigate to chat screen with specific patient
-                console.log('Open chat with:', conversation.patientName);
+                router.push({
+                  pathname: '/patient-chat-modal',
+                  params: {
+                    patientId: conversation.patientId,
+                    patientName: conversation.patientName,
+                    patientEmail: conversation.patientEmail,
+                    patientAvatar: conversation.avatar
+                  }
+                });
               }}
             >
-              <View style={styles.conversationHeader}>
-                <View style={styles.patientAvatar}>
-                  <Text style={styles.avatarText}>
-                    {conversation.patientName.split(' ').map(n => n[0]).join('')}
-                  </Text>
+              <View style={styles.cardContent}>
+                <View style={styles.avatarContainer}>
+                  {conversation.avatar ? (
+                    <Image 
+                      source={{ uri: conversation.avatar }} 
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <View style={styles.defaultAvatar}>
+                      <FontAwesome name="user" size={20} color="#3498db" />
+                    </View>
+                  )}
                   <View style={[
                     styles.statusIndicator,
-                    { backgroundColor: conversation.status === 'online' ? '#2ecc71' : '#95a5a6' }
+                    { backgroundColor: conversation.status === 'online' ? '#27ae60' : '#95a5a6' }
                   ]} />
                 </View>
-                <View style={styles.conversationInfo}>
-                  <View style={styles.patientNameRow}>
+                
+                <View style={styles.conversationDetails}>
+                  <View style={styles.nameRow}>
                     <Text style={styles.patientName}>{conversation.patientName}</Text>
-                    <Text style={styles.lastMessageTime}>{conversation.lastMessageTime}</Text>
+                    <Text style={styles.timestamp}>{conversation.lastMessageTime}</Text>
                   </View>
-                  <Text style={styles.patientEmail}>{conversation.patientEmail}</Text>
+                  
+                  <View style={styles.messageRow}>
+                    <Text style={styles.lastMessage} numberOfLines={1}>
+                      {conversation.lastMessage}
+                    </Text>
+                    {conversation.unreadCount > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadText}>{conversation.unreadCount}</Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.statusRow}>
+                    <View style={styles.statusContainer}>
+                      <View style={[
+                        styles.statusDot,
+                        { backgroundColor: conversation.status === 'online' ? '#27ae60' : '#95a5a6' }
+                      ]} />
+                      <Text style={styles.statusText}>
+                        {conversation.status === 'online' ? 'Online' : 'Offline'}
+                      </Text>
+                    </View>
+                    <FontAwesome name="chevron-right" size={12} color="#bdc3c7" />
+                  </View>
                 </View>
-                {conversation.unreadCount > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{conversation.unreadCount}</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.lastMessageContainer}>
-                <Text 
-                  style={[
-                    styles.lastMessage,
-                    conversation.unreadCount > 0 && styles.unreadMessage
-                  ]}
-                  numberOfLines={2}
-                >
-                  {conversation.lastMessage}
-                </Text>
-              </View>
-
-              <View style={styles.conversationActions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => {
-                    // TODO: Navigate to patient profile
-                    console.log('View patient profile:', conversation.id);
-                  }}
-                >
-                  <FontAwesome name="user" size={14} color="#3498db" />
-                  <Text style={styles.actionButtonText}>Profile</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => {
-                    // TODO: Create prescription for patient
-                    console.log('Create prescription:', conversation.id);
-                  }}
-                >
-                  <FontAwesome name="file-text-o" size={14} color="#e74c3c" />
-                  <Text style={styles.actionButtonText}>Prescribe</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => {
-                    // TODO: Schedule appointment
-                    console.log('Schedule appointment:', conversation.id);
-                  }}
-                >
-                  <FontAwesome name="calendar" size={14} color="#2ecc71" />
-                  <Text style={styles.actionButtonText}>Appointment</Text>
-                </TouchableOpacity>
               </View>
             </TouchableOpacity>
           ))
@@ -222,167 +334,264 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
+  
+  // Header
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     backgroundColor: '#fff',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  unreadBadge: {
-    backgroundColor: '#e74c3c',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-  },
-  unreadText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  searchContainer: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 10,
-    fontSize: 16,
-    color: '#2c3e50',
-  },
-  conversationsList: {
-    flex: 1,
-    padding: 20,
-  },
-  conversationCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 15,
+    borderBottomColor: '#e9ecef',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  conversationHeader: {
+  headerContent: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+  },
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    gap: 12,
   },
-  patientAvatar: {
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  actionButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: '#3498db',
+    fontWeight: '600',
+  },
+  
+  // Status Bar
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+  },
+  statusContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusBarText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  
+  // Search
+  searchContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+  },
+  
+  // Conversations
+  conversationsList: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  conversationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  cardContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
+  avatarImage: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#3498db',
+  },
+  defaultAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 15,
-    position: 'relative',
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+    borderWidth: 2,
+    borderColor: '#e9ecef',
   },
   statusIndicator: {
     position: 'absolute',
     bottom: 2,
     right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     borderWidth: 2,
     borderColor: '#fff',
   },
-  conversationInfo: {
+  conversationDetails: {
     flex: 1,
   },
-  patientNameRow: {
+  nameRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 4,
   },
   patientName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#2c3e50',
+    flex: 1,
   },
-  lastMessageTime: {
+  timestamp: {
     fontSize: 12,
     color: '#7f8c8d',
+    marginLeft: 8,
   },
-  patientEmail: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginTop: 2,
-  },
-  lastMessageContainer: {
-    marginBottom: 15,
+  messageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
   },
   lastMessage: {
     fontSize: 14,
     color: '#7f8c8d',
-    lineHeight: 20,
+    flex: 1,
   },
-  unreadMessage: {
-    color: '#2c3e50',
-    fontWeight: '500',
+  unreadBadge: {
+    backgroundColor: '#e74c3c',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
-  conversationActions: {
+  unreadText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  statusRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  actionButton: {
+  statusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
-    gap: 5,
   },
-  actionButtonText: {
+  statusText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#2c3e50',
+    color: '#7f8c8d',
+    marginLeft: 4,
   },
+  
+  // Empty State
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
   },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#7f8c8d',
-    marginTop: 15,
+  emptyIcon: {
+    marginBottom: 20,
   },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#bdc3c7',
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    color: '#7f8c8d',
     textAlign: 'center',
-    marginTop: 5,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  startChatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#3498db',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  startChatButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  
+  // Loading
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#7f8c8d',
   },
 });

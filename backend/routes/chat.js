@@ -20,8 +20,9 @@ router.get('/conversations', authenticateToken, async (req, res) => {
           cc.id, cc.user_id, cc.professional_id, cc.subject, cc.status, 
           cc.conversation_type, cc.last_activity, cc.created_at,
           u.first_name, u.last_name, u.profile_image as user_profile_image,
-          hp.first_name as professional_first_name, hp.last_name as professional_last_name, 
-          hp.specialty, hp.profile_image as professional_profile_image,
+          p.first_name as professional_first_name, p.last_name as professional_last_name, 
+          p.profile_image as professional_profile_image,
+          hp.specialty,
           hf.name as facility_name, hf.facility_type,
           (SELECT cm.message FROM chat_messages cm 
            WHERE cm.conversation_id = cc.id 
@@ -34,7 +35,8 @@ router.get('/conversations', authenticateToken, async (req, res) => {
            AND cm.is_read = false AND cm.sender_id != ?) as unread_count
         FROM chat_conversations cc
         JOIN users u ON cc.user_id = u.id
-        LEFT JOIN healthcare_professionals hp ON cc.professional_id = hp.id
+        JOIN users p ON cc.professional_id = p.id
+        LEFT JOIN healthcare_professionals hp ON cc.professional_id = hp.user_id
         LEFT JOIN healthcare_facilities hf ON hp.facility_id = hf.id
         WHERE cc.user_id = ?
         ORDER BY cc.last_activity DESC
@@ -45,9 +47,10 @@ router.get('/conversations', authenticateToken, async (req, res) => {
         SELECT 
           cc.id, cc.user_id, cc.professional_id, cc.subject, cc.status, 
           cc.conversation_type, cc.last_activity, cc.created_at,
-          u.first_name, u.last_name, u.profile_image as user_profile_image,
-          hp.first_name as professional_first_name, hp.last_name as professional_last_name, 
-          hp.specialty, hp.profile_image as professional_profile_image,
+          u.first_name as user_first_name, u.last_name as user_last_name, u.profile_image as user_profile_image,
+          p.first_name as professional_first_name, p.last_name as professional_last_name, 
+          p.profile_image as professional_profile_image,
+          hp.specialty,
           hf.name as facility_name, hf.facility_type,
           (SELECT cm.message FROM chat_messages cm 
            WHERE cm.conversation_id = cc.id 
@@ -60,7 +63,8 @@ router.get('/conversations', authenticateToken, async (req, res) => {
            AND cm.is_read = false AND cm.sender_id != ?) as unread_count
         FROM chat_conversations cc
         JOIN users u ON cc.user_id = u.id
-        LEFT JOIN healthcare_professionals hp ON cc.professional_id = hp.id
+        JOIN users p ON cc.professional_id = p.id
+        LEFT JOIN healthcare_professionals hp ON cc.professional_id = hp.user_id
         LEFT JOIN healthcare_facilities hf ON hp.facility_id = hf.id
         WHERE cc.professional_id = ?
         ORDER BY cc.last_activity DESC
@@ -78,9 +82,20 @@ router.get('/conversations', authenticateToken, async (req, res) => {
       });
     }
     
+    // Construct full URLs for profile images
+    const processedData = result.data.map(conversation => ({
+      ...conversation,
+      user_profile_image: conversation.user_profile_image 
+        ? `http://172.20.10.4:3000${conversation.user_profile_image}`
+        : null,
+      professional_profile_image: conversation.professional_profile_image 
+        ? `http://172.20.10.4:3000${conversation.professional_profile_image}`
+        : null
+    }));
+    
     res.json({
       success: true,
-      data: result.data
+      data: processedData
     });
   } catch (error) {
     console.error('Error fetching conversations:', error);
@@ -130,9 +145,17 @@ router.get('/conversations/:id/messages', authenticateToken, async (req, res) =>
       });
     }
     
+    // Construct full URLs for profile images in messages
+    const processedMessages = messagesResult.data.map(message => ({
+      ...message,
+      user_profile_image: message.user_profile_image 
+        ? `http://172.20.10.4:3000${message.user_profile_image}`
+        : null
+    }));
+    
     res.json({
       success: true,
-      data: messagesResult.data
+      data: processedMessages
     });
   } catch (error) {
     console.error('Error fetching messages:', error);
@@ -141,6 +164,7 @@ router.get('/conversations/:id/messages', authenticateToken, async (req, res) =>
 });
 
 // Create new conversation
+// Patient creates conversation with doctor
 router.post('/conversations', authenticateToken, requireRole(['patient']), [
   body('professional_id').isInt({ min: 1 }),
   body('subject').isLength({ min: 1, max: 100 }).trim(),
@@ -240,6 +264,117 @@ router.post('/conversations', authenticateToken, requireRole(['patient']), [
     });
   } catch (error) {
     console.error('Error creating conversation:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Doctor creates conversation with patient
+router.post('/doctor-conversations', authenticateToken, requireRole(['doctor', 'pharmacist']), [
+  body('patient_id').isInt({ min: 1 }),
+  body('subject').isLength({ min: 1, max: 100 }).trim(),
+  body('initial_message').isLength({ min: 1, max: 500 }).trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error', 
+        errors: errors.array() 
+      });
+    }
+    
+    const { patient_id, subject, initial_message } = req.body;
+    const doctorId = parseInt(req.user.id);
+    
+    console.log('🔍 Doctor creating conversation:', { doctorId, patient_id, subject });
+    
+    // Check if conversation already exists between this doctor and patient
+    const existingQuery = `
+      SELECT id FROM chat_conversations 
+      WHERE professional_id = ? AND user_id = ?
+    `;
+    const existingResult = await executeQuery(existingQuery, [doctorId, patient_id]);
+    
+    let conversationId;
+    
+    if (existingResult.success && existingResult.data.length > 0) {
+      // Conversation already exists, use existing one
+      conversationId = existingResult.data[0].id;
+      console.log('✅ Using existing conversation:', conversationId);
+      
+      // Add message to existing conversation
+      const messageQuery = `
+        INSERT INTO chat_messages (
+          conversation_id, sender_id, message, message_type, is_read, created_at
+        ) VALUES (?, ?, ?, 'text', false, NOW())
+      `;
+      const messageResult = await executeQuery(messageQuery, [conversationId, doctorId, initial_message]);
+      
+      if (!messageResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send message to existing conversation'
+        });
+      }
+      
+      console.log('✅ Message added to existing conversation:', conversationId);
+      
+      res.json({
+        success: true,
+        data: {
+          id: conversationId,
+          conversation_id: conversationId,
+          message: 'Message sent to existing conversation'
+        }
+      });
+    } else {
+      // Create new conversation
+      const conversationQuery = `
+        INSERT INTO chat_conversations (
+          user_id, patient_id, professional_id, subject, conversation_type, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'consultation', 'active', NOW(), NOW())
+      `;
+      const conversationResult = await executeQuery(conversationQuery, [patient_id, patient_id, doctorId, subject]);
+      
+      if (!conversationResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create conversation'
+        });
+      }
+      
+      conversationId = conversationResult.data.insertId;
+      
+      // Add initial message
+      const messageQuery = `
+        INSERT INTO chat_messages (
+          conversation_id, sender_id, message, message_type, is_read, created_at
+        ) VALUES (?, ?, ?, 'text', false, NOW())
+      `;
+      const messageResult = await executeQuery(messageQuery, [conversationId, doctorId, initial_message]);
+      
+      if (!messageResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send initial message'
+        });
+      }
+      
+      console.log('✅ New doctor conversation created:', conversationId);
+      
+      res.json({
+        success: true,
+        data: {
+          id: conversationId,
+          conversation_id: conversationId,
+          message: 'New conversation created successfully'
+        }
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error creating doctor conversation:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

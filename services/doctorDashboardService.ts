@@ -509,7 +509,17 @@ class DoctorDashboardService {
       
       if (response.success && response.data) {
         console.log('✅ DoctorDashboardService - Chat conversations fetched successfully');
-        return response.data;
+        // Return data in expected format for frontend
+        const conversations = response.data as any[];
+        return {
+          conversations: conversations,
+          pagination: {
+            total: conversations.length,
+            page: 1,
+            limit: 20,
+            pages: 1
+          }
+        };
       }
       
       console.log('❌ DoctorDashboardService - API returned unsuccessful response');

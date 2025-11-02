@@ -12,9 +12,9 @@ import {
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { doctorDashboardService } from '../../services/doctorDashboardService';
-import PatientHistoryModal from '../patient-history-modal';
-import PrescriptionModal from '../prescription-modal';
-import PatientChatModal from '../patient-chat-modal';
+// Removed PatientHistoryModal import - now using router navigation
+// Removed PrescriptionModal import - now using router navigation
+// Removed PatientChatModal import - now using router navigation
 
 interface Patient {
   id: number;
@@ -42,10 +42,9 @@ export default function DoctorPatients() {
     limit: 20,
     pages: 0
   });
-  const [historyModalVisible, setHistoryModalVisible] = useState(false);
-  const [prescriptionModalVisible, setPrescriptionModalVisible] = useState(false);
-  const [chatModalVisible, setChatModalVisible] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<{ id: number; name: string } | null>(null);
+  // Removed historyModalVisible - now using router navigation
+  // Removed prescriptionModalVisible - now using router navigation
+  // Removed selectedPatient - now using router navigation
 
   useEffect(() => {
     loadPatients();
@@ -96,31 +95,38 @@ export default function DoctorPatients() {
 
   const handlePatientAction = (patientId: number, action: 'history' | 'chat' | 'prescribe', patientName: string) => {
     if (action === 'history') {
-      setSelectedPatient({ id: patientId, name: patientName });
-      setHistoryModalVisible(true);
+      // Navigate to patient history screen instead of opening modal
+      router.push({
+        pathname: '/patient-history-modal',
+        params: {
+          patientId: patientId.toString(),
+          patientName: patientName
+        }
+      });
     } else if (action === 'prescribe') {
-      setSelectedPatient({ id: patientId, name: patientName });
-      setPrescriptionModalVisible(true);
+      // Navigate to prescription screen instead of opening modal
+      router.push({
+        pathname: '/prescription-modal',
+        params: {
+          patientId: patientId.toString(),
+          patientName: patientName
+        }
+      });
     } else if (action === 'chat') {
-      setSelectedPatient({ id: patientId, name: patientName });
-      setChatModalVisible(true);
+      // Navigate to chat screen instead of opening modal
+      router.push({
+        pathname: '/patient-chat-modal',
+        params: {
+          patientId: patientId.toString(),
+          patientName: patientName
+        }
+      });
     }
   };
 
-  const closeHistoryModal = () => {
-    setHistoryModalVisible(false);
-    setSelectedPatient(null);
-  };
-
-  const closePrescriptionModal = () => {
-    setPrescriptionModalVisible(false);
-    setSelectedPatient(null);
-  };
-
-  const closeChatModal = () => {
-    setChatModalVisible(false);
-    setSelectedPatient(null);
-  };
+  // Removed closeHistoryModal - no longer needed with router navigation
+  // Removed closePrescriptionModal - no longer needed with router navigation
+  // Removed closeChatModal - no longer needed with router navigation
 
   const filters = [
     { key: 'all', label: 'All Patients' },
@@ -282,35 +288,9 @@ export default function DoctorPatients() {
         )}
       </ScrollView>
 
-        {/* Patient History Modal */}
-        {selectedPatient && (
-          <PatientHistoryModal
-            visible={historyModalVisible}
-            onClose={closeHistoryModal}
-            patientId={selectedPatient.id}
-            patientName={selectedPatient.name}
-          />
-        )}
-
-        {/* Prescription Modal */}
-        {selectedPatient && (
-          <PrescriptionModal
-            visible={prescriptionModalVisible}
-            onClose={closePrescriptionModal}
-            patientId={selectedPatient.id}
-            patientName={selectedPatient.name}
-          />
-        )}
-
-        {/* Chat Modal */}
-        {selectedPatient && (
-          <PatientChatModal
-            visible={chatModalVisible}
-            onClose={closeChatModal}
-            patientId={selectedPatient.id}
-            patientName={selectedPatient.name}
-          />
-        )}
+        {/* Patient History Modal removed - now using router navigation */}
+        {/* Prescription Modal removed - now using router navigation */}
+        {/* Chat Modal removed - now using router navigation */}
     </View>
   );
 }

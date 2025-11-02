@@ -29,9 +29,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
     `;
     const prescriptionsResult = await executeQuery(prescriptionsQuery, [doctorId]);
     
-    // Get unread messages count from this doctor's appointments (all time)
-    const messagesQuery = 'SELECT COUNT(*) as total FROM appointments WHERE preferred_doctor = ? AND status = "pending"';
-    const messagesResult = await executeQuery(messagesQuery, [doctorId]);
+    // Get unread messages count from chat_messages table
+    const messagesQuery = `
+      SELECT COUNT(*) as total 
+      FROM chat_messages cm
+      JOIN chat_conversations cc ON cm.conversation_id = cc.id
+      WHERE cc.professional_id = ? AND cm.is_read = 0 AND cm.sender_id != ?
+    `;
+    const messagesResult = await executeQuery(messagesQuery, [doctorId, doctorId]);
     
     const stats = {
       todayAppointments: appointmentsResult.success ? appointmentsResult.data[0].total : 0,
@@ -134,10 +139,10 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         (SELECT COUNT(*) FROM appointments WHERE preferred_doctor = ?) as totalAppointments,
         (SELECT COUNT(DISTINCT user_id) FROM appointments WHERE preferred_doctor = ?) as totalPatients,
         (SELECT COUNT(*) FROM prescriptions WHERE doctor_id = ? AND status = 'active') as pendingPrescriptions,
-        (SELECT COUNT(*) FROM appointments WHERE preferred_doctor = ? AND status = 'pending') as unreadMessages
+        (SELECT COUNT(*) FROM chat_messages cm JOIN chat_conversations cc ON cm.conversation_id = cc.id WHERE cc.professional_id = ? AND cm.is_read = 0 AND cm.sender_id != ?) as unreadMessages
     `;
     
-    const statsResult = await executeQuery(statsQuery, [doctorId, doctorId, doctorId, doctorId]);
+    const statsResult = await executeQuery(statsQuery, [doctorId, doctorId, doctorId, doctorId, doctorId]);
     
     // Get today's appointments for this doctor only
     const appointmentsQuery = `

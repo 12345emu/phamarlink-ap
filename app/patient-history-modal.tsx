@@ -3,22 +3,16 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   ScrollView,
   TouchableOpacity,
   RefreshControl,
   Alert,
+  SafeAreaView,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doctorDashboardService } from '../services/doctorDashboardService';
 import MedicalNotesModal from './medical-notes-modal';
-
-interface PatientHistoryModalProps {
-  visible: boolean;
-  onClose: () => void;
-  patientId: number;
-  patientName: string;
-}
 
 interface Appointment {
   id: number;
@@ -83,7 +77,16 @@ interface PatientHistoryData {
   prescriptions: Prescription[];
 }
 
-export default function PatientHistoryModal({ visible, onClose, patientId, patientName }: PatientHistoryModalProps) {
+export default function PatientHistoryModal() {
+  const router = useRouter();
+  const { patientId, patientName } = useLocalSearchParams();
+  
+  const patientIdNum = parseInt(patientId as string);
+  const patientNameStr = patientName as string;
+  
+  const handleClose = () => {
+    router.back();
+  };
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [historyData, setHistoryData] = useState<PatientHistoryData | null>(null);
@@ -94,19 +97,19 @@ export default function PatientHistoryModal({ visible, onClose, patientId, patie
   const [medicalNotesLoading, setMedicalNotesLoading] = useState(false);
 
   useEffect(() => {
-    if (visible && patientId) {
+    if (patientIdNum) {
       loadPatientHistory();
     }
-  }, [visible, patientId]);
+  }, [patientIdNum]);
 
   const loadPatientHistory = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      console.log('🔍 PatientHistoryModal - Loading history for patient:', patientId);
+      console.log('🔍 PatientHistoryModal - Loading history for patient:', patientIdNum);
       
-      const data = await doctorDashboardService.getPatientHistory(patientId);
+      const data = await doctorDashboardService.getPatientHistory(patientIdNum);
       
       console.log('🔍 PatientHistoryModal - History data received:', data);
       
@@ -123,9 +126,9 @@ export default function PatientHistoryModal({ visible, onClose, patientId, patie
     try {
       setMedicalNotesLoading(true);
       
-      console.log('🔍 PatientHistoryModal - Loading medical notes:', { patientId });
+      console.log('🔍 PatientHistoryModal - Loading medical notes:', { patientId: patientIdNum });
       
-      const response = await doctorDashboardService.getPatientMedicalNotes(patientId);
+      const response = await doctorDashboardService.getPatientMedicalNotes(patientIdNum);
       
       console.log('🔍 PatientHistoryModal - Medical notes response:', JSON.stringify(response, null, 2));
       
@@ -404,21 +407,15 @@ export default function PatientHistoryModal({ visible, onClose, patientId, patie
   );
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <FontAwesome name="times" size={24} color="#2c3e50" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Medical History</Text>
-          <View style={styles.placeholder} />
-        </View>
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+          <FontAwesome name="times" size={24} color="#2c3e50" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Medical History</Text>
+        <View style={styles.placeholder} />
+      </View>
 
         {/* Patient Info */}
         {historyData && (
@@ -571,16 +568,15 @@ export default function PatientHistoryModal({ visible, onClose, patientId, patie
             </>
           )}
         </ScrollView>
-      </View>
 
       {/* Medical Notes Modal */}
       <MedicalNotesModal
         visible={medicalNotesModalVisible}
         onClose={() => setMedicalNotesModalVisible(false)}
-        patientId={patientId}
-        patientName={patientName}
+        patientId={patientIdNum}
+        patientName={patientNameStr}
       />
-    </Modal>
+    </SafeAreaView>
   );
 }
 

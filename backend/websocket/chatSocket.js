@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const { executeQuery } = require('../config/database');
+const pushNotificationService = require('../services/pushNotificationService');
 
 class ChatWebSocketServer {
   constructor(server) {
@@ -32,9 +33,16 @@ class ChatWebSocketServer {
       // Verify JWT token
       try {
         console.log('🔍 WebSocket token received:', token ? `${token.substring(0, 20)}...` : 'No token');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-        const userId = decoded.id;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
+        console.log('🔍 WebSocket decoded token:', decoded);
+        const userId = decoded.userId || decoded.id;
         const userType = decoded.user_type;
+        
+        if (!userId) {
+          console.error('❌ No userId found in token:', decoded);
+          ws.close(1008, 'Invalid token: no user ID');
+          return;
+        }
         
         console.log(`✅ WebSocket authenticated for user ${userId} (${userType})`);
         
@@ -114,14 +122,68 @@ class ChatWebSocketServer {
   
   async handleSendMessage(senderId, data) {
     try {
+      console.log('🔍 WebSocket - handleSendMessage called:', { senderId, data });
       const { conversationId, message, messageType = 'text' } = data;
+      
+      console.log('🔍 WebSocket - Parsed data:', { conversationId, message, messageType });
+      
+      // Validate required parameters
+      if (!conversationId || conversationId === undefined) {
+        console.error('❌ WebSocket - conversationId is undefined');
+        this.sendToUser(senderId, {
+          type: 'error',
+          message: 'Invalid conversation ID'
+        });
+        return;
+      }
+      
+      if (!message || message === undefined) {
+        console.error('❌ WebSocket - message is undefined');
+        this.sendToUser(senderId, {
+          type: 'error',
+          message: 'Message cannot be empty'
+        });
+        return;
+      }
+      
+      if (!senderId || senderId === undefined) {
+        console.error('❌ WebSocket - senderId is undefined');
+        this.sendToUser(senderId, {
+          type: 'error',
+          message: 'Invalid sender ID'
+        });
+        return;
+      }
+      
+      // Convert parameters to proper types
+      const conversationIdNum = parseInt(conversationId);
+      const senderIdNum = parseInt(senderId);
+      
+      if (isNaN(conversationIdNum)) {
+        console.error('❌ WebSocket - conversationId is not a valid number:', conversationId);
+        this.sendToUser(senderId, {
+          type: 'error',
+          message: 'Invalid conversation ID format'
+        });
+        return;
+      }
+      
+      if (isNaN(senderIdNum)) {
+        console.error('❌ WebSocket - senderId is not a valid number:', senderId);
+        this.sendToUser(senderId, {
+          type: 'error',
+          message: 'Invalid sender ID format'
+        });
+        return;
+      }
       
       // Verify user has access to this conversation
       const accessQuery = `
         SELECT id, user_id, professional_id FROM chat_conversations 
         WHERE id = ? AND (user_id = ? OR professional_id = ?)
       `;
-      const accessResult = await executeQuery(accessQuery, [conversationId, senderId, senderId]);
+      console.log('🔍 WebSocket - Checking access for conversation:', conversationIdNum);
+      const accessResult = await executeQuery(accessQuery, [conversationIdNum, senderIdNum, senderIdNum]);
       
       if (!accessResult.success || accessResult.data.length === 0) {
         this.sendToUser(senderId, {
@@ -140,9 +202,13 @@ class ChatWebSocketServer {
           conversation_id, sender_id, message, message_type, created_at
         ) VALUES (?, ?, ?, ?, NOW())
       `;
-      const messageResult = await executeQuery(messageQuery, [conversationId, senderId, message, messageType]);
+      console.log('🔍 WebSocket - Inserting message:', { conversationId: conversationIdNum, senderId: senderIdNum, message, messageType });
+      const messageResult = await executeQuery(messageQuery, [conversationIdNum, senderIdNum, message, messageType]);
+      
+      console.log('🔍 WebSocket - Message insert result:', messageResult);
       
       if (!messageResult.success) {
+        console.error('❌ WebSocket - Failed to insert message:', messageResult);
         this.sendToUser(senderId, {
           type: 'error',
           message: 'Failed to send message'
@@ -151,6 +217,7 @@ class ChatWebSocketServer {
       }
       
       const messageId = messageResult.data.insertId;
+      console.log('✅ WebSocket - Message inserted with ID:', messageId);
       
       // Update conversation last activity
       const updateQuery = `
@@ -191,6 +258,9 @@ class ChatWebSocketServer {
         type: 'new_message',
         data: messageObj
       });
+      
+      // Send push notification to recipient if they're not online
+      await this.sendPushNotificationToRecipient(recipientId, sender, message, conversationId);
       
       console.log(`📨 Message sent from ${senderId} to ${recipientId} in conversation ${conversationId}`);
       
@@ -282,6 +352,60 @@ class ChatWebSocketServer {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Send push notification to recipient if they're not online
+   */
+  async sendPushNotificationToRecipient(recipientId, sender, message, conversationId) {
+    try {
+      // Check if recipient is online
+      const isRecipientOnline = this.clients.has(recipientId);
+      
+      if (!isRecipientOnline) {
+        console.log('🔔 WebSocket - Recipient not online, sending push notification');
+        
+        // Get recipient info to determine notification type
+        const recipientQuery = 'SELECT user_type FROM users WHERE id = ?';
+        const recipientResult = await executeQuery(recipientQuery, [recipientId]);
+        
+        if (recipientResult.success && recipientResult.data.length > 0) {
+          const recipientType = recipientResult.data[0].user_type;
+          const senderName = `${sender.first_name} ${sender.last_name}`;
+          
+          let notificationData;
+          
+          if (recipientType === 'doctor') {
+            // Doctor receiving message from patient
+            notificationData = pushNotificationService.createChatNotification(
+              senderName, 
+              message, 
+              conversationId
+            );
+          } else {
+            // Patient receiving message from doctor
+            notificationData = pushNotificationService.createChatNotification(
+              senderName, 
+              message, 
+              conversationId
+            );
+          }
+          
+          // Send push notification
+          const result = await pushNotificationService.sendNotificationToUser(recipientId, notificationData);
+          
+          if (result.success) {
+            console.log('✅ WebSocket - Push notification sent successfully');
+          } else {
+            console.log('⚠️ WebSocket - Failed to send push notification:', result.message);
+          }
+        }
+      } else {
+        console.log('🔔 WebSocket - Recipient is online, no push notification needed');
+      }
+    } catch (error) {
+      console.error('❌ WebSocket - Error sending push notification:', error);
+    }
   }
   
   // Broadcast message to all connected clients

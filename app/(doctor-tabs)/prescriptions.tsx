@@ -12,6 +12,7 @@ import {
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
 import { doctorDashboardService } from '../../services/doctorDashboardService';
+import CreatePrescriptionModal from '../../components/CreatePrescriptionModal';
 
 interface Prescription {
   id: number;
@@ -39,6 +40,7 @@ export default function DoctorPrescriptions() {
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     loadPrescriptions();
@@ -124,10 +126,7 @@ export default function DoctorPrescriptions() {
         <Text style={styles.headerTitle}>Prescriptions</Text>
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => {
-            // TODO: Navigate to create prescription screen
-            Alert.alert('Create Prescription', 'This will open the prescription creation form');
-          }}
+          onPress={() => setShowCreateModal(true)}
         >
           <FontAwesome name="plus" size={16} color="#fff" />
           <Text style={styles.createButtonText}>Create</Text>
@@ -254,6 +253,16 @@ export default function DoctorPrescriptions() {
           ))
         )}
       </ScrollView>
+
+      {/* Create Prescription Modal */}
+      <CreatePrescriptionModal
+        visible={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={() => {
+          loadPrescriptions();
+          setShowCreateModal(false);
+        }}
+      />
     </View>
   );
 }
