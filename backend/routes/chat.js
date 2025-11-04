@@ -1,9 +1,44 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { executeQuery } = require('../config/database');
+const pushNotificationService = require('../services/pushNotificationService');
 
 const router = express.Router();
+
+// Configure multer for chat attachments
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/chat-attachments');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    cb(null, `chat-${timestamp}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow images and videos
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image and video files are allowed'), false);
+    }
+  }
+});
 
 // Get all conversations for a user
 router.get('/conversations', authenticateToken, async (req, res) => {
@@ -27,6 +62,12 @@ router.get('/conversations', authenticateToken, async (req, res) => {
           (SELECT cm.message FROM chat_messages cm 
            WHERE cm.conversation_id = cc.id 
            ORDER BY cm.created_at DESC LIMIT 1) as last_message,
+          (SELECT cm.message_type FROM chat_messages cm 
+           WHERE cm.conversation_id = cc.id 
+           ORDER BY cm.created_at DESC LIMIT 1) as last_message_type,
+          (SELECT cm.sender_id FROM chat_messages cm 
+           WHERE cm.conversation_id = cc.id 
+           ORDER BY cm.created_at DESC LIMIT 1) as last_message_sender_id,
           (SELECT cm.created_at FROM chat_messages cm 
            WHERE cm.conversation_id = cc.id 
            ORDER BY cm.created_at DESC LIMIT 1) as last_message_time,
@@ -55,6 +96,12 @@ router.get('/conversations', authenticateToken, async (req, res) => {
           (SELECT cm.message FROM chat_messages cm 
            WHERE cm.conversation_id = cc.id 
            ORDER BY cm.created_at DESC LIMIT 1) as last_message,
+          (SELECT cm.message_type FROM chat_messages cm 
+           WHERE cm.conversation_id = cc.id 
+           ORDER BY cm.created_at DESC LIMIT 1) as last_message_type,
+          (SELECT cm.sender_id FROM chat_messages cm 
+           WHERE cm.conversation_id = cc.id 
+           ORDER BY cm.created_at DESC LIMIT 1) as last_message_sender_id,
           (SELECT cm.created_at FROM chat_messages cm 
            WHERE cm.conversation_id = cc.id 
            ORDER BY cm.created_at DESC LIMIT 1) as last_message_time,
@@ -183,39 +230,57 @@ router.post('/conversations', authenticateToken, requireRole(['patient']), [
     const { professional_id, subject, initial_message } = req.body;
     const userId = parseInt(req.user.id);
     
-    // Check if conversation already exists
-    const existingQuery = `
-      SELECT id FROM chat_conversations 
-      WHERE user_id = ? AND professional_id = ? AND status = 'active'
-    `;
-    const existingResult = await executeQuery(existingQuery, [userId, professional_id]);
+    // professional_id can be either:
+    // 1. users.id (from the /from-users endpoint) - use directly
+    // 2. healthcare_professionals.id - need to look up user_id
+    // chat_conversations.professional_id stores users.id, so we need to get users.id
     
-    if (existingResult.success && existingResult.data.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'Conversation already exists with this professional',
-        conversationId: existingResult.data[0].id
-      });
+    let professionalUserId = null;
+    let facilityId = 1;
+    
+    // First, check if it's a direct user_id (from users table)
+    const userQuery = `
+      SELECT id, user_type, is_active, first_name, last_name
+      FROM users
+      WHERE id = ? 
+      AND user_type IN ('doctor', 'pharmacist')
+      AND is_active = 1
+    `;
+    const userResult = await executeQuery(userQuery, [professional_id]);
+    
+    if (userResult.success && userResult.data && userResult.data.length > 0) {
+      // It's a direct user_id from users table
+      professionalUserId = parseInt(professional_id);
+    } else {
+      // Try to find it as healthcare_professionals.id
+      const professionalQuery = `
+        SELECT hp.*, hf.id as facility_id, hf.name as facility_name, hf.facility_type, u.is_active as user_is_active, u.id as user_id
+        FROM healthcare_professionals hp
+        LEFT JOIN healthcare_facilities hf ON hp.facility_id = hf.id
+        LEFT JOIN users u ON hp.user_id = u.id
+        WHERE hp.id = ? 
+        AND (u.is_active = 1 OR u.is_active = true)
+      `;
+      const professionalResult = await executeQuery(professionalQuery, [professional_id]);
+      
+      if (!professionalResult.success || professionalResult.data.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Professional not found or inactive'
+        });
+      }
+      
+      const professional = professionalResult.data[0];
+      facilityId = professional.facility_id || 1;
+      professionalUserId = professional.user_id;
     }
     
-    // Verify professional exists
-    const professionalQuery = `
-      SELECT hp.*, hf.id as facility_id, hf.name as facility_name, hf.facility_type
-      FROM healthcare_professionals hp
-      LEFT JOIN healthcare_facilities hf ON hp.facility_id = hf.id
-      WHERE hp.id = ? AND hp.is_active = true
-    `;
-    const professionalResult = await executeQuery(professionalQuery, [professional_id]);
-    
-    if (!professionalResult.success || professionalResult.data.length === 0) {
-      return res.status(404).json({
+    if (!professionalUserId) {
+      return res.status(400).json({
         success: false,
-        message: 'Professional not found or inactive'
+        message: 'Professional user ID not found'
       });
     }
-    
-    const professional = professionalResult.data[0];
-    const facilityId = professional.facility_id || 1;
     
     // Create conversation
     const conversationQuery = `
@@ -225,7 +290,7 @@ router.post('/conversations', authenticateToken, requireRole(['patient']), [
       ) VALUES (?, ?, ?, ?, ?, 'general', 'active', NOW(), NOW())
     `;
     const conversationResult = await executeQuery(conversationQuery, [
-      userId, facilityId, userId, professional_id, subject
+      userId, facilityId, userId, professionalUserId, subject
     ]);
     
     if (!conversationResult.success) {
@@ -435,6 +500,56 @@ router.post('/conversations/:id/messages', authenticateToken, [
     `;
     await executeQuery(updateQuery, [id]);
     
+    // Get conversation info to determine recipient
+    const conversationQuery = `
+      SELECT user_id, professional_id FROM chat_conversations WHERE id = ?
+    `;
+    const conversationResult = await executeQuery(conversationQuery, [id]);
+    
+    if (conversationResult.success && conversationResult.data.length > 0) {
+      const conversation = conversationResult.data[0];
+      const recipientId = conversation.user_id === userId ? conversation.professional_id : conversation.user_id;
+      
+      // Get sender info for notification
+      const senderQuery = `
+        SELECT first_name, last_name FROM users WHERE id = ?
+      `;
+      const senderResult = await executeQuery(senderQuery, [userId]);
+      
+      if (senderResult.success && senderResult.data.length > 0 && recipientId) {
+        const sender = senderResult.data[0];
+        const senderName = `${sender.first_name} ${sender.last_name}`;
+        
+        // Format message for notification (truncate if too long or handle media)
+        let notificationMessage = message;
+        if (message_type === 'image') {
+          notificationMessage = message || 'Sent an image';
+        } else if (message_type === 'file' || message_type === 'video') {
+          notificationMessage = message || 'Sent a video';
+        }
+        
+        // Create and send push notification
+        const notificationData = pushNotificationService.createChatNotification(
+          senderName,
+          notificationMessage,
+          parseInt(id)
+        );
+        
+        // Send notification asynchronously (don't wait for it)
+        pushNotificationService.sendNotificationToUser(recipientId, notificationData)
+          .then(result => {
+            if (result.success) {
+              console.log('✅ Chat API - Push notification sent successfully to user:', recipientId);
+            } else {
+              console.log('⚠️ Chat API - Failed to send push notification:', result.message);
+            }
+          })
+          .catch(error => {
+            console.error('❌ Chat API - Error sending push notification:', error);
+          });
+      }
+    }
+    
     res.status(201).json({
       success: true,
       message: 'Message sent successfully',
@@ -489,6 +604,140 @@ router.put('/conversations/:id/read', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Error marking messages as read:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Upload chat attachment
+router.post('/conversations/:id/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = parseInt(req.user.id);
+    const { message_type = 'image', message } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+    
+    // Verify user has access to this conversation
+    const accessQuery = `
+      SELECT id FROM chat_conversations 
+      WHERE id = ? AND (user_id = ? OR professional_id = ?)
+    `;
+    const accessResult = await executeQuery(accessQuery, [id, userId, userId]);
+    
+    if (!accessResult.success || accessResult.data.length === 0) {
+      // Delete uploaded file if access denied
+      fs.unlinkSync(req.file.path);
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Access denied to this conversation' 
+      });
+    }
+    
+    // Construct attachment URL
+    const attachmentUrl = `/uploads/chat-attachments/${req.file.filename}`;
+    
+    // Insert message with attachment
+    const messageQuery = `
+      INSERT INTO chat_messages (
+        conversation_id, sender_id, message, message_type, attachment_url, created_at
+      ) VALUES (?, ?, ?, ?, ?, NOW())
+    `;
+    const messageResult = await executeQuery(messageQuery, [
+      id, 
+      userId, 
+      message || '', 
+      message_type, 
+      attachmentUrl
+    ]);
+    
+    if (!messageResult.success) {
+      // Delete uploaded file if database insert failed
+      fs.unlinkSync(req.file.path);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to save message'
+      });
+    }
+    
+    // Update conversation last activity
+    const updateQuery = `
+      UPDATE chat_conversations 
+      SET last_activity = NOW() 
+      WHERE id = ?
+    `;
+    await executeQuery(updateQuery, [id]);
+    
+    // Get conversation info to determine recipient
+    const conversationQuery = `
+      SELECT user_id, professional_id FROM chat_conversations WHERE id = ?
+    `;
+    const conversationResult = await executeQuery(conversationQuery, [id]);
+    
+    if (conversationResult.success && conversationResult.data.length > 0) {
+      const conversation = conversationResult.data[0];
+      const recipientId = conversation.user_id === userId ? conversation.professional_id : conversation.user_id;
+      
+      // Get sender info for notification
+      const senderQuery = `
+        SELECT first_name, last_name FROM users WHERE id = ?
+      `;
+      const senderResult = await executeQuery(senderQuery, [userId]);
+      
+      if (senderResult.success && senderResult.data.length > 0 && recipientId) {
+        const sender = senderResult.data[0];
+        const senderName = `${sender.first_name} ${sender.last_name}`;
+        
+        // Format message for notification based on media type
+        let notificationMessage = '';
+        if (message_type === 'image') {
+          notificationMessage = message || 'Sent an image';
+        } else if (message_type === 'file' || message_type === 'video') {
+          notificationMessage = message || 'Sent a video';
+        } else {
+          notificationMessage = message || 'Sent a file';
+        }
+        
+        // Create and send push notification
+        const notificationData = pushNotificationService.createChatNotification(
+          senderName,
+          notificationMessage,
+          parseInt(id)
+        );
+        
+        // Send notification asynchronously (don't wait for it)
+        pushNotificationService.sendNotificationToUser(recipientId, notificationData)
+          .then(result => {
+            if (result.success) {
+              console.log('✅ Chat API - Push notification sent successfully for media to user:', recipientId);
+            } else {
+              console.log('⚠️ Chat API - Failed to send push notification for media:', result.message);
+            }
+          })
+          .catch(error => {
+            console.error('❌ Chat API - Error sending push notification for media:', error);
+          });
+      }
+    }
+    
+    res.status(201).json({
+      success: true,
+      message: 'Media uploaded successfully',
+      data: {
+        messageId: messageResult.data.insertId,
+        attachmentUrl: attachmentUrl
+      }
+    });
+  } catch (error) {
+    console.error('Error uploading chat attachment:', error);
+    // Delete uploaded file if error occurred
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

@@ -13,11 +13,19 @@ import {
   SafeAreaView,
   Image,
   Keyboard,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { Video, ResizeMode } from 'expo-av';
 import { chatService } from '../services/chatService';
+import { apiClient } from '../services/apiClient';
+import { API_CONFIG } from '../constants/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 interface Message {
   id: number;
@@ -28,6 +36,8 @@ interface Message {
   is_read: boolean;
   sender_name?: string;
   is_doctor: boolean;
+  message_type?: 'text' | 'image' | 'file';
+  attachment_url?: string;
 }
 
 export default function ChatScreen() {
@@ -47,7 +57,15 @@ export default function ChatScreen() {
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [videoModalVisible, setVideoModalVisible] = useState(false);
+  const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
+  const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [imageCaption, setImageCaption] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
+  const textInputRef = useRef<TextInput>(null);
+  const videoRef = useRef<Video>(null);
   
   const handleClose = () => {
     router.back();
@@ -68,6 +86,23 @@ export default function ChatScreen() {
       console.error('❌ ChatScreen - Error getting current user ID:', error);
     }
   };
+
+  useEffect(() => {
+    // Request permissions for image picker
+    (async () => {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Sorry, we need camera roll permissions to send images!');
+        }
+        
+        const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+        if (cameraStatus.status !== 'granted') {
+          Alert.alert('Permission needed', 'Sorry, we need camera permissions to take photos!');
+        }
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (conversationIdNum) {
@@ -101,6 +136,33 @@ export default function ChatScreen() {
       keyboardDidHideListener.remove();
     };
   }, [conversationIdNum]);
+
+  // Mark messages as read and scroll to bottom when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (conversationIdNum) {
+        const markAsRead = async () => {
+          try {
+            await chatService.markMessagesAsRead(conversationIdNum.toString());
+            console.log('✅ ChatScreen - Messages marked as read on focus');
+          } catch (error) {
+            console.error('⚠️ ChatScreen - Failed to mark messages as read on focus:', error);
+          }
+        };
+        
+        // Small delay to ensure screen is fully loaded
+        const timer = setTimeout(() => {
+          markAsRead();
+          // Scroll to bottom when screen comes into focus
+          if (scrollViewRef.current && messages.length > 0) {
+            scrollViewRef.current.scrollToEnd({ animated: true });
+            console.log('✅ ChatScreen - Scrolled to bottom on focus');
+          }
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }, [conversationIdNum, messages.length])
+  );
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
@@ -199,15 +261,39 @@ export default function ChatScreen() {
       const response = await chatService.getMessages(conversationIdNum!.toString());
       
       if (response && response.data) {
-        // Process messages without relying on is_doctor field
+        // Process messages - map created_at to timestamp and include attachment_url
         const processedMessages = response.data.map((msg: any) => ({
           ...msg,
-          // Keep is_doctor field for compatibility but don't use it for alignment
-          is_doctor: msg.is_doctor !== undefined ? msg.is_doctor : true
+          // Map created_at to timestamp for compatibility
+          timestamp: msg.created_at || msg.timestamp || new Date().toISOString(),
+          // Keep is_doctor field for compatibility but we'll use sender_id comparison instead
+          is_doctor: msg.is_doctor !== undefined ? msg.is_doctor : true,
+          // Ensure message_type and attachment_url are included
+          message_type: msg.message_type || 'text',
+          attachment_url: msg.attachment_url
         }));
         
         setMessages(processedMessages);
         console.log('✅ ChatScreen - Messages loaded:', processedMessages.length);
+        
+        // Mark messages as read after loading
+        if (conversationIdNum) {
+          try {
+            await chatService.markMessagesAsRead(conversationIdNum.toString());
+            console.log('✅ ChatScreen - Messages marked as read');
+          } catch (markReadError) {
+            // Silently fail - don't block the UI if marking as read fails
+            console.error('⚠️ ChatScreen - Failed to mark messages as read:', markReadError);
+          }
+        }
+        
+        // Scroll to bottom after messages are loaded
+        setTimeout(() => {
+          if (scrollViewRef.current && processedMessages.length > 0) {
+            scrollViewRef.current.scrollToEnd({ animated: false });
+            console.log('✅ ChatScreen - Scrolled to bottom after loading messages');
+          }
+        }, 300);
       } else {
         setMessages([]);
         console.log('⚠️ ChatScreen - No messages found');
@@ -247,6 +333,11 @@ export default function ChatScreen() {
       const messageToSend = newMessage.trim();
       setNewMessage('');
       
+      // Keep keyboard open by maintaining focus on TextInput
+      setTimeout(() => {
+        textInputRef.current?.focus();
+      }, 50);
+      
       // Scroll to bottom immediately after adding message
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -274,13 +365,218 @@ export default function ChatScreen() {
     }
   };
 
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setSelectedImageUri(result.assets[0].uri);
+        setImageCaption('');
+        setImagePreviewVisible(true);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
+
+  const takePhoto = async () => {
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setSelectedImageUri(result.assets[0].uri);
+        setImageCaption('');
+        setImagePreviewVisible(true);
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Error', 'Failed to take photo');
+    }
+  };
+
+  const pickVideo = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await sendMediaMessage(result.assets[0].uri, 'file');
+      }
+    } catch (error) {
+      console.error('Error picking video:', error);
+      Alert.alert('Error', 'Failed to pick video');
+    }
+  };
+
+  const showMediaOptions = () => {
+    Alert.alert(
+      'Select Media',
+      'Choose an option',
+      [
+        { text: 'Camera', onPress: takePhoto },
+        { text: 'Photo Library', onPress: pickImage },
+        { text: 'Video Library', onPress: pickVideo },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const sendMediaMessage = async (uri: string, messageType: 'image' | 'file', message?: string) => {
+    if (!conversationIdNum) {
+      Alert.alert('Error', 'Please wait for conversation to load');
+      return;
+    }
+
+    try {
+      setUploadingMedia(true);
+      
+      console.log('🔍 ChatScreen - Uploading media:', { uri, messageType, conversationId: conversationIdNum });
+      
+      // Create FormData for file upload
+      const formData = new FormData();
+      const filename = uri.split('/').pop() || `media-${Date.now()}.jpg`;
+      
+      // Determine file type based on messageType and filename
+      let fileType = 'image/jpeg';
+      if (messageType === 'file') {
+        // For videos, check extension
+        if (filename.toLowerCase().endsWith('.mp4') || filename.toLowerCase().endsWith('.mov')) {
+          fileType = 'video/mp4';
+        } else if (filename.toLowerCase().endsWith('.jpg') || filename.toLowerCase().endsWith('.jpeg')) {
+          fileType = 'image/jpeg';
+        } else if (filename.toLowerCase().endsWith('.png')) {
+          fileType = 'image/png';
+        }
+      } else {
+        // For images, check extension
+        if (filename.toLowerCase().endsWith('.png')) {
+          fileType = 'image/png';
+        } else if (filename.toLowerCase().endsWith('.jpg') || filename.toLowerCase().endsWith('.jpeg')) {
+          fileType = 'image/jpeg';
+        }
+      }
+      
+      // Fix URI format for React Native
+      let fileUri = uri;
+      if (Platform.OS === 'ios') {
+        // iOS: remove file:// prefix if present
+        fileUri = uri.replace('file://', '');
+      } else {
+        // Android: keep as is, but ensure it's a valid URI
+        fileUri = uri;
+      }
+      
+      console.log('🔍 ChatScreen - File details:', { filename, fileType, fileUri });
+      
+      // Append file to FormData (React Native format)
+      formData.append('file', {
+        uri: fileUri,
+        type: fileType,
+        name: filename,
+      } as any);
+      
+      formData.append('message_type', messageType);
+      if (message && message.trim()) {
+        formData.append('message', message.trim());
+      }
+
+      console.log('🔍 ChatScreen - FormData created, sending request...');
+
+      // Upload file - use direct axios call like other services do for FormData
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const axios = require('axios');
+      const response = await axios.post(
+        `${API_CONFIG.BASE_URL}/chat/conversations/${conversationIdNum}/upload`,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            // Don't set Content-Type - let axios set it automatically for FormData
+          },
+          timeout: 30000, // 30 seconds timeout
+        }
+      );
+
+      console.log('✅ ChatScreen - Upload response:', response.data);
+
+      if (response.data && response.data.success) {
+        // Reload messages to show the uploaded media
+        await loadMessages();
+        Alert.alert('Success', 'Media uploaded successfully');
+      } else {
+        Alert.alert('Error', response.data?.message || 'Failed to upload media');
+      }
+    } catch (error: any) {
+      console.error('❌ ChatScreen - Error uploading media:', error);
+      console.error('❌ ChatScreen - Error details:', error.response?.data || error.message);
+      Alert.alert('Error', error.response?.data?.message || error.message || 'Failed to upload media');
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
   const formatTime = (timestamp: string) => {
+    if (!timestamp) return 'Just now';
+    
     try {
       const date = new Date(timestamp);
+      
+      // Check if date is valid
       if (isNaN(date.getTime())) {
         return 'Just now';
       }
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      const now = new Date();
+      const diffInMs = now.getTime() - date.getTime();
+      
+      // Handle future dates (shouldn't happen, but just in case)
+      if (diffInMs < 0) {
+        return 'Just now';
+      }
+      
+      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+      const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+      const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+      
+      // If message is from today, show time (e.g., "2:30 PM")
+      if (diffInDays < 1) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      
+      // If message is from yesterday, show "Yesterday"
+      if (diffInDays === 1) {
+        return 'Yesterday';
+      }
+      
+      // If message is from this week, show day name (e.g., "Mon")
+      if (diffInDays < 7) {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        return days[date.getDay()];
+      }
+      
+      // For older messages, show date (e.g., "Jan 13")
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[date.getMonth()];
+      const day = date.getDate();
+      return `${month} ${day}`;
     } catch (error) {
       return 'Just now';
     }
@@ -289,12 +585,16 @@ export default function ChatScreen() {
   const renderMessage = (message: Message) => {
     // Determine if message is from current user (sender) - sender on right, receiver on left
     const isFromCurrentUser = currentUserId ? message.sender_id === currentUserId : false;
+    const isMediaMessage = message.message_type === 'image' || message.message_type === 'file';
+    const mediaUrl = message.attachment_url || message.message;
     
     console.log('🔍 ChatScreen - Rendering message:', {
       messageId: message.id,
       senderId: message.sender_id,
       currentUserId: currentUserId,
-      isFromCurrentUser: isFromCurrentUser
+      isFromCurrentUser: isFromCurrentUser,
+      messageType: message.message_type,
+      mediaUrl: mediaUrl
     });
     
     return (
@@ -304,14 +604,71 @@ export default function ChatScreen() {
       ]}>
         <View style={[
           styles.messageBubble,
-          isFromCurrentUser ? styles.senderBubble : styles.receiverBubble
+          isFromCurrentUser ? styles.senderBubble : styles.receiverBubble,
+          isMediaMessage && styles.mediaBubble
         ]}>
-          <Text style={[
-            styles.messageText,
-            isFromCurrentUser ? styles.senderText : styles.receiverText
-          ]}>
-            {message.message}
-          </Text>
+          {isMediaMessage && mediaUrl ? (
+            <View>
+              {message.message_type === 'image' ? (
+                <Image 
+                  source={{ 
+                    uri: mediaUrl.startsWith('http') 
+                      ? mediaUrl 
+                      : `http://172.20.10.4:3000${mediaUrl}` 
+                  }}
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                  onError={(error) => {
+                    console.error('❌ ChatScreen - Image load error:', error);
+                    console.error('❌ ChatScreen - Failed URL:', mediaUrl.startsWith('http') ? mediaUrl : `http://172.20.10.4:3000${mediaUrl}`);
+                  }}
+                  onLoad={() => {
+                    console.log('✅ ChatScreen - Image loaded successfully:', mediaUrl.startsWith('http') ? mediaUrl : `http://172.20.10.4:3000${mediaUrl}`);
+                  }}
+                />
+              ) : (
+                <TouchableOpacity
+                  style={styles.videoContainer}
+                  onPress={() => {
+                    const videoUrl = mediaUrl.startsWith('http')
+                      ? mediaUrl
+                      : `http://172.20.10.4:3000${mediaUrl}`;
+                    setSelectedVideoUrl(videoUrl);
+                    setVideoModalVisible(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Video
+                    source={{ uri: mediaUrl.startsWith('http') ? mediaUrl : `http://172.20.10.4:3000${mediaUrl}` }}
+                    style={styles.videoThumbnail}
+                    resizeMode={ResizeMode.COVER}
+                    useNativeControls={false}
+                    shouldPlay={false}
+                    isLooping={false}
+                  />
+                  <View style={styles.videoOverlay}>
+                    <FontAwesome name="play-circle" size={50} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+              )}
+              {message.message && (
+                <Text style={[
+                  styles.messageText,
+                  isFromCurrentUser ? styles.senderText : styles.receiverText,
+                  styles.captionText
+                ]}>
+                  {message.message}
+                </Text>
+              )}
+            </View>
+          ) : (
+            <Text style={[
+              styles.messageText,
+              isFromCurrentUser ? styles.senderText : styles.receiverText
+            ]}>
+              {message.message}
+            </Text>
+          )}
           <Text style={[
             styles.messageTime,
             isFromCurrentUser ? styles.senderTime : styles.receiverTime
@@ -328,7 +685,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView 
         style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         {/* Professional Header */}
         <View style={styles.header}>
@@ -385,7 +742,8 @@ export default function ChatScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.messagesContent}
-              automaticallyAdjustKeyboardInsets={true}
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              keyboardDismissMode="interactive"
             >
               {messages.length === 0 ? (
                 <View style={styles.emptyContainer}>
@@ -401,14 +759,26 @@ export default function ChatScreen() {
             {/* Professional Input Area */}
             <View style={styles.inputContainer}>
               <View style={styles.inputWrapper}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={showMediaOptions}
+                  disabled={uploadingMedia || sending}
+                >
+                  {uploadingMedia ? (
+                    <ActivityIndicator size="small" color="#3498db" />
+                  ) : (
+                    <FontAwesome name="paperclip" size={20} color="#3498db" />
+                  )}
+                </TouchableOpacity>
                 <TextInput
+                  ref={textInputRef}
                   style={styles.messageInput}
                   value={newMessage}
                   onChangeText={setNewMessage}
                   placeholder="Type a message..."
                   multiline
                   maxLength={500}
-                  editable={!sending}
+                  editable={!sending && !uploadingMedia}
                   returnKeyType="default"
                   blurOnSubmit={false}
                   textAlignVertical="top"
@@ -420,9 +790,9 @@ export default function ChatScreen() {
                   }}
                 />
                 <TouchableOpacity
-                  style={[styles.sendButton, (!newMessage.trim() || sending) && styles.sendButtonDisabled]}
+                  style={[styles.sendButton, (!newMessage.trim() || sending || uploadingMedia) && styles.sendButtonDisabled]}
                   onPress={sendMessage}
-                  disabled={!newMessage.trim() || sending}
+                  disabled={!newMessage.trim() || sending || uploadingMedia}
                 >
                   {sending ? (
                     <ActivityIndicator size="small" color="#fff" />
@@ -435,6 +805,120 @@ export default function ChatScreen() {
           </>
         )}
       </KeyboardAvoidingView>
+      
+      {/* Video Modal */}
+      <Modal
+        visible={videoModalVisible}
+        transparent={false}
+        animationType="fade"
+        onRequestClose={() => {
+          setVideoModalVisible(false);
+          setSelectedVideoUrl(null);
+          if (videoRef.current) {
+            videoRef.current.pauseAsync();
+          }
+        }}
+      >
+        <View style={styles.videoModalContainer}>
+          <TouchableOpacity
+            style={styles.videoModalClose}
+            onPress={() => {
+              setVideoModalVisible(false);
+              setSelectedVideoUrl(null);
+              if (videoRef.current) {
+                videoRef.current.pauseAsync();
+              }
+            }}
+          >
+            <FontAwesome name="times" size={30} color="#fff" />
+          </TouchableOpacity>
+          {selectedVideoUrl && (
+            <Video
+              ref={videoRef}
+              source={{ uri: selectedVideoUrl }}
+              style={styles.videoPlayer}
+              resizeMode={ResizeMode.CONTAIN}
+              useNativeControls
+              shouldPlay
+              isLooping={false}
+            />
+          )}
+        </View>
+      </Modal>
+
+      {/* Image Preview Modal */}
+      <Modal
+        visible={imagePreviewVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setImagePreviewVisible(false);
+          setSelectedImageUri(null);
+          setImageCaption('');
+        }}
+      >
+        <View style={styles.imagePreviewContainer}>
+          <View style={styles.imagePreviewContent}>
+            <View style={styles.imagePreviewHeader}>
+              <TouchableOpacity
+                style={styles.imagePreviewCancelButton}
+                onPress={() => {
+                  setImagePreviewVisible(false);
+                  setSelectedImageUri(null);
+                  setImageCaption('');
+                }}
+              >
+                <FontAwesome name="times" size={24} color="#2c3e50" />
+              </TouchableOpacity>
+              <Text style={styles.imagePreviewTitle}>Add Caption (Optional)</Text>
+              <TouchableOpacity
+                style={styles.imagePreviewSendButton}
+                onPress={async () => {
+                  if (selectedImageUri) {
+                    setImagePreviewVisible(false);
+                    await sendMediaMessage(selectedImageUri, 'image', imageCaption);
+                    setSelectedImageUri(null);
+                    setImageCaption('');
+                  }
+                }}
+                disabled={uploadingMedia}
+              >
+                {uploadingMedia ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <FontAwesome name="send" size={20} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+            
+            {selectedImageUri && (
+              <Image 
+                source={{ uri: selectedImageUri }} 
+                style={styles.imagePreviewImage}
+                resizeMode="contain"
+              />
+            )}
+            
+            <View style={styles.imagePreviewInputContainer}>
+              <Text style={styles.imagePreviewLabel}>Caption (Optional)</Text>
+              <TextInput
+                style={styles.imagePreviewInput}
+                placeholder="Add a caption to your image..."
+                placeholderTextColor="#95a5a6"
+                value={imageCaption}
+                onChangeText={setImageCaption}
+                multiline
+                maxLength={500}
+                autoFocus={true}
+                textAlignVertical="top"
+              />
+              <Text style={styles.imagePreviewCharCount}>
+                {imageCaption.length}/500
+              </Text>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -615,6 +1099,152 @@ const styles = StyleSheet.create({
     backgroundColor: '#3498db',
     borderBottomRightRadius: 6,
   },
+  mediaBubble: {
+    padding: 4,
+  },
+  messageImage: {
+    width: 250,
+    height: 250,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  videoContainer: {
+    width: 250,
+    height: 150,
+    borderRadius: 12,
+    backgroundColor: '#000',
+    overflow: 'hidden',
+    marginBottom: 4,
+    position: 'relative',
+  },
+  videoThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoText: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  videoModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoModalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoPlayer: {
+    width: screenWidth,
+    height: screenHeight,
+  },
+  imagePreviewContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewContent: {
+    width: screenWidth,
+    height: screenHeight,
+    backgroundColor: '#fff',
+  },
+  imagePreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  imagePreviewCancelButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  imagePreviewSendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#3498db',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewImage: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#000',
+  },
+  imagePreviewInputContainer: {
+    padding: 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  imagePreviewLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  imagePreviewInput: {
+    borderWidth: 1.5,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+    minHeight: 60,
+    maxHeight: 120,
+    backgroundColor: '#f8f9fa',
+  },
+  imagePreviewCharCount: {
+    fontSize: 12,
+    color: '#95a5a6',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  captionText: {
+    marginTop: 4,
+    fontSize: 14,
+  },
+  actionButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
   messageText: {
     fontSize: 16,
     lineHeight: 22,
@@ -649,8 +1279,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 8,
-    position: 'relative',
-    zIndex: 1000,
   },
   inputWrapper: {
     flexDirection: 'row',

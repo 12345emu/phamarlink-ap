@@ -59,6 +59,68 @@ class ProfessionalsService {
     }));
   }
 
+  // Get healthcare professionals from users table (for chat compatibility)
+  async getProfessionalsFromUsers(params?: ProfessionalSearchParams): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
+    try {
+      const queryParams = new URLSearchParams();
+      
+      if (params?.specialty) queryParams.append('specialty', params.specialty);
+      if (params?.is_available !== undefined) queryParams.append('is_available', params.is_available.toString());
+      if (params?.search) queryParams.append('search', params.search);
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+      const url = `${API_ENDPOINTS.PROFESSIONALS.FROM_USERS}?${queryParams.toString()}`;
+      const response = await apiClient.get<{ professionals: HealthcareProfessional[]; pagination: any }>(url);
+      
+      // apiClient.get() returns ApiResponse<T> directly
+      if (response && response.success && response.data) {
+        // Process professionals data to convert relative image paths to full URLs
+        if (response.data.professionals) {
+          response.data.professionals = this.processProfessionalsData(response.data.professionals);
+        }
+        return response;
+      } else {
+        return {
+          success: false,
+          message: response?.message || 'Invalid response from server',
+          error: response?.error || 'Invalid Response',
+        };
+      }
+    } catch (error: any) {
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        if (status === 401) {
+          return {
+            success: false,
+            message: 'Authentication required. Please log in again.',
+            error: 'Authentication Error',
+          };
+        } else if (status === 403) {
+          return {
+            success: false,
+            message: 'Access denied.',
+            error: 'Authorization Error',
+          };
+        }
+        
+        return {
+          success: false,
+          message: data?.message || `HTTP ${status} error`,
+          error: 'Network Error',
+        };
+      }
+      
+      return {
+        success: false,
+        message: 'Failed to get professionals from users.',
+        error: 'Unknown Error',
+      };
+    }
+  }
+
   // Get all healthcare professionals
   async getProfessionals(params?: ProfessionalSearchParams): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
     try {

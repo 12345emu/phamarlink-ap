@@ -61,6 +61,137 @@ const upload = multer({
   }
 });
 
+// Get healthcare professionals from users table (for chat system compatibility)
+// Note: This endpoint does NOT require authentication to allow patients to browse professionals
+// Simplified to use only users table - no joins needed
+router.get('/from-users', async (req, res) => {
+  try {
+    console.log('🔍 GET /professionals/from-users route hit');
+    console.log('📝 Query params:', req.query);
+    
+    const { 
+      page = 1, 
+      limit = 100, 
+      search,
+      sort_by = 'first_name',
+      sort_order = 'ASC'
+    } = req.query;
+    
+    const offset = (page - 1) * limit;
+    
+    // Build WHERE clause - just users table
+    let whereClause = "WHERE user_type IN ('doctor', 'pharmacist') AND is_active = 1";
+    let params = [];
+    
+    // Search filter
+    if (search) {
+      whereClause += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)';
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+    
+    // Validate sort parameters
+    const allowedSortFields = ['first_name', 'last_name', 'email', 'created_at'];
+    const allowedSortOrders = ['ASC', 'DESC'];
+    
+    if (!allowedSortFields.includes(sort_by)) sort_by = 'first_name';
+    if (!allowedSortOrders.includes(sort_order.toUpperCase())) sort_order = 'ASC';
+    
+    // Count query - just users table
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM users
+      ${whereClause}
+    `;
+    
+    const countResult = await executeQuery(countQuery, params);
+    
+    // Main query - just users table, no joins
+    const professionalsQuery = `
+      SELECT 
+        id as user_id,
+        first_name,
+        last_name,
+        email,
+        phone,
+        user_type,
+        profile_image,
+        is_active,
+        created_at
+      FROM users
+      ${whereClause}
+      ORDER BY ${sort_by} ${sort_order}
+      LIMIT ? OFFSET ?
+    `;
+    
+    const professionals = await executeQuery(professionalsQuery, [...params, parseInt(limit), offset]);
+    
+    if (!professionals.success) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Database query failed',
+        error: professionals.error
+      });
+    }
+    
+    // Process results - simple mapping from users table
+    const processedProfessionals = (professionals.data || []).map(user => ({
+      id: user.user_id, // Use user_id as id for React keys
+      user_id: user.user_id,
+      facility_id: null,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: user.email,
+      phone: user.phone || null,
+      specialty: user.user_type === 'doctor' ? 'General Practitioner' : 'Pharmacist',
+      qualification: null,
+      experience_years: 0,
+      rating: null,
+      total_reviews: 0,
+      is_available: true, // Default to available
+      is_verified: false, // Default to not verified
+      is_active: user.is_active === 1 || user.is_active === true,
+      profile_image: user.profile_image || null,
+      bio: null,
+      facility_name: null,
+      facility_type: null,
+      facility_address: null,
+      facility_phone: null,
+      user_type: user.user_type,
+      created_at: user.created_at
+    }));
+    
+    // Log response for debugging
+    console.log(`✅ Returning ${processedProfessionals.length} professionals from users table`);
+    console.log(`📊 Sample professional:`, processedProfessionals[0] || 'No professionals');
+    console.log(`📊 Response structure:`, {
+      success: true,
+      hasData: true,
+      professionalsCount: processedProfessionals.length,
+      firstProfessionalId: processedProfessionals[0]?.id,
+      firstProfessionalName: processedProfessionals[0] ? `${processedProfessionals[0].first_name} ${processedProfessionals[0].last_name}` : 'N/A'
+    });
+    
+    const responseData = {
+      success: true,
+      data: {
+        professionals: processedProfessionals,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: countResult.data && countResult.data[0] ? countResult.data[0].total : processedProfessionals.length,
+          pages: Math.ceil((countResult.data && countResult.data[0] ? countResult.data[0].total : processedProfessionals.length) / limit)
+        }
+      }
+    };
+    
+    res.json(responseData);
+  } catch (error) {
+    console.error('❌ Error fetching professionals from users:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 // Get all healthcare professionals
 router.get('/', async (req, res) => {
   try {

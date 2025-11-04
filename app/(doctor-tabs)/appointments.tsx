@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { doctorDashboardService } from '../../services/doctorDashboardService';
 
 interface Appointment {
@@ -44,6 +44,18 @@ export default function DoctorAppointments() {
   useEffect(() => {
     loadAppointments();
   }, []);
+
+  // Refresh appointments when screen comes into focus (when navigating back from appointment details)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Small delay to ensure navigation has completed
+      const timer = setTimeout(() => {
+        loadAppointments();
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }, [])
+  );
 
   const loadAppointments = async () => {
     try {

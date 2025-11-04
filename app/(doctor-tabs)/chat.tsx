@@ -13,7 +13,7 @@ import {
   Dimensions,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { doctorDashboardService } from '../../services/doctorDashboardService';
 import { chatService } from '../../services/chatService';
 import { notificationService } from '../../services/notificationService';
@@ -28,6 +28,8 @@ interface ChatConversation {
   patientEmail: string;
   lastMessage: string;
   lastMessageTime: string;
+  lastMessageType?: string;
+  lastMessageSenderId?: number;
   unreadCount: number;
   status: 'online' | 'offline';
   avatar?: string;
@@ -51,6 +53,18 @@ export default function ProfessionalChat() {
       chatService.disconnect();
     };
   }, []);
+
+  // Refresh conversations when screen comes into focus (when navigating back from chat)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Small delay to ensure navigation has completed
+      const timer = setTimeout(() => {
+        loadConversations();
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }, [])
+  );
 
   const initializeWebSocket = async () => {
     try {
@@ -109,10 +123,38 @@ export default function ProfessionalChat() {
     }
   };
 
+  const formatLastMessage = (conv: any, currentUserId: number | null): string => {
+    if (!conv.last_message && !conv.last_message_type) {
+      return 'No messages yet';
+    }
+
+    // Check if message is from current user
+    const isFromCurrentUser = currentUserId && conv.last_message_sender_id === currentUserId;
+    const prefix = isFromCurrentUser ? 'You: ' : '';
+
+    // Handle media messages
+    if (conv.last_message_type === 'image') {
+      return conv.last_message ? `${prefix}📷 ${conv.last_message}` : `${prefix}📷 Image`;
+    } else if (conv.last_message_type === 'file' || conv.last_message_type === 'video') {
+      return conv.last_message ? `${prefix}🎥 ${conv.last_message}` : `${prefix}🎥 Video`;
+    }
+
+    // Regular text message
+    return conv.last_message || 'No messages yet';
+  };
+
   const loadConversations = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Get current user ID first
+      const userInfo = await AsyncStorage.getItem('userInfo');
+      let userId: number | null = null;
+      if (userInfo) {
+        const user = JSON.parse(userInfo);
+        userId = user.id;
+      }
       
       const response = await doctorDashboardService.getChatConversations();
       
@@ -122,8 +164,10 @@ export default function ProfessionalChat() {
           patientId: conv.user_id,
           patientName: `${conv.first_name} ${conv.last_name}` || 'Unknown Patient',
           patientEmail: conv.email || '',
-          lastMessage: conv.last_message || 'No messages yet',
+          lastMessage: formatLastMessage(conv, userId),
           lastMessageTime: formatTimeAgo(conv.last_message_time || conv.updated_at),
+          lastMessageType: conv.last_message_type,
+          lastMessageSenderId: conv.last_message_sender_id,
           unreadCount: conv.unread_count || 0,
           status: conv.status || 'offline',
           avatar: conv.user_profile_image

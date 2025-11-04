@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, StyleSheet, Animated, Dimensions, Text } from 'react-native';
 import { BlurView } from 'expo-blur';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -6,6 +6,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useCart } from '../context/CartContext';
 import { useOrders } from '../context/OrdersContext';
 import { useAuth } from '../context/AuthContext';
+import { chatService } from '../services/chatService';
 
 const { width } = Dimensions.get('window');
 const TAB_HEIGHT = 80;
@@ -32,6 +33,38 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
   const { cart } = useCart();
   const { orders } = useOrders();
   const { user } = useAuth();
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+
+  // Fetch chat unread count
+  useEffect(() => {
+    const loadChatUnreadCount = async () => {
+      try {
+        const response = await chatService.getConversations();
+        if (response && response.success && response.data && Array.isArray(response.data)) {
+          const totalUnread = response.data.reduce((sum: number, conv: any) => {
+            let count = 0;
+            if (conv.unread_count !== undefined && conv.unread_count !== null) {
+              if (typeof conv.unread_count === 'string') {
+                count = parseInt(conv.unread_count, 10) || 0;
+              } else if (typeof conv.unread_count === 'number') {
+                count = conv.unread_count;
+              } else if (typeof conv.unread_count === 'bigint') {
+                count = Number(conv.unread_count);
+              }
+            }
+            return sum + count;
+          }, 0);
+          setChatUnreadCount(totalUnread);
+        }
+      } catch (error) {
+        // Silently fail
+      }
+    };
+
+    loadChatUnreadCount();
+    const interval = setInterval(loadChatUnreadCount, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Determine which tabs to show based on user role
   const isDoctor = user?.role === 'doctor';
@@ -87,6 +120,14 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
                     <View style={styles.ordersBadge}>
                       <Text style={styles.ordersBadgeText}>
                         {orders.length > 99 ? '99+' : orders.length}
+                      </Text>
+                    </View>
+                  )}
+                  {/* Chat Badge */}
+                  {tab.route === 'chat' && chatUnreadCount > 0 && (
+                    <View style={styles.ordersBadge}>
+                      <Text style={styles.ordersBadgeText}>
+                        {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
                       </Text>
                     </View>
                   )}

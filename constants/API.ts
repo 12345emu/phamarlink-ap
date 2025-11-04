@@ -40,6 +40,7 @@ export const API_ENDPOINTS = {
   PROFESSIONALS: {
     BASE: '/professionals',
     LIST: '/professionals',
+    FROM_USERS: '/professionals/from-users', // New endpoint for chat system
     GET_BY_ID: (id: string) => `/professionals/${id}`,
     GET_BY_FACILITY: (facilityId: string) => `/professionals/facility/${facilityId}`,
     REGISTER: '/professionals/register',

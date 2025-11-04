@@ -260,7 +260,14 @@ class ChatWebSocketServer {
       });
       
       // Send push notification to recipient if they're not online
-      await this.sendPushNotificationToRecipient(recipientId, sender, message, conversationId);
+      // Format message for notification (handle media messages)
+      let notificationMessage = message;
+      if (messageType === 'image') {
+        notificationMessage = message || 'Sent an image';
+      } else if (messageType === 'file' || messageType === 'video') {
+        notificationMessage = message || 'Sent a video';
+      }
+      await this.sendPushNotificationToRecipient(recipientId, sender, notificationMessage, conversationId);
       
       console.log(`📨 Message sent from ${senderId} to ${recipientId} in conversation ${conversationId}`);
       

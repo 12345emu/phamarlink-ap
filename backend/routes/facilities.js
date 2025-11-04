@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { executeQuery } = require('../config/database');
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
+const { generateSecurePassword } = require('../utils/passwordGenerator');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -561,6 +562,60 @@ router.post('/pharmacy/register', upload.array('images', 5), [
       });
     }
 
+    // Handle user creation/update
+    let finalUserId = userId;
+    
+    // Check if user exists with this email
+    const existingUserQuery = 'SELECT id, user_type FROM users WHERE email = ?';
+    const existingUserResult = await executeQuery(existingUserQuery, [email]);
+    
+    if (existingUserResult.success && existingUserResult.data.length > 0) {
+      // User exists - update user_type to facility-admin
+      const existingUser = existingUserResult.data[0];
+      finalUserId = existingUser.id;
+      
+      const updateUserQuery = 'UPDATE users SET user_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      const updateResult = await executeQuery(updateUserQuery, ['facility-admin', finalUserId]);
+      
+      if (updateResult.success) {
+        console.log('✅ Updated existing user to facility-admin:', finalUserId);
+      } else {
+        console.error('⚠️ Failed to update user type:', updateResult.error);
+      }
+    } else {
+      // User doesn't exist - create new user
+      const { password, hash } = await generateSecurePassword();
+      console.log('🔐 Generated password for new facility-admin user');
+      
+      // Extract first name and last name from ownerName
+      const nameParts = ownerName.trim().split(' ');
+      const firstName = nameParts[0] || ownerName;
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
+      const createUserQuery = `
+        INSERT INTO users (email, password_hash, user_type, first_name, last_name, phone, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `;
+      const createUserResult = await executeQuery(createUserQuery, [
+        email,
+        hash,
+        'facility-admin',
+        firstName,
+        lastName,
+        phone
+      ]);
+      
+      if (!createUserResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create user account'
+        });
+      }
+      
+      finalUserId = createUserResult.data.insertId;
+      console.log('✅ Created new facility-admin user:', finalUserId);
+    }
+
     // Insert pharmacy into database
     const insertQuery = `
       INSERT INTO healthcare_facilities (
@@ -572,7 +627,7 @@ router.post('/pharmacy/register', upload.array('images', 5), [
     `;
 
     const insertParams = [
-      userId || null,
+      finalUserId || null,
       pharmacyName,
       'pharmacy',
       ownerName,
@@ -786,6 +841,60 @@ router.post('/hospital/register', upload.array('images', 5), [
       imageUrls = req.files.map(file => `/uploads/hospital-images/${file.filename}`);
     }
 
+    // Handle user creation/update
+    let finalUserId = userId;
+    
+    // Check if user exists with this email
+    const existingUserQuery = 'SELECT id, user_type FROM users WHERE email = ?';
+    const existingUserResult = await executeQuery(existingUserQuery, [email]);
+    
+    if (existingUserResult.success && existingUserResult.data.length > 0) {
+      // User exists - update user_type to facility-admin
+      const existingUser = existingUserResult.data[0];
+      finalUserId = existingUser.id;
+      
+      const updateUserQuery = 'UPDATE users SET user_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+      const updateResult = await executeQuery(updateUserQuery, ['facility-admin', finalUserId]);
+      
+      if (updateResult.success) {
+        console.log('✅ Updated existing user to facility-admin:', finalUserId);
+      } else {
+        console.error('⚠️ Failed to update user type:', updateResult.error);
+      }
+    } else {
+      // User doesn't exist - create new user
+      const { password, hash } = await generateSecurePassword();
+      console.log('🔐 Generated password for new facility-admin user');
+      
+      // Extract first name and last name from administratorName
+      const nameParts = administratorName.trim().split(' ');
+      const firstName = nameParts[0] || administratorName;
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
+      const createUserQuery = `
+        INSERT INTO users (email, password_hash, user_type, first_name, last_name, phone, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `;
+      const createUserResult = await executeQuery(createUserQuery, [
+        email,
+        hash,
+        'facility-admin',
+        firstName,
+        lastName,
+        phone
+      ]);
+      
+      if (!createUserResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create user account'
+        });
+      }
+      
+      finalUserId = createUserResult.data.insertId;
+      console.log('✅ Created new facility-admin user:', finalUserId);
+    }
+
     // Prepare services array (combine specialties and other services)
     const servicesArray = [];
     if (specialties && Array.isArray(specialties)) {
@@ -819,7 +928,7 @@ router.post('/hospital/register', upload.array('images', 5), [
     `;
 
     const insertParams = [
-      userId || null,
+      finalUserId || null,
       hospitalName,
       'hospital',
       administratorName,

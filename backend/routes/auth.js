@@ -96,7 +96,7 @@ router.post('/signup', [
   body('password').isLength({ min: 6 }),
   body('firstName').trim().isLength({ min: 2 }),
   body('lastName').trim().isLength({ min: 2 }),
-  body('userType').isIn(['patient', 'doctor', 'pharmacist']),
+  body('userType').isIn(['patient', 'doctor', 'pharmacist','admin','facility-admin']),
   body('phone').optional().isMobilePhone()
 ], async (req, res) => {
   try {

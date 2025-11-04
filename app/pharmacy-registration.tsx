@@ -560,7 +560,10 @@ export default function PharmacyRegistrationScreen() {
               value={formData.email}
               onChangeText={(text) => setFormData(prev => ({ ...prev, email: text }))}
               placeholder="Enter email address"
+              placeholderTextColor="#95a5a6"
               keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
           </View>
 
@@ -934,6 +937,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     backgroundColor: '#fff',
+    color: '#2c3e50',
   },
   multilineInput: {
     minHeight: 80,

@@ -161,7 +161,6 @@ export default function AppointmentsScreen() {
               Alert.alert('Error', 'Cannot make phone calls on this device');
             }
           } catch (error) {
-            console.error('❌ Error making phone call:', error);
             Alert.alert('Error', 'Failed to make phone call');
           }
         }},
@@ -174,7 +173,6 @@ export default function AppointmentsScreen() {
               Alert.alert('Error', 'No email app found on this device');
             }
           } catch (error) {
-            console.error('❌ Error opening email:', error);
             Alert.alert('Error', 'Failed to open email app');
           }
         }}

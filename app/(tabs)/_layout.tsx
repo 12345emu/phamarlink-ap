@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs, useRouter } from 'expo-router';
 import { Pressable, View, StyleSheet, Animated, Platform, TouchableOpacity, Text, Image } from 'react-native';
@@ -8,6 +8,7 @@ import ProfileImage from '../../components/ProfileImage';
 import FloatingMedicineButton from '../../components/FloatingMedicineButton';
 import { useProfile } from '../../context/ProfileContext';
 import { useOrders } from '../../context/OrdersContext';
+import { chatService } from '../../services/chatService';
 
 import Colors from '../../constants/Colors';
 import { useColorScheme } from '../../components/useColorScheme';
@@ -110,6 +111,173 @@ function OrdersTabBarIcon({ focused }: { focused: boolean }) {
             }}
           >
             {ordersCount > 99 ? '99+' : ordersCount}
+          </Text>
+        </View>
+      )}
+    </Animated.View>
+  );
+}
+
+function ChatTabBarIcon({ focused }: { focused: boolean }) {
+  const [unreadCount, setUnreadCount] = useState(0);
+  const scaleAnim = useRef(new Animated.Value(focused ? 1.15 : 1)).current;
+  
+  // TEMPORARY: Test badge visibility - remove after testing
+  // Uncomment the line below to test if badge renders
+  // const unreadCount = 5;
+  
+  React.useEffect(() => {
+    Animated.spring(scaleAnim, {
+      toValue: focused ? 1.15 : 1,
+      useNativeDriver: true,
+      friction: 5,
+    }).start();
+  }, [focused]);
+
+  // Fetch unread count on mount and periodically
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      try {
+        const response = await chatService.getConversations();
+        if (response && response.success && response.data && Array.isArray(response.data)) {
+          // Debug logging
+          console.log('🔍 ChatTabBarIcon - Conversations response:', response.data.length);
+          
+          // Sum up all unread counts from conversations
+          const totalUnread = response.data.reduce((sum: number, conv: any) => {
+            // Handle both string and number unread_count from MySQL
+            // Also handle BigInt from MySQL which might come as string
+            let count = 0;
+            if (conv.unread_count !== undefined && conv.unread_count !== null) {
+              if (typeof conv.unread_count === 'string') {
+                count = parseInt(conv.unread_count, 10) || 0;
+              } else if (typeof conv.unread_count === 'number') {
+                count = conv.unread_count;
+              } else if (typeof conv.unread_count === 'bigint') {
+                count = Number(conv.unread_count);
+              }
+            }
+            console.log(`🔍 ChatTabBarIcon - Conversation ${conv.id}: unread_count = ${conv.unread_count}, parsed = ${count}`);
+            return sum + count;
+          }, 0);
+          
+          console.log('🔍 ChatTabBarIcon - Total unread count:', totalUnread);
+          setUnreadCount(totalUnread);
+        } else {
+          console.log('🔍 ChatTabBarIcon - No conversations or invalid response');
+          setUnreadCount(0);
+        }
+      } catch (error: any) {
+        console.error('❌ ChatTabBarIcon - Error loading unread count:', error);
+        setUnreadCount(0);
+      }
+    };
+
+    // Small delay to ensure app is ready
+    const timer = setTimeout(() => {
+      loadUnreadCount();
+    }, 500);
+
+    // Refresh every 10 seconds
+    const interval = setInterval(loadUnreadCount, 10000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Also refresh when tab becomes focused
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      try {
+        const response = await chatService.getConversations();
+        if (response && response.success && response.data && Array.isArray(response.data)) {
+          // Sum up all unread counts from conversations
+          const totalUnread = response.data.reduce((sum: number, conv: any) => {
+            // Handle both string and number unread_count from MySQL
+            // Also handle BigInt from MySQL which might come as string
+            let count = 0;
+            if (conv.unread_count !== undefined && conv.unread_count !== null) {
+              if (typeof conv.unread_count === 'string') {
+                count = parseInt(conv.unread_count, 10) || 0;
+              } else if (typeof conv.unread_count === 'number') {
+                count = conv.unread_count;
+              } else if (typeof conv.unread_count === 'bigint') {
+                count = Number(conv.unread_count);
+              }
+            }
+            return sum + count;
+          }, 0);
+          setUnreadCount(totalUnread);
+        } else {
+          setUnreadCount(0);
+        }
+      } catch (error: any) {
+        // Silently fail
+        setUnreadCount(0);
+      }
+    };
+    
+    if (focused) {
+      loadUnreadCount();
+    }
+  }, [focused]);
+  
+  const activeColor = '#43e97b';
+  const inactiveColor = '#B0B0B0';
+  
+  // Debug: Log unreadCount when it changes
+  React.useEffect(() => {
+    console.log('🔍 ChatTabBarIcon - unreadCount state changed:', unreadCount);
+  }, [unreadCount]);
+  
+  
+  return (
+    <Animated.View
+      style={{
+        transform: [{ scale: scaleAnim }],
+        backgroundColor: focused ? 'rgba(67,233,123,0.12)' : 'transparent',
+        borderRadius: 18,
+        padding: focused ? 8 : 0,
+        borderWidth: focused ? 2 : 0,
+        borderColor: focused ? '#43e97b' : 'transparent',
+        justifyContent: 'center',
+        alignItems: 'center',
+        position: 'relative',
+        overflow: 'visible',
+      }}
+    >
+      <FontAwesome
+        size={26}
+        style={{ marginBottom: -2 }}
+        name="comments"
+        color={focused ? activeColor : inactiveColor}
+      />
+      {unreadCount > 0 && (
+        <View
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: -5,
+            backgroundColor: '#e74c3c',
+            borderRadius: 10,
+            minWidth: 20,
+            height: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 2,
+            borderColor: '#fff',
+          }}
+        >
+          <Text
+            style={{
+              color: '#fff',
+              fontSize: 10,
+              fontWeight: 'bold',
+            }}
+          >
+            {unreadCount > 99 ? '99+' : String(unreadCount)}
           </Text>
         </View>
       )}
@@ -287,7 +455,7 @@ export default function TabLayout() {
           name="chat"
           options={{
             title: '',
-            tabBarIcon: ({ focused }) => <AnimatedTabBarIcon name="comments" focused={focused} />,
+            tabBarIcon: ({ focused }) => <ChatTabBarIcon focused={focused} />,
             headerLeft: () => (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 15 }}>
                 <View style={{ 

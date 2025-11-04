@@ -54,29 +54,18 @@ class AppointmentsService {
    */
   async getAvailableSlots(facilityId: number, date: string): Promise<AvailableSlotsResponse> {
     try {
-      console.log(`🔍 Attempting to fetch slots for facilityId: ${facilityId}, date: ${date}`);
       const response = await apiClient.get<AvailableSlotsResponse>(
         `${API_ENDPOINTS.APPOINTMENTS.FACILITY_SLOTS(facilityId.toString())}?date=${date}`
       );
       
-      console.log('📡 API Response received:', JSON.stringify(response, null, 2));
-      console.log('📡 Response type:', typeof response);
-      console.log('📡 Response.success:', response?.success);
-      console.log('📡 Response.data exists:', !!response?.data);
-      
       // Check if response exists and is successful
       if (!response || !response.success || !response.data) {
-        console.error('❌ Received unsuccessful response:', JSON.stringify(response, null, 2));
         throw new Error('API returned unsuccessful response');
       }
       
-      console.log('✅ Successfully extracted data:', response.data);
       return response.data;
     } catch (error: any) {
-      console.error('❌ Error fetching available slots:', error);
-      
       // TEMPORARY FALLBACK: Return mock data when API fails
-      console.log('🔄 Using fallback mock data for available slots');
       return {
         date,
         facility_id: facilityId,
@@ -93,53 +82,30 @@ class AppointmentsService {
    */
   async createAppointment(appointmentData: AppointmentData): Promise<{ id: number }> {
     try {
-      console.log('🔍 Creating appointment with data:', JSON.stringify(appointmentData, null, 2));
-      
-      // Debug: Check if we have a token
-      const token = await AsyncStorage.getItem('userToken');
-      console.log('🔑 Token from AsyncStorage:', token ? `${token.substring(0, 20)}...` : 'No token found');
-      
-      // Debug: Check API endpoint
       const endpoint = API_ENDPOINTS.APPOINTMENTS.CREATE;
-      console.log('🔍 API Endpoint:', endpoint);
-      console.log('🔍 Full URL will be:', `${API_CONFIG.BASE_URL}${endpoint}`);
       
-      // Test network connectivity first
-      console.log('🔍 Testing network connectivity...');
+      // Test network connectivity first (silently - don't log errors)
       try {
-        const healthCheck = await apiClient.healthCheck();
-        console.log('🔍 Health check result:', healthCheck);
+        await apiClient.healthCheck();
       } catch (healthError) {
-        console.error('❌ Health check failed:', healthError);
+        // Silently continue if health check fails
       }
       
-      console.log('📡 Making API request...');
       const response = await apiClient.post<{ id: number }>(endpoint, appointmentData);
       
-      console.log('📡 Create appointment response:', JSON.stringify(response, null, 2));
-      console.log('📡 Response success:', response.success);
-      console.log('📡 Response data:', response.data);
-      console.log('📡 Response message:', response.message);
-      
       if (!response.success || !response.data) {
-        console.error('❌ API returned unsuccessful response:', response.message);
-        console.error('❌ Full response object:', response);
         throw new Error(response.message || 'Failed to create appointment');
       }
       
       // Additional validation: ensure we have a valid appointment ID
       if (!response.data.id || typeof response.data.id !== 'number') {
-        console.error('❌ Invalid appointment ID received:', response.data);
-        console.log('⚠️ Response structure issue, but appointment may have been created');
         // Don't throw error - just return a fallback ID
         // The appointment was likely created successfully
         return { id: Date.now() }; // Fallback ID
       }
       
-      console.log('✅ Appointment created successfully via API:', response.data);
       return response.data;
     } catch (error: any) {
-      console.error('❌ Error creating appointment:', error);
       throw error;
     }
   }
@@ -172,7 +138,6 @@ class AppointmentsService {
       
       return response.data;
     } catch (error) {
-      console.error('Error fetching appointments:', error);
       throw error;
     }
   }
@@ -182,24 +147,15 @@ class AppointmentsService {
    */
   async getAppointmentById(id: number): Promise<Appointment> {
     try {
-      console.log('🔍 Fetching appointment by ID:', id);
-      
       const response = await apiClient.get<Appointment>(API_ENDPOINTS.APPOINTMENTS.GET_BY_ID(id.toString()));
       
-      console.log('📡 Get appointment response:', JSON.stringify(response, null, 2));
-      
       if (!response.success || !response.data) {
-        console.log('⚠️ API returned unsuccessful response, using fallback');
         throw new Error(response.message || 'Failed to fetch appointment');
       }
       
-      console.log('✅ Appointment fetched successfully via API:', response.data);
       return response.data;
     } catch (error: any) {
-      console.error('❌ Error fetching appointment:', error);
-      
       // TEMPORARY FALLBACK: Return mock data when API fails
-      console.log('🔄 Using fallback mock data for appointment details');
       const mockAppointment: Appointment = {
         id: id,
         user_id: 1,
@@ -218,7 +174,6 @@ class AppointmentsService {
         updated_at: '2025-01-15T10:00:00Z'
       };
       
-      console.log('✅ Returning mock appointment data:', mockAppointment);
       return mockAppointment;
     }
   }
@@ -248,7 +203,6 @@ class AppointmentsService {
       
       await apiClient.patch(API_ENDPOINTS.APPOINTMENTS.UPDATE_STATUS(id.toString()), updateData);
     } catch (error) {
-      console.error('Error updating appointment status:', error);
       throw error;
     }
   }
@@ -258,30 +212,17 @@ class AppointmentsService {
    */
   async rescheduleAppointment(id: number, newDate: string, newTime: string): Promise<void> {
     try {
-      console.log('🔍 Rescheduling appointment:', { id, newDate, newTime });
-      
       const response = await apiClient.patch(API_ENDPOINTS.APPOINTMENTS.RESCHEDULE(id.toString()), {
         rescheduled_date: newDate,
         rescheduled_time: newTime,
         notes: `Appointment rescheduled to ${newDate} at ${newTime}`
       });
       
-      console.log('📡 Reschedule response:', JSON.stringify(response, null, 2));
-      
       if (!response.success) {
-        console.error('❌ Reschedule failed:', response.message);
         throw new Error(response.message || 'Failed to reschedule appointment');
       }
-      
-      console.log('✅ Appointment rescheduled successfully via API');
     } catch (error: any) {
-      console.error('❌ Error rescheduling appointment:', error);
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error response:', error.response?.data);
-      
       // TEMPORARY FALLBACK: Return success when API fails
-      console.log('🔄 Using fallback for reschedule (demo mode)');
-      console.log('✅ Reschedule completed via fallback');
       return;
     }
   }
@@ -301,7 +242,6 @@ class AppointmentsService {
         const availableSlots = await this.getAvailableSlots(facilityId, dateString);
         slots[dateString] = availableSlots.available_slots;
       } catch (error) {
-        console.error(`Error fetching slots for ${dateString}:`, error);
         // Provide fallback slots instead of empty array
         slots[dateString] = [
           '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',

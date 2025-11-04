@@ -8,6 +8,7 @@ import {
   RefreshControl,
   TextInput,
   Alert,
+  Image,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
@@ -21,6 +22,7 @@ interface Patient {
   name: string;
   email: string;
   phone: string;
+  profileImage?: string | null;
   lastVisit: string | null;
   nextAppointment?: string | null;
   totalAppointments: number;
@@ -217,9 +219,16 @@ export default function DoctorPatients() {
             >
               <View style={styles.patientHeader}>
                 <View style={styles.patientAvatar}>
-                  <Text style={styles.avatarText}>
-                    {patient.name.split(' ').map(n => n[0]).join('')}
-                  </Text>
+                  {patient.profileImage ? (
+                    <Image
+                      source={{ uri: patient.profileImage }}
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <Text style={styles.avatarText}>
+                      {patient.name.split(' ').map(n => n[0]).join('')}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.patientInfo}>
                   <Text style={styles.patientName}>{patient.name}</Text>
@@ -373,6 +382,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 15,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
   },
   avatarText: {
     color: '#fff',

@@ -59,13 +59,6 @@ export default function AppointmentBookingScreen() {
   const facilityName = params.facilityName as string;
   const facilityType = params.facilityType as string;
 
-  // Debug logging
-  console.log('🔍 Appointment booking params:', {
-    facilityId: params.facilityId,
-    parsedFacilityId: facilityId,
-    facilityName: params.facilityName,
-    facilityType: params.facilityType
-  });
 
   const appointmentTypes = [
     { id: 'consultation', name: 'General Consultation', icon: 'stethoscope' },
@@ -83,21 +76,16 @@ export default function AppointmentBookingScreen() {
   const fetchFacilityProfessionals = async () => {
     try {
       if (!facilityId || isNaN(facilityId)) {
-        console.error('❌ Invalid facility ID for fetching professionals:', facilityId);
         return;
       }
       
       const response = await professionalsService.getProfessionalsByFacility(facilityId.toString());
       if (response.success && response.data && response.data.professionals) {
-        console.log('✅ Fetched professionals for facility:', response.data.professionals.length);
-        console.log('🔍 Professionals data sample:', JSON.stringify(response.data.professionals[0], null, 2));
         setProfessionals(response.data.professionals);
       } else {
-        console.error('❌ Failed to fetch professionals:', response.message);
         setProfessionals([]);
       }
     } catch (error) {
-      console.error('❌ Error fetching professionals:', error);
       setProfessionals([]);
     }
   };
@@ -105,17 +93,12 @@ export default function AppointmentBookingScreen() {
   const fetchAvailableDates = async () => {
     try {
       setLoading(true);
-      console.log('🔍 Fetching available dates for facility:', facilityId);
-      console.log('🔍 Facility ID type:', typeof facilityId);
-      console.log('🔍 Facility ID value:', facilityId);
       
       if (!facilityId || isNaN(facilityId)) {
-        console.error('❌ Invalid facility ID:', facilityId);
         throw new Error('Invalid facility ID');
       }
       
       const availableSlots = await appointmentsService.getAvailableSlotsForNextDays(facilityId, 7);
-      console.log('✅ Available slots received:', availableSlots);
       
       const dates: DateSlot[] = Object.entries(availableSlots)
         .filter(([date, slots]) => slots.length > 0)
@@ -126,13 +109,11 @@ export default function AppointmentBookingScreen() {
         }))
         .slice(0, 5); // Show max 5 dates
 
-      console.log('Processed dates:', dates);
       setAvailableDates(dates);
       if (dates.length > 0) {
         setSelectedDate(dates[0].date);
       }
     } catch (error) {
-      console.error('Error fetching available dates:', error);
       // Use fallback data instead of showing error
       const fallbackDates: DateSlot[] = [
         {
@@ -262,26 +243,13 @@ export default function AppointmentBookingScreen() {
 
     try {
       setLoading(true);
-      console.log('Creating appointment with data:', {
-        facility_id: facilityId,
-        appointment_date: selectedDate,
-        appointment_time: selectedTime,
-        appointment_type: selectedType,
-        reason: reason.trim()
-      });
       
       // Get the user_id for the preferred doctor
       let preferredDoctorUserId = undefined;
       if (preferredDoctor) {
-        console.log('🔍 Looking for professional with ID:', preferredDoctor);
-        console.log('🔍 Available professionals:', professionals.map(p => ({ id: p.id, user_id: p.user_id, name: `${p.first_name} ${p.last_name}` })));
         const selectedProfessional = professionals.find(p => p.id.toString() === preferredDoctor);
         if (selectedProfessional) {
           preferredDoctorUserId = selectedProfessional.user_id;
-          console.log('🔍 Selected professional user_id:', preferredDoctorUserId);
-          console.log('🔍 Selected professional details:', JSON.stringify(selectedProfessional, null, 2));
-        } else {
-          console.error('❌ Professional not found with ID:', preferredDoctor);
         }
       }
 
@@ -296,34 +264,7 @@ export default function AppointmentBookingScreen() {
         ...(notes.trim() && { notes: notes.trim() }),
       };
 
-      console.log('🔍 Final appointment data being sent:', JSON.stringify(appointmentData, null, 2));
-      console.log('🔍 Data types:', {
-        facility_id: typeof appointmentData.facility_id,
-        appointment_date: typeof appointmentData.appointment_date,
-        appointment_time: typeof appointmentData.appointment_time,
-        appointment_type: typeof appointmentData.appointment_type,
-        reason: typeof appointmentData.reason,
-        symptoms: typeof appointmentData.symptoms,
-        preferred_doctor: typeof appointmentData.preferred_doctor,
-        notes: typeof appointmentData.notes
-      });
-      console.log('🔍 Raw values:', {
-        facility_id: appointmentData.facility_id,
-        facility_id_type: typeof appointmentData.facility_id,
-        appointment_date: appointmentData.appointment_date,
-        appointment_time: appointmentData.appointment_time,
-        appointment_type: appointmentData.appointment_type,
-        reason: appointmentData.reason,
-        reason_length: appointmentData.reason.length,
-        symptoms: appointmentData.symptoms,
-        symptoms_type: typeof appointmentData.symptoms,
-        preferred_doctor: appointmentData.preferred_doctor,
-        preferred_doctor_type: typeof appointmentData.preferred_doctor,
-        notes: appointmentData.notes
-      });
-
       const result = await appointmentsService.createAppointment(appointmentData);
-      console.log('✅ Appointment creation completed:', result);
       
       // Only proceed if we have a valid result with an ID
       if (!result || !result.id) {
@@ -367,16 +308,10 @@ export default function AppointmentBookingScreen() {
         ]
       );
     } catch (error: any) {
-      console.error('❌ Error creating appointment:', error);
-      console.error('❌ Error type:', typeof error);
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Error stack:', error.stack);
-      
       // Check if the appointment was actually created despite the error
       // This can happen if there's a race condition or API client issue
       if (error.message && (error.message.includes('Invalid appointment data received from server') || 
                            error.message.includes('Invalid response from server'))) {
-        console.log('⚠️ Appointment may have been created despite error, checking...');
         // Don't show error if appointment was likely created
         // The appointment was likely created successfully
         return;

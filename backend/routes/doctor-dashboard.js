@@ -2,6 +2,7 @@ const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { executeQuery } = require('../config/database');
 const { sendAppointmentConfirmationEmail } = require('../utils/emailService');
+const pushNotificationService = require('../services/pushNotificationService');
 
 const router = express.Router();
 
@@ -250,33 +251,115 @@ router.put('/appointments/:id/status', authenticateToken, async (req, res) => {
     
     console.log('✅ Doctor Dashboard - Appointment status updated successfully');
     
-    // Send confirmation email if status is 'confirmed'
-    if (status === 'confirmed') {
+    // Get appointment details for notifications
+    const appointmentDetailsQuery = `
+      SELECT 
+        a.user_id, a.appointment_date, a.appointment_time, a.appointment_type, a.reason,
+        u.first_name, u.last_name, u.email,
+        d.first_name as doctor_first_name, d.last_name as doctor_last_name,
+        hf.name as facility_name, hf.address as facility_address
+      FROM appointments a
+      JOIN users u ON a.user_id = u.id
+      JOIN users d ON a.preferred_doctor = d.id
+      JOIN healthcare_facilities hf ON a.facility_id = hf.id
+      WHERE a.id = ?
+    `;
+    
+    const appointmentDetails = await executeQuery(appointmentDetailsQuery, [appointmentId]);
+    
+    if (appointmentDetails.success && appointmentDetails.data.length > 0) {
+      const appointment = appointmentDetails.data[0];
+      const doctorName = `Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name}`;
+      
+      // Send push notification to patient
       try {
-        // Get appointment details for email
-        const appointmentDetailsQuery = `
-          SELECT 
-            a.appointment_date, a.appointment_time, a.appointment_type, a.reason,
-            u.first_name, u.last_name, u.email,
-            d.first_name as doctor_first_name, d.last_name as doctor_last_name,
-            hf.name as facility_name, hf.address as facility_address
-          FROM appointments a
-          JOIN users u ON a.user_id = u.id
-          JOIN users d ON a.preferred_doctor = d.id
-          JOIN healthcare_facilities hf ON a.facility_id = hf.id
-          WHERE a.id = ?
-        `;
+        let notificationData;
+        switch (status) {
+          case 'confirmed':
+            notificationData = {
+              title: 'Appointment Confirmed',
+              body: `Your appointment with ${doctorName} has been confirmed for ${appointment.appointment_date} at ${appointment.appointment_time}`,
+              data: {
+                type: 'appointment',
+                appointmentId: parseInt(appointmentId),
+                status: 'confirmed',
+                doctorName
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high'
+            };
+            break;
+          case 'cancelled':
+            notificationData = {
+              title: 'Appointment Cancelled',
+              body: `Your appointment with ${doctorName} scheduled for ${appointment.appointment_date} has been cancelled`,
+              data: {
+                type: 'appointment',
+                appointmentId: parseInt(appointmentId),
+                status: 'cancelled',
+                doctorName
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high'
+            };
+            break;
+          case 'completed':
+            notificationData = {
+              title: 'Appointment Completed',
+              body: `Your appointment with ${doctorName} on ${appointment.appointment_date} has been completed`,
+              data: {
+                type: 'appointment',
+                appointmentId: parseInt(appointmentId),
+                status: 'completed',
+                doctorName
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high'
+            };
+            break;
+          default:
+            notificationData = {
+              title: 'Appointment Update',
+              body: `Your appointment with ${doctorName} status has been updated to ${status}`,
+              data: {
+                type: 'appointment',
+                appointmentId: parseInt(appointmentId),
+                status: status,
+                doctorName
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high'
+            };
+        }
         
-        const appointmentDetails = await executeQuery(appointmentDetailsQuery, [appointmentId]);
-        
-        if (appointmentDetails.success && appointmentDetails.data.length > 0) {
-          const appointment = appointmentDetails.data[0];
-          
-          // Send confirmation email
+        // Send push notification asynchronously
+        pushNotificationService.sendNotificationToUser(appointment.user_id, notificationData)
+          .then(result => {
+            if (result.success) {
+              console.log('✅ Doctor Dashboard - Push notification sent successfully to patient');
+            } else {
+              console.log('⚠️ Doctor Dashboard - Failed to send push notification:', result.message);
+            }
+          })
+          .catch(error => {
+            console.error('❌ Doctor Dashboard - Error sending push notification:', error);
+          });
+      } catch (notificationError) {
+        console.error('❌ Doctor Dashboard - Error sending push notification:', notificationError);
+        // Don't fail the request if notification fails
+      }
+      
+      // Send confirmation email if status is 'confirmed'
+      if (status === 'confirmed') {
+        try {
           const emailSent = await sendAppointmentConfirmationEmail(
             appointment.email,
             `${appointment.first_name} ${appointment.last_name}`,
-            `Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name}`,
+            doctorName,
             appointment.appointment_date,
             appointment.appointment_time,
             appointment.appointment_type,
@@ -289,12 +372,10 @@ router.put('/appointments/:id/status', authenticateToken, async (req, res) => {
           } else {
             console.log('⚠️ Doctor Dashboard - Failed to send confirmation email');
           }
-        } else {
-          console.log('⚠️ Doctor Dashboard - Could not fetch appointment details for email');
+        } catch (emailError) {
+          console.error('❌ Doctor Dashboard - Error sending confirmation email:', emailError);
+          // Don't fail the request if email fails
         }
-      } catch (emailError) {
-        console.error('❌ Doctor Dashboard - Error sending confirmation email:', emailError);
-        // Don't fail the request if email fails
       }
     }
     
@@ -330,9 +411,11 @@ router.post('/appointments/:id/start-consultation', authenticateToken, async (re
     // Check if appointment exists and belongs to this doctor
     const checkQuery = `
       SELECT a.id, a.user_id, a.preferred_doctor, a.status, a.appointment_date, a.appointment_time,
-             u.first_name, u.last_name, u.email, u.phone
+             u.first_name, u.last_name, u.email, u.phone,
+             d.first_name as doctor_first_name, d.last_name as doctor_last_name
       FROM appointments a
       JOIN users u ON a.user_id = u.id
+      JOIN users d ON a.preferred_doctor = d.id
       WHERE a.id = ? AND a.preferred_doctor = ?
     `;
     const checkResult = await executeQuery(checkQuery, [appointmentId, doctorId]);
@@ -366,6 +449,42 @@ router.post('/appointments/:id/start-consultation', authenticateToken, async (re
     }
     
     console.log('✅ Doctor Dashboard - Consultation started successfully');
+    
+    // Send push notification to patient that consultation has started
+    try {
+      const doctorName = `Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name}`;
+      
+      const notificationData = {
+        title: 'Consultation Started',
+        body: `Your consultation with ${doctorName} has started`,
+        data: {
+          type: 'appointment',
+          appointmentId: parseInt(appointmentId),
+          status: 'in_progress',
+          doctorName
+        },
+        sound: true,
+        badge: 1,
+        priority: 'high'
+      };
+      
+      // Send push notification asynchronously
+      pushNotificationService.sendNotificationToUser(appointment.user_id, notificationData)
+        .then(result => {
+          if (result.success) {
+            console.log('✅ Doctor Dashboard - Consultation started notification sent successfully');
+          } else {
+            console.log('⚠️ Doctor Dashboard - Failed to send consultation started notification:', result.message);
+          }
+        })
+        .catch(error => {
+          console.error('❌ Doctor Dashboard - Error sending consultation started notification:', error);
+        });
+    } catch (notificationError) {
+      console.error('❌ Doctor Dashboard - Error sending consultation started notification:', notificationError);
+      // Don't fail the request if notification fails
+    }
+    
     res.json({
       success: true,
       message: 'Consultation started successfully',
@@ -425,6 +544,7 @@ router.get('/patients', authenticateToken, async (req, res) => {
         u.last_name,
         u.email,
         u.phone,
+        u.profile_image,
         u.created_at as patient_since,
         MAX(a.appointment_date) as last_visit,
         MAX(CASE WHEN a.status = 'confirmed' AND a.appointment_date > CURDATE() THEN a.appointment_date END) as next_appointment,
@@ -433,7 +553,7 @@ router.get('/patients', authenticateToken, async (req, res) => {
       FROM users u
       JOIN appointments a ON u.id = a.user_id
       WHERE a.preferred_doctor = ? ${searchCondition} ${statusCondition}
-      GROUP BY u.id, u.first_name, u.last_name, u.email, u.phone, u.created_at
+      GROUP BY u.id, u.first_name, u.last_name, u.email, u.phone, u.profile_image, u.created_at
       ORDER BY last_visit DESC
       LIMIT ? OFFSET ?
     `;
@@ -461,6 +581,7 @@ router.get('/patients', authenticateToken, async (req, res) => {
       name: `${patient.first_name} ${patient.last_name}`,
       email: patient.email,
       phone: patient.phone,
+      profileImage: patient.profile_image ? `http://172.20.10.4:3000${patient.profile_image}` : null,
       lastVisit: patient.last_visit ? new Date(patient.last_visit).toISOString().split('T')[0] : null,
       nextAppointment: patient.next_appointment ? new Date(patient.next_appointment).toISOString().split('T')[0] : null,
       totalAppointments: patient.total_appointments,
