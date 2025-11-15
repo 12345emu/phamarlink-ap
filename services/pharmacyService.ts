@@ -168,23 +168,28 @@ class PharmacyService {
        }
       
       // Use direct axios for React Native FormData (more reliable)
+      // Pharmacy registration is a public endpoint, so token is optional
       const token = await AsyncStorage.getItem('userToken');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-
+      
       console.log('🔍 PharmacyService - Making direct axios request for React Native FormData');
+      console.log('🔍 PharmacyService - Token available:', !!token);
+      
+      // Build headers - include Authorization only if token exists
+      const headers: any = {
+        'Accept': 'application/json',
+        // Don't set Content-Type - let React Native handle it
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       
       const response = await axios.post(
         `${API_CONFIG.BASE_URL}${API_ENDPOINTS.FACILITIES.PHARMACY_REGISTER}`,
         formData,
         {
           timeout: 30000,
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-            // Don't set Content-Type - let React Native handle it
-          }
+          headers
         }
       );
 

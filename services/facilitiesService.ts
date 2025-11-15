@@ -471,6 +471,49 @@ class FacilitiesService {
         return 'Facility';
     }
   }
+
+  // Get my facilities (for facility-admin users)
+  async getMyFacilities(): Promise<ApiResponse<any[]>> {
+    try {
+      const response = await apiClient.get<any[]>(API_ENDPOINTS.FACILITIES.MY_FACILITIES);
+      
+      if (response.success && response.data) {
+        // Transform backend data to match frontend Facility interface
+        const facilities = response.data.map((facility: any) => ({
+          id: facility.id.toString(),
+          name: facility.name,
+          facility_type: facility.facility_type,
+          type: facility.facility_type,
+          description: facility.description || '',
+          address: facility.address || '',
+          city: facility.city || '',
+          state: facility.state || '',
+          phone: facility.phone || '',
+          email: facility.email || '',
+          images: facility.images || [],
+          services: facility.services || [],
+          is_verified: facility.is_verified || false,
+          is_active: facility.is_active !== false,
+          created_at: facility.created_at,
+          updated_at: facility.updated_at,
+        }));
+        
+        return {
+          success: true,
+          data: facilities,
+        };
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('Get my facilities error:', error);
+      return {
+        success: false,
+        message: 'Failed to fetch your facilities. Please try again.',
+        error: 'My Facilities Error',
+      };
+    }
+  }
 }
 
 // Export singleton instance

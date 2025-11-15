@@ -62,14 +62,18 @@ export default function PatientSignupScreen() {
         role: 'patient' as const
       };
       
-      const success = await signup(userData);
-      if (success) {
+      const result = await signup(userData);
+      if (result.success) {
         router.push('/(tabs)');
       } else {
-        Alert.alert('Error', 'Failed to create account. Please try again.');
+        // Show the specific error message from the API
+        const errorMessage = result.message || 'Failed to create account. Please try again.';
+        Alert.alert('Error', errorMessage);
       }
-    } catch (error) {
-      Alert.alert('Error', 'An error occurred during signup. Please try again.');
+    } catch (error: any) {
+      // Fallback error handling
+      const errorMessage = error?.message || 'An error occurred during signup. Please try again.';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsLoading(false);
     }

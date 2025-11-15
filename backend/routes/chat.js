@@ -49,7 +49,7 @@ router.get('/conversations', authenticateToken, async (req, res) => {
     let query = '';
     let params = [];
     
-    if (userRole === 'patient') {
+    if (userRole === 'patient' || userRole === 'facility-admin') {
       query = `
         SELECT 
           cc.id, cc.user_id, cc.professional_id, cc.subject, cc.status, 
@@ -211,8 +211,8 @@ router.get('/conversations/:id/messages', authenticateToken, async (req, res) =>
 });
 
 // Create new conversation
-// Patient creates conversation with doctor
-router.post('/conversations', authenticateToken, requireRole(['patient']), [
+// Patient or facility-admin creates conversation with doctor
+router.post('/conversations', authenticateToken, requireRole(['patient', 'facility-admin']), [
   body('professional_id').isInt({ min: 1 }),
   body('subject').isLength({ min: 1, max: 100 }).trim(),
   body('initial_message').isLength({ min: 1, max: 500 }).trim()
@@ -444,7 +444,9 @@ router.post('/doctor-conversations', authenticateToken, requireRole(['doctor', '
   }
 });
 
-// Send message (this will be handled by WebSocket, but we keep this for fallback)
+// Send message in a conversation
+// Allowed for: patient, doctor, pharmacist, facility-admin (any authenticated user with conversation access)
+// Note: This route is also used as a fallback when WebSocket is unavailable
 router.post('/conversations/:id/messages', authenticateToken, [
   body('message').isLength({ min: 1, max: 500 }).trim(),
   body('message_type').optional().isIn(['text', 'image', 'file'])
@@ -464,6 +466,7 @@ router.post('/conversations/:id/messages', authenticateToken, [
     const userId = parseInt(req.user.id);
     
     // Verify user has access to this conversation
+    // Access is granted if user is either the user_id (patient/facility-admin) or professional_id (doctor/pharmacist)
     const accessQuery = `
       SELECT id FROM chat_conversations 
       WHERE id = ? AND (user_id = ? OR professional_id = ?)
@@ -564,12 +567,14 @@ router.post('/conversations/:id/messages', authenticateToken, [
 });
 
 // Mark messages as read
+// Allowed for: patient, doctor, pharmacist, facility-admin (any authenticated user with conversation access)
 router.put('/conversations/:id/read', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = parseInt(req.user.id);
     
     // Verify user has access to this conversation
+    // Access is granted if user is either the user_id (patient/facility-admin) or professional_id (doctor/pharmacist)
     const accessQuery = `
       SELECT id FROM chat_conversations 
       WHERE id = ? AND (user_id = ? OR professional_id = ?)

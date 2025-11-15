@@ -4,8 +4,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { executeQuery } = require('../config/database');
-const { authenticateToken, optionalAuth } = require('../middleware/auth');
+const { authenticateToken, optionalAuth, requireRole } = require('../middleware/auth');
 const { generateSecurePassword } = require('../utils/passwordGenerator');
+const { sendPharmacyCredentials } = require('../utils/emailService');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -614,6 +615,20 @@ router.post('/pharmacy/register', upload.array('images', 5), [
       
       finalUserId = createUserResult.data.insertId;
       console.log('✅ Created new facility-admin user:', finalUserId);
+      
+      // Send credentials email to new user
+      try {
+        console.log('📧 Attempting to send pharmacy credentials email to:', email);
+        const emailSent = await sendPharmacyCredentials(email, ownerName, pharmacyName, password);
+        if (emailSent) {
+          console.log('✅ Pharmacy credentials email sent successfully to:', email);
+        } else {
+          console.log('⚠️ Failed to send pharmacy credentials email to:', email);
+        }
+      } catch (emailError) {
+        console.error('❌ Error sending pharmacy credentials email:', emailError);
+        // Don't fail the registration if email fails
+      }
     }
 
     // Insert pharmacy into database
@@ -1037,6 +1052,114 @@ router.post('/hospital/register', upload.array('images', 5), [
   }
 });
 
+// Get my facilities (for facility-admin users)
+router.get('/my-facilities', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.user_type;
+
+    console.log('🔍 Get my facilities - User ID:', userId, 'Type:', typeof userId);
+    console.log('🔍 Get my facilities - User Role:', userRole);
+    console.log('🔍 Get my facilities - Full user object:', JSON.stringify(req.user, null, 2));
+
+    // Only facility-admin can access this endpoint
+    if (userRole !== 'facility-admin') {
+      console.log('❌ Get my facilities - Access denied, user role is:', userRole);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only facility administrators can access this endpoint.'
+      });
+    }
+
+    // Convert userId to integer to ensure type matching
+    const userIdInt = parseInt(userId, 10);
+    console.log('🔍 Get my facilities - Converted user ID to integer:', userIdInt);
+
+    // First, let's check if there are any facilities with this user_id (for debugging)
+    // Check without is_active filter first
+    const debugQuery = 'SELECT id, name, user_id, facility_type, is_active FROM healthcare_facilities WHERE user_id = ?';
+    const debugResult = await executeQuery(debugQuery, [userIdInt]);
+    console.log('🔍 Get my facilities - Debug query (all facilities for user):', JSON.stringify(debugResult, null, 2));
+    
+    // Also check if user_id might be stored as string
+    const debugQueryString = 'SELECT id, name, user_id, facility_type, is_active FROM healthcare_facilities WHERE CAST(user_id AS CHAR) = ?';
+    const debugResultString = await executeQuery(debugQueryString, [userId.toString()]);
+    console.log('🔍 Get my facilities - Debug query (string comparison):', JSON.stringify(debugResultString, null, 2));
+    
+    // Check all facilities to see what user_ids exist
+    const allFacilitiesQuery = 'SELECT id, name, user_id, facility_type FROM healthcare_facilities LIMIT 10';
+    const allFacilitiesResult = await executeQuery(allFacilitiesQuery, []);
+    console.log('🔍 Get my facilities - Sample facilities in database:', JSON.stringify(allFacilitiesResult, null, 2));
+
+    const query = `
+      SELECT 
+        id, name, facility_type, address, city, state, country,
+        latitude, longitude, phone, email, website, operating_hours,
+        services, description, rating, total_reviews, is_verified,
+        images, license_number, registration_number, owner_name,
+        is_active, created_at, updated_at, user_id
+      FROM healthcare_facilities 
+      WHERE user_id = ? AND is_active = TRUE
+      ORDER BY created_at DESC
+    `;
+    
+    console.log('🔍 Get my facilities - Executing query with user_id:', userIdInt);
+    const result = await executeQuery(query, [userIdInt]);
+    console.log('🔍 Get my facilities - Query result:', {
+      success: result.success,
+      dataLength: result.data ? result.data.length : 0,
+      error: result.error
+    });
+
+    if (!result.success) {
+      console.error('❌ Get my facilities - Query failed:', result.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch facilities',
+        error: result.error
+      });
+    }
+
+    console.log('🔍 Get my facilities - Raw facilities data:', JSON.stringify(result.data, null, 2));
+
+    // Parse JSON fields
+    const facilities = result.data.map(facility => {
+      if (facility.services && typeof facility.services === 'string') {
+        try {
+          facility.services = JSON.parse(facility.services);
+        } catch (error) {
+          console.error('❌ Error parsing services:', error);
+          facility.services = [];
+        }
+      }
+      if (facility.images && typeof facility.images === 'string') {
+        try {
+          facility.images = JSON.parse(facility.images);
+        } catch (error) {
+          console.error('❌ Error parsing images:', error);
+          facility.images = [];
+        }
+      }
+      return facility;
+    });
+
+    console.log('✅ Get my facilities - Returning', facilities.length, 'facilities');
+
+    res.json({
+      success: true,
+      data: facilities,
+      message: 'Facilities fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Get my facilities error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // Get facility by ID
 router.get('/:id', async (req, res) => {
   try {
@@ -1292,6 +1415,183 @@ router.get('/:id/stats', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get facility stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Add medicine to pharmacy (facility-admin/pharmacist only)
+router.post('/:id/medicines', authenticateToken, requireRole(['facility-admin', 'pharmacist', 'admin']), [
+  body('medicine_id').isInt({ min: 1 }).withMessage('Valid medicine ID is required').toInt(),
+  body('stock_quantity').isInt({ min: 0 }).withMessage('Stock quantity must be a non-negative integer').toInt(),
+  body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number').toFloat(),
+  body('discount_price').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('Discount price must be a positive number').toFloat(),
+  body('expiry_date').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Expiry date must be a valid date (YYYY-MM-DD)').toDate(),
+  body('is_available').optional().isBoolean().withMessage('is_available must be a boolean').toBoolean(),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.error('❌ Validation errors:', errors.array());
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const facilityId = parseInt(req.params.id, 10);
+    const userId = parseInt(req.user.id, 10);
+    const { medicine_id, stock_quantity, price, discount_price, expiry_date, is_available } = req.body;
+    
+    console.log('🔍 Add medicine request data:', {
+      facilityId,
+      facilityIdType: typeof facilityId,
+      userId,
+      userIdType: typeof userId,
+      medicine_id,
+      medicine_idType: typeof medicine_id,
+      stock_quantity,
+      stock_quantityType: typeof stock_quantity,
+      price,
+      priceType: typeof price,
+      discount_price,
+      discount_priceType: typeof discount_price,
+      is_available
+    });
+
+    // Validate facilityId
+    if (isNaN(facilityId) || facilityId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid facility ID'
+      });
+    }
+
+    // Check if facility exists and user owns it
+    const facilityQuery = 'SELECT id, facility_type FROM healthcare_facilities WHERE id = ? AND user_id = ?';
+    const facilityResult = await executeQuery(facilityQuery, [facilityId, userId]);
+
+    if (!facilityResult.success || facilityResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found or you do not have permission to manage it'
+      });
+    }
+
+    const facility = facilityResult.data[0];
+
+    // Only allow adding medicines to pharmacies
+    if (facility.facility_type !== 'pharmacy') {
+      return res.status(400).json({
+        success: false,
+        message: 'Medicines can only be added to pharmacies'
+      });
+    }
+
+    // Check if medicine exists
+    const medicineQuery = 'SELECT id FROM medicines WHERE id = ? AND is_active = TRUE';
+    const medicineResult = await executeQuery(medicineQuery, [medicine_id]);
+
+    if (!medicineResult.success || medicineResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Medicine not found'
+      });
+    }
+
+    // Check if medicine already exists in pharmacy
+    const existingQuery = 'SELECT id FROM pharmacy_medicines WHERE pharmacy_id = ? AND medicine_id = ?';
+    const existingResult = await executeQuery(existingQuery, [facilityId, medicine_id]);
+
+    if (existingResult.success && existingResult.data.length > 0) {
+      // Update existing entry
+      const updateQuery = `
+        UPDATE pharmacy_medicines 
+        SET stock_quantity = ?, price = ?, discount_price = ?, expiry_date = ?, is_available = ?, updated_at = NOW()
+        WHERE id = ?
+      `;
+      const updateResult = await executeQuery(updateQuery, [
+        stock_quantity,
+        price,
+        discount_price || null,
+        expiry_date || null,
+        is_available !== undefined ? is_available : true,
+        existingResult.data[0].id
+      ]);
+
+      if (!updateResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to update medicine in pharmacy'
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: 'Medicine updated in pharmacy successfully',
+        data: { id: existingResult.data[0].id }
+      });
+    }
+
+    // Insert new entry
+    // pharmacy_id should be the same as facility_id
+    const pharmacyId = facilityId; // facility_id and pharmacy_id are the same
+    
+    const insertQuery = `
+      INSERT INTO pharmacy_medicines (facility_id, pharmacy_id, medicine_id, stock_quantity, price, discount_price, expiry_date, is_available, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+    `;
+    
+    // Prepare values array - pharmacy_id is the first value
+    const insertValues = [
+      pharmacyId, // pharmacy_id = facility_id (FIRST PARAMETER)
+      facilityId, // facility_id (SECOND PARAMETER)
+      medicine_id,
+      stock_quantity,
+      price,
+      discount_price || null,
+      expiry_date || null,
+      is_available !== undefined ? is_available : true
+    ];
+    
+    console.log('🔍 Inserting medicine - SQL Query:', insertQuery);
+    console.log('🔍 Inserting medicine - Values array:', insertValues);
+    console.log('🔍 Inserting medicine - Detailed values:', {
+      'pharmacy_id (position 0)': insertValues[0],
+      'facility_id (position 1)': insertValues[1],
+      'medicine_id (position 2)': insertValues[2],
+      'stock_quantity (position 3)': insertValues[3],
+      'price (position 3)': insertValues[3],
+      'discount_price (position 5)': insertValues[4],
+      'is_available (position 5)': insertValues[5]
+    });
+    
+    const insertResult = await executeQuery(insertQuery, insertValues);
+    
+    console.log('🔍 Insert result:', {
+      success: insertResult.success,
+      insertId: insertResult.data?.insertId,
+      error: insertResult.error
+    });
+
+    if (!insertResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to add medicine to pharmacy'
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Medicine added to pharmacy successfully',
+      data: { id: insertResult.data.insertId }
+    });
+
+  } catch (error) {
+    console.error('❌ Add medicine to pharmacy error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'

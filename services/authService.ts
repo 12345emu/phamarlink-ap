@@ -20,7 +20,7 @@ export interface User {
     zipCode: string;
     country: string;
   };
-  role: 'patient' | 'doctor' | 'pharmacist' | 'admin';
+  role: 'patient' | 'doctor' | 'pharmacist' | 'admin' | 'facility-admin';
   profileImage?: string;
   isActive: boolean;
   createdAt: string;
@@ -109,7 +109,34 @@ class AuthService {
   // User signup
   async signup(userData: SignupData): Promise<ApiResponse<AuthResponse>> {
     try {
-      const response = await apiClient.post<AuthResponse>(API_ENDPOINTS.AUTH.SIGNUP, userData);
+      // Transform role to userType for backend compatibility
+      const { role, ...restData } = userData;
+      const requestData = {
+        ...restData,
+        userType: role
+      };
+      
+      console.log('🔍 AuthService - Signup request data:', {
+        ...requestData,
+        password: '***'
+      });
+      
+      const response = await apiClient.post<AuthResponse>(API_ENDPOINTS.AUTH.SIGNUP, requestData);
+      
+      console.log('🔍 AuthService - Signup response:', {
+        success: response.success,
+        message: response.message,
+        hasData: !!response.data
+      });
+      
+      // If there are validation errors in the response, format them
+      if (!response.success && (response as any).errors) {
+        const validationErrors = (response as any).errors.map((err: any) => err.msg || err.message || err.param).join(', ');
+        return {
+          ...response,
+          message: validationErrors ? `Validation failed: ${validationErrors}` : response.message
+        };
+      }
       
       if (response.success && response.data) {
         // Store tokens and user data
@@ -117,11 +144,27 @@ class AuthService {
       }
       
       return response;
-    } catch (error) {
-      console.error('Signup error:', error);
+    } catch (error: any) {
+      console.error('❌ Signup error:', error);
+      console.error('❌ Signup error details:', {
+        message: error?.message,
+        response: error?.response?.data,
+        status: error?.response?.status
+      });
+      
+      // If there are validation errors from the backend, include them in the message
+      if (error?.response?.data?.errors) {
+        const validationErrors = error.response.data.errors.map((err: any) => err.msg || err.message).join(', ');
+        return {
+          success: false,
+          message: `Validation failed: ${validationErrors}`,
+          error: 'Validation Error',
+        };
+      }
+      
       return {
         success: false,
-        message: 'Signup failed. Please try again.',
+        message: error?.response?.data?.message || 'Signup failed. Please try again.',
         error: 'Signup Error',
       };
     }

@@ -57,6 +57,7 @@ export const API_ENDPOINTS = {
     SEARCH_NEARBY: '/facilities/nearby',
     ADD_REVIEW: (id: string) => `/facilities/${id}/reviews`,
     PHARMACY_REGISTER: '/facilities/pharmacy/register',
+    MY_FACILITIES: '/facilities/my-facilities',
   },
 
   // Chat

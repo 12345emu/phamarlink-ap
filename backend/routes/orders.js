@@ -28,9 +28,11 @@ router.get('/', authenticateToken, async (req, res) => {
     if (userRole === 'patient') {
       whereClause += ' AND o.patient_id = ?';
       params.push(userId);
-    } else if (userRole === 'pharmacist') {
+    } else if (userRole === 'pharmacist' || userRole === 'facility-admin') {
+      // Only show orders from facilities owned by this user
       whereClause += ' AND o.pharmacy_id IN (SELECT id FROM healthcare_facilities WHERE user_id = ?)';
       params.push(userId);
+      console.log(`🔍 Filtering orders for ${userRole} (userId: ${userId}) - Only showing orders from their facilities`);
     }
     // Admin can see all orders
     
@@ -82,6 +84,7 @@ router.get('/', authenticateToken, async (req, res) => {
      }
      
      const orders = ordersResult.data;
+     console.log(`📦 Found ${orders.length} orders for ${userRole} (userId: ${userId})`);
     
          // Get order items for each order and structure pharmacy data
      for (let order of orders) {
@@ -181,7 +184,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
        return res.status(403).json({ success: false, message: 'Access denied' });
      }
     
-    if (userRole === 'pharmacist' && !await checkPharmacyAccess(userId, order.pharmacy_id)) {
+    if ((userRole === 'pharmacist' || userRole === 'facility-admin') && !await checkPharmacyAccess(userId, order.pharmacy_id)) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
     
@@ -351,8 +354,8 @@ router.post('/', authenticateToken, requireRole(['patient']), [
   }
 });
 
-// Update order status (pharmacist/admin only)
-router.patch('/:id/status', authenticateToken, requireRole(['pharmacist', 'admin']), [
+// Update order status (pharmacist/facility-admin/admin only)
+router.patch('/:id/status', authenticateToken, requireRole(['pharmacist', 'facility-admin', 'admin']), [
   body('status').isIn(['confirmed', 'processing', 'ready', 'out_for_delivery', 'delivered', 'cancelled']),
   body('notes').optional().isLength({ max: 200 }).trim(),
   body('estimated_delivery').optional().isISO8601()
@@ -370,6 +373,9 @@ router.patch('/:id/status', authenticateToken, requireRole(['pharmacist', 'admin
     const { id } = req.params;
     const { status, notes, estimated_delivery } = req.body;
     const userId = req.user.id;
+    const userRole = req.user.user_type;
+    
+    console.log(`🔍 Update order status - Order ID: ${id}, New Status: ${status}, User ID: ${userId}, Role: ${userRole}`);
     
     // Check if order exists and user has access
     const orderResult = await executeQuery(
@@ -378,12 +384,18 @@ router.patch('/:id/status', authenticateToken, requireRole(['pharmacist', 'admin
     );
     
     if (!orderResult.success || !orderResult.data || orderResult.data.length === 0) {
+      console.error(`❌ Order not found: ${id}`);
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
     
     const order = orderResult.data[0];
+    console.log(`🔍 Order found - Pharmacy ID: ${order.pharmacy_id}, Current Status: ${order.status}`);
     
-    if (!await checkPharmacyAccess(userId, order.pharmacy_id)) {
+    const hasAccess = await checkPharmacyAccess(userId, order.pharmacy_id);
+    console.log(`🔍 Access check result: ${hasAccess}`);
+    
+    if (!hasAccess) {
+      console.error(`❌ Access denied - User ${userId} does not have access to pharmacy ${order.pharmacy_id}`);
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
     
@@ -394,14 +406,50 @@ router.patch('/:id/status', authenticateToken, requireRole(['pharmacist', 'admin
       WHERE id = ?
     `;
     
-    await executeQuery(updateQuery, [
+    const updateResult = await executeQuery(updateQuery, [
       status, 
       notes || null, 
       estimated_delivery || null, 
       id
     ]);
     
-    res.json({ success: true, message: 'Order status updated successfully' });
+    if (!updateResult.success) {
+      console.error('❌ Failed to update order status:', updateResult.error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to update order status',
+        error: updateResult.error 
+      });
+    }
+    
+    if (updateResult.affectedRows === 0) {
+      console.error('❌ No rows affected. Order ID:', id, 'Status:', status);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No rows were updated. Order may not exist or status is the same.' 
+      });
+    }
+    
+    console.log(`✅ Order ${id} status updated to ${status}. Affected rows: ${updateResult.affectedRows}`);
+    
+    // Fetch and return the updated order
+    const updatedOrderResult = await executeQuery(
+      'SELECT * FROM orders WHERE id = ?',
+      [id]
+    );
+    
+    if (!updatedOrderResult.success || !updatedOrderResult.data || updatedOrderResult.data.length === 0) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Status updated but failed to fetch updated order' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Order status updated successfully',
+      data: updatedOrderResult.data[0]
+    });
   } catch (error) {
     console.error('Error updating order status:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
@@ -517,11 +565,35 @@ router.get('/:id/tracking', authenticateToken, async (req, res) => {
 
 // Helper function to check pharmacy access
 async function checkPharmacyAccess(userId, pharmacyId) {
+  // Check if the facility belongs to the user (for both pharmacist and facility-admin)
+  console.log(`🔍 Checking pharmacy access - User ID: ${userId} (type: ${typeof userId}), Pharmacy ID: ${pharmacyId} (type: ${typeof pharmacyId})`);
+  
+  // Convert userId to integer to ensure type matching
+  const userIdInt = parseInt(userId, 10);
+  
   const pharmacyResult = await executeQuery(
-    'SELECT id FROM healthcare_facilities WHERE id = ? AND user_id = ? AND facility_type = "pharmacy"',
-    [pharmacyId, userId]
+    'SELECT id, name, user_id, facility_type FROM healthcare_facilities WHERE id = ? AND user_id = ?',
+    [pharmacyId, userIdInt]
   );
-  return pharmacyResult.success && pharmacyResult.data && pharmacyResult.data.length > 0;
+  
+  console.log(`🔍 Pharmacy query result:`, JSON.stringify(pharmacyResult, null, 2));
+  
+  const hasAccess = pharmacyResult.success && pharmacyResult.data && pharmacyResult.data.length > 0;
+  
+  if (!hasAccess) {
+    // Try with string comparison as well for debugging
+    const pharmacyResultString = await executeQuery(
+      'SELECT id, name, user_id, facility_type FROM healthcare_facilities WHERE id = ? AND CAST(user_id AS CHAR) = ?',
+      [pharmacyId, userId.toString()]
+    );
+    console.log(`🔍 Pharmacy query result (string comparison):`, JSON.stringify(pharmacyResultString, null, 2));
+    
+    console.log(`❌ Access denied: User ${userId} does not own facility ${pharmacyId}`);
+  } else {
+    console.log(`✅ Access granted: User ${userId} owns facility ${pharmacyId}`);
+  }
+  
+  return hasAccess;
 }
 
 // Helper function to generate tracking timeline

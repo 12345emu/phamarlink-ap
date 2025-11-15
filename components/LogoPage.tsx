@@ -81,6 +81,10 @@ export default function LogoPage() {
               console.log('LogoPage - Navigating doctor to doctor tabs');
               router.replace("/(doctor-tabs)" as any);
               break;
+            case 'facility-admin':
+              console.log('LogoPage - Navigating facility-admin to facility tabs');
+              router.replace("/(facility-tabs)" as any);
+              break;
             case 'patient':
               console.log('LogoPage - Navigating patient to patient tabs');
               router.replace('/(tabs)');

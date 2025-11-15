@@ -1,18 +1,25 @@
 // Email service for sending credentials and notifications
 const nodemailer = require('nodemailer');
 
-// Email configuration
+// Email configuration - Hostinger SMTP
+// Using port 465 with SSL (matches PHP Mailer SMTPSecure::ENCRYPTION_SMTPS)
 const emailConfig = {
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587, // Use 587 for TLS, 465 for SSL
-  secure: false, // true for 465, false for other ports (587 uses TLS)
+  host: process.env.EMAIL_HOST || 'smtp.hostinger.com',
+  port: parseInt(process.env.EMAIL_PORT) || 465, // SSL port (matches PHP Mailer)
+  secure: true, // true for 465 (SSL/SMTPS), matches PHPMailer::ENCRYPTION_SMTPS
   auth: {
-    user: process.env.EMAIL_USER || 'ericayesu99@gmail.com',
-    pass: process.env.EMAIL_PASS || 'sklo nuxl aqbg bzhz' // Use app password for Gmail
+    user: process.env.EMAIL_USER || 'hello@gohouse.cloud',
+    pass: process.env.EMAIL_PASS || 'Godly@2025#'
   },
   tls: {
     rejectUnauthorized: false // Allow self-signed certificates in development
-  }
+  },
+  connectionTimeout: 20000, // 20 seconds
+  greetingTimeout: 20000, // 20 seconds
+  socketTimeout: 20000, // 20 seconds
+  pool: false, // Disable pooling for troubleshooting
+  debug: false, // Disable debug to reduce noise
+  logger: false // Disable logger
 };
 
 // Test email connection on startup
@@ -20,11 +27,33 @@ console.log('📧 Email configuration:', {
   host: emailConfig.host,
   port: emailConfig.port,
   user: emailConfig.auth.user,
-  hasPassword: !!emailConfig.auth.pass
+  hasPassword: !!emailConfig.auth.pass,
+  secure: emailConfig.secure
 });
 
 // Create transporter
 const transporter = nodemailer.createTransport(emailConfig);
+
+// Verify connection on startup (non-blocking)
+transporter.verify(function(error, success) {
+  if (error) {
+    console.error('❌ Email service verification failed:', error.message);
+    console.error('❌ Attempted connection to:', {
+      host: emailConfig.host,
+      port: emailConfig.port,
+      secure: emailConfig.secure,
+      user: emailConfig.auth.user
+    });
+    console.error('❌ Full error:', error);
+  } else {
+    console.log('✅ Email service is ready to send messages');
+    console.log('✅ Connected to:', {
+      host: emailConfig.host,
+      port: emailConfig.port,
+      secure: emailConfig.secure
+    });
+  }
+});
 
 /**
  * Send pharmacist registration credentials
@@ -411,11 +440,125 @@ async function sendAppointmentConfirmationEmail(patientEmail, patientName, docto
  */
 async function testEmailConnection() {
   try {
+    console.log('🔍 Testing email connection with config:', {
+      host: emailConfig.host,
+      port: emailConfig.port,
+      secure: emailConfig.secure,
+      user: emailConfig.auth.user
+    });
     await transporter.verify();
     console.log('✅ Email service is ready');
     return true;
   } catch (error) {
-    console.error('❌ Email service configuration error:', error);
+    console.error('❌ Email service configuration error:', error.message);
+    console.error('❌ Current config being used:', {
+      host: emailConfig.host,
+      port: emailConfig.port,
+      secure: emailConfig.secure,
+      user: emailConfig.auth.user
+    });
+    console.error('❌ Full error:', error);
+    return false;
+  }
+}
+
+/**
+ * Send pharmacy registration credentials
+ * @param {string} email - Recipient email
+ * @param {string} ownerName - Pharmacy owner's name
+ * @param {string} pharmacyName - Pharmacy name
+ * @param {string} password - Generated password
+ * @returns {Promise<boolean>} Success status
+ */
+async function sendPharmacyCredentials(email, ownerName, pharmacyName, password) {
+  try {
+    const mailOptions = {
+      from: `"PharmaLink" <${emailConfig.auth.user}>`,
+      to: email,
+      subject: 'Welcome to PharmaLink - Your Pharmacy Account Credentials',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Welcome to PharmaLink</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .credentials { background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #9b59b6; margin: 20px 0; }
+            .password { font-family: monospace; font-size: 18px; font-weight: bold; color: #e74c3c; background: #f8f9fa; padding: 10px; border-radius: 4px; }
+            .warning { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 4px; margin: 20px 0; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .button { display: inline-block; background: #9b59b6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🏥 Welcome to PharmaLink!</h1>
+              <p>Your pharmacy account has been created successfully</p>
+            </div>
+            
+            <div class="content">
+              <h2>Hello ${ownerName}!</h2>
+              
+              <p>Congratulations! Your pharmacy <strong>${pharmacyName}</strong> has been registered on PharmaLink. Your account is now active and ready to use.</p>
+              
+              <div class="credentials">
+                <h3>🔐 Your Login Credentials:</h3>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Temporary Password:</strong></p>
+                <div class="password">${password}</div>
+              </div>
+              
+              <div class="warning">
+                <strong>⚠️ Important Security Notice:</strong>
+                <ul>
+                  <li>This is a temporary password - please change it after your first login</li>
+                  <li>Keep your credentials secure and don't share them with anyone</li>
+                  <li>If you didn't request this account, please contact our support team immediately</li>
+                </ul>
+              </div>
+              
+              <p>You can now:</p>
+              <ul>
+                <li>✅ Log in to your pharmacy dashboard</li>
+                <li>✅ Manage your pharmacy profile and services</li>
+                <li>✅ Connect with patients and healthcare professionals</li>
+                <li>✅ Manage inventory and orders</li>
+                <li>✅ Access pharmacy management tools</li>
+              </ul>
+              
+              <p style="text-align: center;">
+                <a href="http://172.20.10.3:3000/login" class="button">Login to PharmaLink</a>
+              </p>
+              
+              <p><strong>Note:</strong> Your pharmacy registration is pending review. We will review your application and contact you within 3-5 business days. Once approved, your pharmacy will be visible to patients on the platform.</p>
+              
+              <p>If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
+              
+              <p>Best regards,<br>
+              The PharmaLink Team</p>
+            </div>
+            
+            <div class="footer">
+              <p>This email was sent from PharmaLink. Please do not reply to this email.</p>
+              <p>© 2024 PharmaLink. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Pharmacy credentials email sent successfully:', info.messageId);
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending pharmacy credentials email:', error);
     return false;
   }
 }
@@ -423,6 +566,7 @@ async function testEmailConnection() {
 module.exports = {
   sendPharmacistCredentials,
   sendDoctorCredentials,
+  sendPharmacyCredentials,
   sendPasswordResetEmail,
   sendAppointmentConfirmationEmail,
   testEmailConnection

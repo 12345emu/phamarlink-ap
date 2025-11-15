@@ -1,7 +1,8 @@
 const express = require('express');
-const { query, validationResult } = require('express-validator');
+const { query, validationResult, body } = require('express-validator');
 const db = require('../config/database');
 const os = require('os');
+const { testEmailConnection, sendPharmacyCredentials } = require('../utils/emailService');
 
 const router = express.Router();
 
@@ -383,6 +384,79 @@ router.get('/rate-limit-status', (req, res) => {
   } catch (error) {
     console.error('Rate limit status error:', error);
     res.status(500).json({ error: 'Failed to get rate limit status' });
+  }
+});
+
+// Test email connection endpoint
+router.get('/test-email', async (req, res) => {
+  try {
+    console.log('📧 Testing email connection...');
+    const isConnected = await testEmailConnection();
+    
+    if (isConnected) {
+      res.json({
+        success: true,
+        message: 'Email service is ready and connected',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(503).json({
+        success: false,
+        message: 'Email service connection failed',
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error('Email test error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Email test failed',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Send test email endpoint
+router.post('/test-email-send', [
+  body('to').optional().isEmail().withMessage('Valid email address is required'),
+], async (req, res) => {
+  try {
+    const { to } = req.body;
+    const testEmail = to || 'ericayesu99@yahoo.com';
+    
+    console.log('📧 Sending test email to:', testEmail);
+    
+    const emailSent = await sendPharmacyCredentials(
+      testEmail,
+      'Test Owner',
+      'Test Pharmacy',
+      'TestPassword123!'
+    );
+    
+    if (emailSent) {
+      res.json({
+        success: true,
+        message: 'Test email sent successfully',
+        recipient: testEmail,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send test email',
+        recipient: testEmail,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error('Send test email error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending test email',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 

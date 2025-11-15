@@ -11,7 +11,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
   login: (email: string, password: string) => Promise<{ success: boolean; user?: User }>;
-  signup: (userData: SignupData) => Promise<boolean>;
+  signup: (userData: SignupData) => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
   loading: boolean;
   firstTimeUser: boolean;
@@ -235,7 +235,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (userData: SignupData): Promise<boolean> => {
+  const signup = async (userData: SignupData): Promise<{ success: boolean; message?: string }> => {
     try {
       setLoading(true);
       
@@ -246,14 +246,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsAuthenticated(true);
         setUser(response.data.user);
         markUserAsNotFirstTime(); // User is not new after successful signup
-        return true;
+        return { success: true };
       } else {
         console.error('Signup failed:', response.message);
-        return false;
+        return { 
+          success: false, 
+          message: response.message || 'Failed to create account. Please try again.' 
+        };
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Signup error:', error);
-      return false;
+      return { 
+        success: false, 
+        message: error?.message || 'An error occurred during signup. Please try again.' 
+      };
     } finally {
       setLoading(false);
     }

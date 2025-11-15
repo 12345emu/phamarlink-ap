@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon1.png",
     "scheme": "pharmalink1",
+    "owner": "odame",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -14,14 +15,24 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.odame.pharmalink1",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs access to your location to show you nearby hospitals and pharmacies."
+      }
+      
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon1.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.odame.pharmalink1"
+      
     },
     "web": {
       "bundler": "metro",
@@ -41,6 +52,18 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4d35d823-95e9-4161-a725-eeb80549331d"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/4d35d823-95e9-4161-a725-eeb80549331d"
     }
   }
 }

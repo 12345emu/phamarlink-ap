@@ -27,8 +27,10 @@ export default function RootLayout() {
                     <Stack.Screen name="chat-screen" options={{ headerShown: false }} />
                   <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                   <Stack.Screen name="(doctor-tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="(facility-tabs)" options={{ headerShown: false }} />
                                           <Stack.Screen name="pharmacy-details-modal" options={{ headerShown: false }} />
                             <Stack.Screen name="hospital-details-modal" options={{ headerShown: false }} />
+                            <Stack.Screen name="facility-management" options={{ headerShown: false }} />
                             <Stack.Screen name="pharmacy-registration" options={{ headerShown: false }} />
                             <Stack.Screen name="hospital-registration" options={{ headerShown: false }} />
                             <Stack.Screen name="pharmacist-registration" options={{ headerShown: false }} />

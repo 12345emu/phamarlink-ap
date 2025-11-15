@@ -53,6 +53,11 @@ export interface Order {
     address: string;
     phone: string;
   };
+  // Customer information (from users table)
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
 }
 
 class OrderService {

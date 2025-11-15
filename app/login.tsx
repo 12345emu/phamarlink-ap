@@ -62,6 +62,9 @@ export default function LoginScreen() {
           console.log('🔍 Navigating doctor to doctor tabs');
           console.log('🔍 About to navigate to: /(doctor-tabs)/');
           router.replace('/(doctor-tabs)' as any);
+        } else if (result.user.role === 'facility-admin') {
+          console.log('🔍 Navigating facility-admin to facility tabs');
+          router.replace('/(facility-tabs)' as any);
         } else {
           console.log('🔍 Navigating patient to patient tabs');
           router.replace('/(tabs)');

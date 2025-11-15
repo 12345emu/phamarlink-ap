@@ -1,9 +1,44 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { authenticateToken, requireRole, requireOwnership } = require('../middleware/auth');
 const { executeQuery, executeTransaction } = require('../config/database');
 
 const router = express.Router();
+
+// Configure multer for medicine image uploads
+const medicineStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/medicine-images');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    cb(null, `medicine-${timestamp}${ext}`);
+  }
+});
+
+const medicineFileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed'), false);
+  }
+};
+
+const uploadMedicineImage = multer({
+  storage: medicineStorage,
+  fileFilter: medicineFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 // Get all medicines with search and filtering
 router.get('/', async (req, res) => {
@@ -152,25 +187,30 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Add new medicine (admin/pharmacist only)
-router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
-  body('name').isLength({ min: 2, max: 100 }).trim(),
-  body('generic_name').optional().isLength({ min: 2, max: 100 }).trim(),
-  body('description').optional().isLength({ max: 500 }).trim(),
-  body('category').isIn(['antibiotics', 'painkillers', 'vitamins', 'diabetes', 'heart', 'respiratory', 'other']),
-  body('prescription_required').isBoolean(),
-  body('dosage_form').isIn(['tablet', 'capsule', 'liquid', 'injection', 'cream', 'inhaler', 'other']),
-  body('strength').optional().isLength({ max: 50 }).trim(),
-  body('manufacturer').optional().isLength({ max: 100 }).trim(),
-  body('side_effects').optional().isArray(),
-  body('interactions').optional().isArray(),
-  body('storage_instructions').optional().isLength({ max: 200 }).trim(),
-  body('min_price').optional().isFloat({ min: 0 }),
-  body('max_price').optional().isFloat({ min: 0 })
-], async (req, res) => {
+// Add new medicine (admin/pharmacist/facility-admin only)
+router.post('/', authenticateToken, requireRole(['admin', 'pharmacist', 'facility-admin']), 
+  uploadMedicineImage.single('image'),
+  [
+    body('name').isLength({ min: 2, max: 255 }).trim(),
+    body('generic_name').optional().isLength({ min: 2, max: 255 }).trim(),
+    body('brand_name').optional().isLength({ min: 2, max: 255 }).trim(),
+    body('description').optional().trim(),
+    body('category').isIn(['antibiotics', 'painkillers', 'vitamins', 'diabetes', 'heart', 'respiratory', 'other']),
+    body('prescription_required').isBoolean(),
+    body('dosage_form').isIn(['tablet', 'capsule', 'liquid', 'injection', 'cream', 'inhaler', 'other']),
+    body('strength').optional().isLength({ max: 100 }).trim(),
+    body('manufacturer').optional().isLength({ max: 255 }).trim(),
+    body('active_ingredients').optional().trim(),
+    body('side_effects').optional().trim(),
+    body('contraindications').optional().trim()
+  ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      // Delete uploaded file if validation fails
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(400).json({ 
         success: false, 
         message: 'Validation error', 
@@ -180,28 +220,34 @@ router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
     
     const medicineData = req.body;
     
+    // Handle image upload
+    let imagePath = null;
+    if (req.file) {
+      imagePath = `/uploads/medicine-images/${req.file.filename}`;
+    }
+    
     const insertQuery = `
       INSERT INTO medicines (
-        name, generic_name, description, category, prescription_required,
-        dosage_form, strength, manufacturer, side_effects, interactions,
-        storage_instructions, min_price, max_price, created_at
+        name, generic_name, brand_name, description, category, prescription_required,
+        dosage_form, strength, manufacturer, active_ingredients, side_effects, 
+        contraindications, image, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
     
     const result = await executeQuery(insertQuery, [
       medicineData.name,
       medicineData.generic_name || null,
+      medicineData.brand_name || null,
       medicineData.description || null,
       medicineData.category,
       medicineData.prescription_required,
       medicineData.dosage_form,
       medicineData.strength || null,
       medicineData.manufacturer || null,
-      JSON.stringify(medicineData.side_effects || []),
-      JSON.stringify(medicineData.interactions || []),
-      medicineData.storage_instructions || null,
-      medicineData.min_price || 0.00,
-      medicineData.max_price || 0.00
+      medicineData.active_ingredients || null,
+      medicineData.side_effects || null,
+      medicineData.contraindications || null,
+      imagePath
     ]);
     
     if (!result.success) {
@@ -212,12 +258,22 @@ router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
       });
     }
     
-    const [insertResult] = result.data;
+    // For INSERT operations, result.data is an OkPacket object, not an array
+    // The insertId is available directly from result.insertId or result.data.insertId
+    const insertId = result.insertId || result.data?.insertId;
+    
+    if (!insertId) {
+      console.error('❌ No insertId returned from INSERT query');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to get medicine ID after insertion'
+      });
+    }
     
     res.status(201).json({ 
       success: true, 
       message: 'Medicine added successfully',
-      data: { id: insertResult.insertId }
+      data: { id: insertId }
     });
   } catch (error) {
     console.error('Error adding medicine:', error);
@@ -226,7 +282,7 @@ router.post('/', authenticateToken, requireRole(['admin', 'pharmacist']), [
 });
 
 // Update medicine (admin/pharmacist only)
-router.put('/:id', authenticateToken, requireRole(['admin', 'pharmacist']), [
+router.put('/:id', authenticateToken, requireRole(['facility-admin', 'admin', 'pharmacist']), [
   body('name').optional().isLength({ min: 2, max: 100 }).trim(),
   body('generic_name').optional().isLength({ min: 2, max: 100 }).trim(),
   body('description').optional().isLength({ max: 500 }).trim(),

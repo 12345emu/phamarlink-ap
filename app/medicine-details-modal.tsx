@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCart } from '../context/CartContext';
 import { medicinesService, Medicine } from '../services/medicinesService';
+import { API_CONFIG } from '../constants/API';
 
 const { width } = Dimensions.get('window');
 const ACCENT = '#3498db';
@@ -38,6 +39,9 @@ interface MedicineDetails {
   contraindications?: string[];
   pregnancy_category?: string;
   breastfeeding_safe?: boolean;
+  // Facility-specific data
+  facility_id?: string;
+  facility_name?: string;
 }
 
 export default function MedicineDetailsScreen() {
@@ -46,6 +50,29 @@ export default function MedicineDetailsScreen() {
   const { addToCart } = useCart();
   const [medicine, setMedicine] = useState<MedicineDetails | null>(null);
   const [loading, setLoading] = useState(true);
+  const fromFacility = params.fromFacility === 'true';
+  const facilityId = params.facilityId as string;
+  const facilityName = params.facilityName as string;
+
+  // Helper function to convert relative image path to full URL
+  const getMedicineImageUrl = (imagePath: string | undefined | null): string => {
+    if (!imagePath) return '';
+    
+    // If it's already a full URL (starts with http), return as is
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return imagePath;
+    }
+    
+    // Convert relative path to full URL
+    if (imagePath.startsWith('/uploads/')) {
+      // Remove /api from BASE_URL for static file serving
+      const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+      return `${baseUrl}${imagePath}`;
+    }
+    
+    // If it doesn't start with /uploads/, return as is (might be a different format)
+    return imagePath;
+  };
 
   useEffect(() => {
     const fetchMedicineDetails = async () => {
@@ -58,7 +85,8 @@ export default function MedicineDetailsScreen() {
           
           if (response.success && response.data) {
             // Convert API Medicine to MedicineDetails format
-                         const medicineData: MedicineDetails = {
+            // Use facility-specific data if available, otherwise use API data
+            const medicineData: MedicineDetails = {
                id: parseInt(response.data.id),
               name: response.data.name,
               generic_name: response.data.generic_name,
@@ -68,10 +96,23 @@ export default function MedicineDetailsScreen() {
               strength: response.data.strength,
               description: response.data.description || 'No description available',
               manufacturer: response.data.manufacturer,
-                             stock_quantity: response.data.avg_stock || 0,
-               price: Number(response.data.min_price) || 0,
-              is_available: (response.data.avg_stock || 0) > 0,
-              image: '', // API doesn't provide images
+              // Use facility-specific data if available, otherwise use API defaults
+              stock_quantity: fromFacility && params.stockQuantity 
+                ? parseInt(params.stockQuantity as string) 
+                : (response.data.avg_stock || 0),
+              price: fromFacility && params.price 
+                ? Number(params.price) 
+                : (Number(response.data.min_price) || 0),
+              discount_price: fromFacility && params.discountPrice 
+                ? Number(params.discountPrice) 
+                : undefined,
+              is_available: fromFacility && params.isAvailable 
+                ? params.isAvailable !== 'false'
+                : ((response.data.avg_stock || 0) > 0),
+              image: getMedicineImageUrl(params.medicineImage as string || response.data.image || ''),
+              // Facility-specific data
+              facility_id: params.facilityId as string,
+              facility_name: params.facilityName as string,
               // Use default values for fields not in API
               side_effects: [
                 'Nausea and vomiting',
@@ -116,8 +157,9 @@ export default function MedicineDetailsScreen() {
                manufacturer: params.manufacturer as string || 'Pharmaceutical Company',
                stock_quantity: parseInt(params.stockQuantity as string) || 100,
                price: Number(params.price) || 25.00,
+               discount_price: params.discountPrice ? Number(params.discountPrice) : undefined,
               is_available: params.isAvailable !== 'false',
-              image: params.medicineImage as string,
+              image: getMedicineImageUrl(params.medicineImage as string),
               side_effects: ['Nausea and vomiting', 'Headache', 'Dizziness'],
               interactions: ['Avoid alcohol while taking this medication'],
               dosage_instructions: 'Take as directed by your doctor.',
@@ -126,10 +168,44 @@ export default function MedicineDetailsScreen() {
               active_ingredients: ['Active ingredient'],
               contraindications: ['Allergy to any ingredient'],
               pregnancy_category: 'C',
-              breastfeeding_safe: false
+              breastfeeding_safe: false,
+              // Facility-specific data
+              facility_id: params.facilityId as string,
+              facility_name: params.facilityName as string,
             };
             setMedicine(fallbackData);
           }
+        } else {
+          // If no medicineId, use params data directly
+          const fallbackData: MedicineDetails = {
+            id: parseInt(params.medicineId as string) || 1,
+            name: params.medicineName as string || 'Medicine Name',
+            generic_name: params.genericName as string,
+            category: params.category as string || 'General',
+            prescription_required: params.prescriptionRequired === 'true',
+            dosage_form: params.dosageForm as string || 'Tablet',
+            strength: params.strength as string || '500mg',
+            description: params.description as string || 'This medicine is used to treat various conditions.',
+            manufacturer: params.manufacturer as string || 'Pharmaceutical Company',
+            stock_quantity: parseInt(params.stockQuantity as string) || 100,
+            price: Number(params.price) || 25.00,
+            discount_price: params.discountPrice ? Number(params.discountPrice) : undefined,
+            is_available: params.isAvailable !== 'false',
+            image: getMedicineImageUrl(params.medicineImage as string),
+            side_effects: ['Nausea and vomiting', 'Headache', 'Dizziness'],
+            interactions: ['Avoid alcohol while taking this medication'],
+            dosage_instructions: 'Take as directed by your doctor.',
+            storage_instructions: 'Store at room temperature.',
+            expiry_date: '2025-12-31',
+            active_ingredients: ['Active ingredient'],
+            contraindications: ['Allergy to any ingredient'],
+            pregnancy_category: 'C',
+            breastfeeding_safe: false,
+            // Facility-specific data
+            facility_id: params.facilityId as string,
+            facility_name: params.facilityName as string,
+          };
+          setMedicine(fallbackData);
         }
       } catch (error) {
         console.error('Error fetching medicine details:', error);
@@ -146,8 +222,9 @@ export default function MedicineDetailsScreen() {
           manufacturer: params.manufacturer as string || 'Pharmaceutical Company',
           stock_quantity: parseInt(params.stockQuantity as string) || 100,
           price: parseFloat(params.price as string) || 25.00,
+          discount_price: params.discountPrice ? Number(params.discountPrice) : undefined,
           is_available: params.isAvailable !== 'false',
-          image: params.medicineImage as string,
+          image: getMedicineImageUrl(params.medicineImage as string),
           side_effects: ['Nausea and vomiting', 'Headache', 'Dizziness'],
           interactions: ['Avoid alcohol while taking this medication'],
           dosage_instructions: 'Take as directed by your doctor.',
@@ -156,7 +233,10 @@ export default function MedicineDetailsScreen() {
           active_ingredients: ['Active ingredient'],
           contraindications: ['Allergy to any ingredient'],
           pregnancy_category: 'C',
-          breastfeeding_safe: false
+          breastfeeding_safe: false,
+          // Facility-specific data
+          facility_id: params.facilityId as string,
+          facility_name: params.facilityName as string,
         };
         setMedicine(fallbackData);
       } finally {
@@ -319,19 +399,46 @@ export default function MedicineDetailsScreen() {
           </View>
         )}
 
+        {/* Facility Information (if from facility) */}
+        {fromFacility && medicine.facility_name && (
+          <View style={styles.facilitySection}>
+            <View style={styles.facilityHeader}>
+              <FontAwesome name="hospital-o" size={20} color={ACCENT} />
+              <Text style={styles.facilityTitle}>Available at</Text>
+            </View>
+            <Text style={styles.facilityName}>{medicine.facility_name}</Text>
+          </View>
+        )}
+
         {/* Price and Availability */}
         <View style={styles.priceSection}>
           <View style={styles.priceInfo}>
-                            <Text style={styles.price}>GHS {Number(medicine.price).toFixed(2)}</Text>
-            {medicine.discount_price && (
-                              <Text style={styles.originalPrice}>GHS {Number(medicine.discount_price).toFixed(2)}</Text>
-            )}
+            <View>
+              {medicine.discount_price && medicine.discount_price > 0 && medicine.discount_price < medicine.price ? (
+                <>
+                  <Text style={styles.originalPrice}>GHS {Number(medicine.price).toFixed(2)}</Text>
+                  <Text style={styles.price}>GHS {Number(medicine.discount_price).toFixed(2)}</Text>
+                </>
+              ) : (
+                <Text style={styles.price}>GHS {Number(medicine.price).toFixed(2)}</Text>
+              )}
+              {fromFacility && medicine.facility_name && (
+                <Text style={styles.facilityPriceLabel}>Price at {medicine.facility_name}</Text>
+              )}
+            </View>
           </View>
           <View style={styles.availabilityContainer}>
-            <View style={[styles.availabilityIndicator, { backgroundColor: medicine.is_available ? SUCCESS : DANGER }]} />
-            <Text style={styles.availabilityText}>
-              {medicine.is_available ? 'In Stock' : 'Out of Stock'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={[styles.availabilityIndicator, { backgroundColor: medicine.is_available ? SUCCESS : DANGER }]} />
+              <Text style={styles.availabilityText}>
+                {medicine.is_available ? 'In Stock' : 'Out of Stock'}
+              </Text>
+            </View>
+            {fromFacility && (
+              <Text style={styles.stockQuantity}>
+                {medicine.stock_quantity} units available
+              </Text>
+            )}
           </View>
         </View>
 
@@ -591,6 +698,32 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#fff',
   },
+  facilitySection: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginTop: 20,
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: ACCENT,
+  },
+  facilityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  facilityTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7f8c8d',
+    textTransform: 'uppercase',
+  },
+  facilityName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
   priceSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -622,9 +755,20 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     marginLeft: 8,
   },
+  facilityPriceLabel: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  stockQuantity: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 4,
+  },
   availabilityContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
   },
   availabilityIndicator: {
     width: 8,

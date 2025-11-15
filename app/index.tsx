@@ -36,6 +36,9 @@ export default function Index() {
         console.log('Index.tsx - Redirecting doctor to doctor tabs');
         console.log('Index.tsx - Attempting to redirect to doctor tabs');
         return <Redirect href={"/(doctor-tabs)" as any} />;
+      case 'facility-admin':
+        console.log('Index.tsx - Redirecting facility-admin to facility tabs');
+        return <Redirect href={"/(facility-tabs)" as any} />;
       case 'patient':
         console.log('Index.tsx - Redirecting patient to patient tabs');
         return <Redirect href="/(tabs)" />;
