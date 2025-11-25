@@ -81,9 +81,17 @@ class ApiClient {
     }
   );
 
-    // Response interceptor - handle token refresh
+    // Response interceptor - handle token refresh and wrap responses
     this.client.interceptors.response.use(
       (response: AxiosResponse) => {
+        // If backend response doesn't have success field, wrap it
+        if (response.data && typeof response.data === 'object' && !('success' in response.data)) {
+          // Wrap the response in ApiResponse format
+          response.data = {
+            success: true,
+            data: response.data,
+          };
+        }
         return response;
       },
       async (error: AxiosError) => {

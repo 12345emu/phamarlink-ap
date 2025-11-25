@@ -30,6 +30,7 @@ const prescriptionRoutes = require('./routes/prescriptions');
 const doctorDashboardRoutes = require('./routes/doctor-dashboard');
 const pushNotificationRoutes = require('./routes/push-notifications');
 const testAppointmentNotificationRoutes = require('./routes/test-appointment-notifications');
+const hrManagementRoutes = require('./routes/hr-management');
 
 const app = express();
 const server = http.createServer(app);
@@ -126,6 +127,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/hr', hrManagementRoutes);
 app.use('/api/utils', utilRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/tracking', trackingRoutes);

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { doctorService } from '../services/doctorService';
@@ -35,6 +35,8 @@ interface DoctorRegistration {
 
 export default function DoctorRegistrationScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const facilityId = params.facilityId as string;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [formData, setFormData] = useState<DoctorRegistration>({
@@ -171,10 +173,11 @@ export default function DoctorRegistrationScreen() {
     try {
       console.log('Submitting doctor registration:', formData);
       
-      // Add profile image to form data
+      // Add profile image and facilityId to form data
       const registrationData = {
         ...formData,
-        profileImage: profileImage
+        profileImage: profileImage,
+        facilityId: facilityId ? parseInt(facilityId) : undefined
       };
       
       const response = await doctorService.registerDoctor(registrationData);

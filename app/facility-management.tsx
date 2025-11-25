@@ -24,6 +24,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { facilitiesService } from '../services/facilitiesService';
 import { professionalsService } from '../services/professionalsService';
 import { medicinesService, Medicine as MedicineType } from '../services/medicinesService';
+import { chatService } from '../services/chatService';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../services/apiClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,6 +33,7 @@ import { API_CONFIG } from '../constants/API';
 
 interface StaffMember {
   id: number;
+  userId?: number;
   firstName: string;
   lastName: string;
   email: string;
@@ -39,6 +41,7 @@ interface StaffMember {
   specialty: string;
   licenseNumber: string;
   isVerified: boolean;
+  profileImage?: string;
 }
 
 interface Medicine {
@@ -71,6 +74,8 @@ export default function FacilityManagementScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
   const [showAddMedicineModal, setShowAddMedicineModal] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
+  const [showStaffManagementModal, setShowStaffManagementModal] = useState(false);
 
   useEffect(() => {
     loadFacilityData();
@@ -88,12 +93,34 @@ export default function FacilityManagementScreen() {
 
       // Load staff (if facility type supports it)
       if (facilityType === 'pharmacy' || facilityType === 'hospital') {
-        const staffResponse = await professionalsService.getProfessionalsByFacility(facilityId);
+        console.log('🔍 Loading staff for facility:', facilityId);
+        // Pass includeAll=true to get all staff regardless of verification/availability status
+        const staffResponse = await professionalsService.getProfessionalsByFacility(facilityId, 100, true);
+        console.log('🔍 Staff response:', staffResponse);
         if (staffResponse.success && staffResponse.data) {
           const professionals = staffResponse.data.professionals || [];
+          console.log('🔍 Professionals found:', professionals.length);
+          // Helper function to convert profile image path to full URL
+          const getProfileImageUrl = (imagePath: string | null | undefined): string | undefined => {
+            if (!imagePath || imagePath === 'null' || imagePath === '') {
+              return undefined;
+            }
+            // If it's already a full URL, return as is
+            if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+              return imagePath;
+            }
+            // Convert relative path to full URL
+            if (imagePath.startsWith('/uploads/')) {
+              const baseUrl = API_CONFIG.BASE_URL.replace('/api', '');
+              return `${baseUrl}${imagePath}`;
+            }
+            return imagePath;
+          };
+          
           // Transform HealthcareProfessional to StaffMember
           const transformedStaff: StaffMember[] = professionals.map((prof: any) => ({
             id: prof.id,
+            userId: prof.user_id || prof.userId || null,
             firstName: prof.first_name || prof.firstName || '',
             lastName: prof.last_name || prof.lastName || '',
             email: prof.email || '',
@@ -101,8 +128,13 @@ export default function FacilityManagementScreen() {
             specialty: prof.specialty || prof.specialization || '',
             licenseNumber: prof.license_number || prof.licenseNumber || '',
             isVerified: prof.is_verified || prof.isVerified || false,
+            profileImage: getProfileImageUrl(prof.profile_image || prof.profileImage),
           }));
+          console.log('🔍 Transformed staff:', transformedStaff.length);
           setStaff(transformedStaff);
+        } else {
+          console.log('⚠️ Failed to load staff:', staffResponse.message);
+          setStaff([]);
         }
       }
 
@@ -155,12 +187,33 @@ export default function FacilityManagementScreen() {
   };
 
   const handleAddStaff = () => {
+    console.log('🔍 Facility Management - handleAddStaff called');
+    console.log('🔍 Facility Management - facilityId:', facilityId);
+    console.log('🔍 Facility Management - facilityId type:', typeof facilityId);
+    
+    if (!facilityId) {
+      Alert.alert('Error', 'Facility ID is missing. Cannot add staff.');
+      return;
+    }
+    
     Alert.alert(
       'Add Staff',
       'What type of staff member would you like to add?',
       [
-        { text: 'Pharmacist', onPress: () => router.push('/pharmacist-registration') },
-        { text: 'Doctor', onPress: () => router.push('/doctor-registration') },
+        { 
+          text: 'Pharmacist', 
+          onPress: () => {
+            console.log('🔍 Navigating to pharmacist registration with facilityId:', facilityId);
+            router.push(`/pharmacist-registration?facilityId=${facilityId}`);
+          }
+        },
+        { 
+          text: 'Doctor', 
+          onPress: () => {
+            console.log('🔍 Navigating to doctor registration with facilityId:', facilityId);
+            router.push(`/doctor-registration?facilityId=${facilityId}`);
+          }
+        },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
@@ -168,6 +221,83 @@ export default function FacilityManagementScreen() {
 
   const handleAddMedicine = () => {
     setShowAddMedicineModal(true);
+  };
+
+  const handleChatWithStaff = async (member: StaffMember) => {
+    try {
+      if (!member.userId) {
+        Alert.alert('Error', 'Unable to start chat. Staff member user ID is missing.');
+        return;
+      }
+
+      if (!user?.id) {
+        Alert.alert('Error', 'Unable to start chat. Please log in again.');
+        return;
+      }
+
+      const staffName = `${member.firstName} ${member.lastName}`;
+      const staffEmail = member.email;
+      const staffAvatar = member.profileImage || '';
+
+      // Check if conversation already exists
+      try {
+        const conversationsResponse = await chatService.getConversations();
+        if (conversationsResponse.success && conversationsResponse.data) {
+          const existingConversation = conversationsResponse.data.find((conv: any) => 
+            conv.professional_id === member.userId
+          );
+          
+          if (existingConversation) {
+            // Navigate to existing conversation
+            router.push({
+              pathname: '/chat-screen',
+              params: {
+                conversationId: existingConversation.id.toString(),
+                patientName: staffName,
+                patientEmail: staffEmail,
+                patientAvatar: staffAvatar,
+              },
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.log('Could not check existing conversations, will create new one');
+      }
+
+      // Create new conversation
+      const conversationResponse = await chatService.createConversation({
+        professional_id: member.id, // Backend will look up user_id from healthcare_professionals
+        subject: `Chat with ${staffName}`,
+        initial_message: 'Hello.'
+      });
+
+      if (conversationResponse.success && conversationResponse.data) {
+        const conversationId = (conversationResponse.data as any).id || 
+                              (conversationResponse.data as any).conversationId ||
+                              (conversationResponse.data as any).conversation_id;
+        
+        if (conversationId) {
+          router.push({
+            pathname: '/chat-screen',
+            params: {
+              conversationId: conversationId.toString(),
+              patientName: staffName,
+              patientEmail: staffEmail,
+              patientAvatar: staffAvatar,
+            },
+          });
+        } else {
+          Alert.alert('Error', 'Failed to get conversation ID. Please try again.');
+        }
+      } else {
+        const errorMessage = conversationResponse.message || 'Failed to start conversation';
+        Alert.alert('Error', errorMessage);
+      }
+    } catch (error: any) {
+      console.error('Error starting chat with staff:', error);
+      Alert.alert('Error', error.message || 'Failed to start chat. Please try again.');
+    }
   };
 
   if (loading && !refreshing) {
@@ -255,6 +385,11 @@ export default function FacilityManagementScreen() {
             facilityType={facilityType}
             onAddStaff={handleAddStaff}
             onRefresh={loadFacilityData}
+            onStaffClick={(member) => {
+              setSelectedStaff(member);
+              setShowStaffManagementModal(true);
+            }}
+            onChatWithStaff={handleChatWithStaff}
           />
         )}
         {activeTab === 'medicines' && (
@@ -268,7 +403,7 @@ export default function FacilityManagementScreen() {
           />
         )}
         {activeTab === 'orders' && <OrdersTab facilityId={facilityId} />}
-        {activeTab === 'settings' && <SettingsTab facility={facility} />}
+        {activeTab === 'settings' && <SettingsTab facility={facility} onUpdate={loadFacilityData} />}
       </ScrollView>
 
       {/* Add Medicine Modal */}
@@ -281,6 +416,34 @@ export default function FacilityManagementScreen() {
           loadFacilityData();
         }}
       />
+
+      {/* Staff Management Modal */}
+      {selectedStaff && (
+        <StaffManagementModal
+          visible={showStaffManagementModal}
+          staff={selectedStaff}
+          onClose={() => {
+            setShowStaffManagementModal(false);
+            setSelectedStaff(null);
+          }}
+          onUpdate={async () => {
+            // Reload facility data to get updated staff information
+            await loadFacilityData();
+            // Update selectedStaff with the latest data from the reloaded staff list
+            if (selectedStaff) {
+              const updatedStaffFromList = staff.find(s => s.id === selectedStaff.id);
+              if (updatedStaffFromList) {
+                setSelectedStaff(updatedStaffFromList);
+              }
+            }
+          }}
+          onDelete={() => {
+            setShowStaffManagementModal(false);
+            setSelectedStaff(null);
+            loadFacilityData();
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -1183,20 +1346,47 @@ function OverviewTab({
 
   // Format operating hours
   const getOperatingHours = () => {
-    if (!facility?.operating_hours) return 'N/A';
-    if (typeof facility.operating_hours === 'string') {
+    // Handle both operating_hours (snake_case) and operatingHours (camelCase)
+    const hoursData = facility?.operating_hours || facility?.operatingHours;
+    if (!hoursData) return 'N/A';
+    
+    let hours;
+    if (typeof hoursData === 'string') {
       try {
-        const hours = JSON.parse(facility.operating_hours);
-        if (typeof hours === 'object') {
-          return Object.entries(hours)
-            .map(([day, time]) => `${day}: ${time}`)
-            .join('\n');
-        }
+        hours = JSON.parse(hoursData);
       } catch {
-        return facility.operating_hours;
+        return hoursData;
       }
+    } else {
+      hours = hoursData;
     }
-    return facility.operating_hours;
+    
+    if (typeof hours !== 'object' || hours === null) {
+      return 'N/A';
+    }
+    
+    const dayNames: { [key: string]: string } = {
+      monday: 'Monday',
+      tuesday: 'Tuesday',
+      wednesday: 'Wednesday',
+      thursday: 'Thursday',
+      friday: 'Friday',
+      saturday: 'Saturday',
+      sunday: 'Sunday'
+    };
+    
+    return Object.entries(hours)
+      .map(([day, time]: [string, any]) => {
+        const dayName = dayNames[day] || day.charAt(0).toUpperCase() + day.slice(1);
+        if (time && typeof time === 'object') {
+          if (time.isOpen === false || time.isOpen === 0) {
+            return `${dayName}: Closed`;
+          }
+          return `${dayName}: ${time.open || 'N/A'} - ${time.close || 'N/A'}`;
+        }
+        return `${dayName}: ${time}`;
+      })
+      .join('\n');
   };
 
   // Format services
@@ -1387,7 +1577,11 @@ function OverviewTab({
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoLabel}>Coordinates</Text>
                 <Text style={styles.infoText}>
-                  {facility.latitude.toFixed(6)}, {facility.longitude.toFixed(6)}
+                  {facility.latitude && !isNaN(parseFloat(facility.latitude)) 
+                    ? parseFloat(facility.latitude).toFixed(6) 
+                    : 'N/A'}, {facility.longitude && !isNaN(parseFloat(facility.longitude)) 
+                    ? parseFloat(facility.longitude).toFixed(6) 
+                    : 'N/A'}
                 </Text>
               </View>
             </View>
@@ -1404,11 +1598,15 @@ function StaffTab({
   facilityType,
   onAddStaff,
   onRefresh,
+  onStaffClick,
+  onChatWithStaff,
 }: {
   staff: StaffMember[];
   facilityType: string;
   onAddStaff: () => void;
   onRefresh: () => void;
+  onStaffClick: (member: StaffMember) => void;
+  onChatWithStaff: (member: StaffMember) => void;
 }) {
   return (
     <View style={styles.tabContent}>
@@ -1431,11 +1629,24 @@ function StaffTab({
       ) : (
         <View style={styles.listContainer}>
           {staff.map((member) => (
-            <View key={member.id} style={styles.staffCard}>
+            <TouchableOpacity 
+              key={member.id} 
+              style={styles.staffCard}
+              onPress={() => onStaffClick(member)}
+              activeOpacity={0.7}
+            >
               <View style={styles.staffInfo}>
-                <View style={styles.staffAvatar}>
-                  <FontAwesome name="user-md" size={20} color="#9b59b6" />
-                </View>
+                {member.profileImage ? (
+                  <Image
+                    source={{ uri: member.profileImage }}
+                    style={styles.staffAvatar}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.staffAvatar}>
+                    <FontAwesome name="user-md" size={20} color="#9b59b6" />
+                  </View>
+                )}
                 <View style={styles.staffDetails}>
                   <Text style={styles.staffName}>
                     {member.firstName} {member.lastName}
@@ -1455,8 +1666,19 @@ function StaffTab({
                     <Text style={styles.pendingText}>Pending</Text>
                   </View>
                 )}
+                <TouchableOpacity
+                  style={styles.chatButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onChatWithStaff(member);
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <FontAwesome name="comment" size={18} color="#3498db" />
+                </TouchableOpacity>
+                <FontAwesome name="chevron-right" size={16} color="#bdc3c7" style={{ marginLeft: 8 }} />
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
       )}
@@ -1615,17 +1837,1096 @@ function OrdersTab({ facilityId }: { facilityId: string }) {
 }
 
 // Settings Tab Component
-function SettingsTab({ facility }: { facility: any }) {
+function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState(() => {
+    // Use original fields if available, otherwise check transformed structure
+    let addressValue = '';
+    if (facility?.address_original) {
+      addressValue = facility.address_original;
+    } else if (facility?.address) {
+      if (typeof facility.address === 'string') {
+        addressValue = facility.address;
+      } else if (facility.address.street) {
+        addressValue = facility.address.street;
+      }
+    }
+    
+    return {
+      name: facility?.name || '',
+      address: addressValue,
+      city: facility?.city || facility?.address?.city || '',
+      state: facility?.state || facility?.address?.state || '',
+      postal_code: facility?.postal_code || facility?.address?.zipCode || '',
+      phone: facility?.phone || '',
+      email: facility?.email || '',
+      website: facility?.website || '',
+      description: facility?.description || '',
+      emergency_contact: (facility?.emergency_contact !== null && facility?.emergency_contact !== undefined) ? facility.emergency_contact : '',
+      accepts_insurance: Boolean(
+        facility?.accepts_insurance === true ||
+        facility?.accepts_insurance === 1 ||
+        facility?.accepts_insurance === '1' ||
+        facility?.accepts_insurance === 'true'
+      ),
+      has_delivery: Boolean(
+        facility?.has_delivery === true ||
+        facility?.has_delivery === 1 ||
+        facility?.has_delivery === '1' ||
+        facility?.has_delivery === 'true'
+      ),
+      has_consultation: Boolean(
+        facility?.has_consultation === true ||
+        facility?.has_consultation === 1 ||
+        facility?.has_consultation === '1' ||
+        facility?.has_consultation === 'true'
+      ),
+      is_active: Boolean(facility?.is_active !== false && facility?.is_active !== 0 && facility?.is_active !== '0' && facility?.is_active !== 'false'),
+    };
+  });
+
+  const [operatingHours, setOperatingHours] = useState(() => {
+    // Handle both operating_hours (snake_case) and operatingHours (camelCase)
+    const hoursData = facility?.operating_hours || facility?.operatingHours;
+    if (hoursData) {
+      const hours = typeof hoursData === 'string' 
+        ? JSON.parse(hoursData) 
+        : hoursData;
+      return {
+        monday: hours.monday || { open: '08:00', close: '18:00', isOpen: true },
+        tuesday: hours.tuesday || { open: '08:00', close: '18:00', isOpen: true },
+        wednesday: hours.wednesday || { open: '08:00', close: '18:00', isOpen: true },
+        thursday: hours.thursday || { open: '08:00', close: '18:00', isOpen: true },
+        friday: hours.friday || { open: '08:00', close: '18:00', isOpen: true },
+        saturday: hours.saturday || { open: '09:00', close: '17:00', isOpen: true },
+        sunday: hours.sunday || { open: '09:00', close: '17:00', isOpen: true },
+      };
+    }
+    return {
+      monday: { open: '08:00', close: '18:00', isOpen: true },
+      tuesday: { open: '08:00', close: '18:00', isOpen: true },
+      wednesday: { open: '08:00', close: '18:00', isOpen: true },
+      thursday: { open: '08:00', close: '18:00', isOpen: true },
+      friday: { open: '08:00', close: '18:00', isOpen: true },
+      saturday: { open: '09:00', close: '17:00', isOpen: true },
+      sunday: { open: '09:00', close: '17:00', isOpen: true },
+    };
+  });
+
+  const [services, setServices] = useState<string[]>(() => {
+    if (facility?.services) {
+      return typeof facility.services === 'string' 
+        ? JSON.parse(facility.services) 
+        : facility.services;
+    }
+    return [];
+  });
+  const [newService, setNewService] = useState('');
+  const [selectedImages, setSelectedImages] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (facility) {
+      // Use original fields if available, otherwise check transformed structure
+      let addressValue = '';
+      if (facility.address_original) {
+        addressValue = facility.address_original;
+      } else if (facility.address) {
+        if (typeof facility.address === 'string') {
+          addressValue = facility.address;
+        } else if (facility.address.street) {
+          addressValue = facility.address.street;
+        }
+      }
+      
+      setFormData({
+        name: facility.name || '',
+        address: addressValue,
+        city: facility.city || facility.address?.city || '',
+        state: facility.state || facility.address?.state || '',
+        postal_code: facility.postal_code || facility.address?.zipCode || '',
+        phone: facility.phone || '',
+        email: facility.email || '',
+        website: facility.website || '',
+        description: facility.description || '',
+        emergency_contact: (facility.emergency_contact !== null && facility.emergency_contact !== undefined) ? facility.emergency_contact : '',
+        accepts_insurance: Boolean(
+          facility.accepts_insurance === true ||
+          facility.accepts_insurance === 1 ||
+          facility.accepts_insurance === '1' ||
+          facility.accepts_insurance === 'true'
+        ),
+        has_delivery: Boolean(
+          facility.has_delivery === true ||
+          facility.has_delivery === 1 ||
+          facility.has_delivery === '1' ||
+          facility.has_delivery === 'true'
+        ),
+        has_consultation: Boolean(
+          facility.has_consultation === true ||
+          facility.has_consultation === 1 ||
+          facility.has_consultation === '1' ||
+          facility.has_consultation === 'true'
+        ),
+        is_active: Boolean(facility.is_active !== false && facility.is_active !== 0 && facility.is_active !== '0' && facility.is_active !== 'false'),
+      });
+
+      // Handle both operating_hours (snake_case) and operatingHours (camelCase)
+      const hoursData = facility.operating_hours || facility.operatingHours;
+      if (hoursData) {
+        const hours = typeof hoursData === 'string' 
+          ? JSON.parse(hoursData) 
+          : hoursData;
+        setOperatingHours({
+          monday: hours.monday || { open: '08:00', close: '18:00', isOpen: true },
+          tuesday: hours.tuesday || { open: '08:00', close: '18:00', isOpen: true },
+          wednesday: hours.wednesday || { open: '08:00', close: '18:00', isOpen: true },
+          thursday: hours.thursday || { open: '08:00', close: '18:00', isOpen: true },
+          friday: hours.friday || { open: '08:00', close: '18:00', isOpen: true },
+          saturday: hours.saturday || { open: '09:00', close: '17:00', isOpen: true },
+          sunday: hours.sunday || { open: '09:00', close: '17:00', isOpen: true },
+        });
+      }
+
+      if (facility.services) {
+        setServices(typeof facility.services === 'string' 
+          ? JSON.parse(facility.services) 
+          : facility.services);
+      }
+    }
+  }, [facility]);
+
+  const pickImages = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        selectionLimit: 5,
+      });
+
+      if (!result.canceled && result.assets) {
+        setSelectedImages([...selectedImages, ...result.assets]);
+      }
+    } catch (error) {
+      console.error('Error picking images:', error);
+      Alert.alert('Error', 'Failed to pick images');
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setSelectedImages(selectedImages.filter((_, i) => i !== index));
+  };
+
+  const addService = () => {
+    if (newService.trim() && !services.includes(newService.trim())) {
+      setServices([...services, newService.trim()]);
+      setNewService('');
+    }
+  };
+
+  const removeService = (index: number) => {
+    setServices(services.filter((_, i) => i !== index));
+  };
+
+  const updateOperatingHours = (day: string, field: 'open' | 'close' | 'isOpen', value: any) => {
+    setOperatingHours({
+      ...operatingHours,
+      [day]: {
+        ...operatingHours[day as keyof typeof operatingHours],
+        [field]: value,
+      },
+    });
+  };
+
+  const handleSave = async () => {
+    if (!formData.name.trim() || !formData.address.trim() || !formData.city.trim() || !formData.phone.trim()) {
+      Alert.alert('Validation Error', 'Please fill in all required fields (Name, Address, City, Phone)');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const updateData = {
+        ...formData,
+        operating_hours: operatingHours,
+        services: services,
+      };
+
+      const response = await facilitiesService.updateFacility(
+        facility.id.toString(),
+        updateData,
+        selectedImages.length > 0 ? selectedImages : undefined
+      );
+
+      if (response.success) {
+        // Update formData with response data if available
+        if (response.data) {
+          const updatedFacility = response.data;
+          setFormData({
+            ...formData,
+            accepts_insurance: Boolean(
+              updatedFacility.accepts_insurance === true ||
+              updatedFacility.accepts_insurance === 1 ||
+              updatedFacility.accepts_insurance === '1' ||
+              updatedFacility.accepts_insurance === 'true'
+            ),
+            has_delivery: Boolean(
+              updatedFacility.has_delivery === true ||
+              updatedFacility.has_delivery === 1 ||
+              updatedFacility.has_delivery === '1' ||
+              updatedFacility.has_delivery === 'true'
+            ),
+            has_consultation: Boolean(
+              updatedFacility.has_consultation === true ||
+              updatedFacility.has_consultation === 1 ||
+              updatedFacility.has_consultation === '1' ||
+              updatedFacility.has_consultation === 'true'
+            ),
+            is_active: Boolean(updatedFacility.is_active !== false && updatedFacility.is_active !== 0 && updatedFacility.is_active !== '0' && updatedFacility.is_active !== 'false'),
+          });
+        }
+        
+        Alert.alert('Success', 'Facility updated successfully', [
+          {
+            text: 'OK',
+            onPress: () => {
+              setIsEditing(false);
+              setSelectedImages([]);
+              onUpdate();
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Error', response.message || 'Failed to update facility');
+      }
+    } catch (error: any) {
+      console.error('Error updating facility:', error);
+      Alert.alert('Error', error.message || 'Failed to update facility');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const dayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
   return (
     <View style={styles.tabContent}>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Facility Settings</Text>
-        <View style={styles.emptyState}>
-          <FontAwesome name="cog" size={48} color="#bdc3c7" />
-          <Text style={styles.emptyText}>Settings coming soon</Text>
+      <ScrollView style={styles.settingsScrollView} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.settingsHeader}>
+          <Text style={styles.settingsTitle}>Facility Settings</Text>
+          {!isEditing ? (
+            <TouchableOpacity
+              style={styles.settingsEditButton}
+              onPress={() => setIsEditing(true)}
+            >
+              <FontAwesome name="edit" size={16} color="#fff" />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.editActions}>
+              <TouchableOpacity
+                style={[styles.settingsSaveButton, loading && styles.settingsSaveButtonDisabled]}
+                onPress={handleSave}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <FontAwesome name="check" size={14} color="#fff" />
+                    <Text style={styles.settingsSaveButtonText}>Save</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsCancelButton}
+                onPress={() => {
+                  setIsEditing(false);
+                  setSelectedImages([]);
+                  // Reset form data
+                  if (facility) {
+                    // Use original fields if available, otherwise check transformed structure
+                    let addressValue = '';
+                    if (facility.address_original) {
+                      addressValue = facility.address_original;
+                    } else if (facility.address) {
+                      if (typeof facility.address === 'string') {
+                        addressValue = facility.address;
+                      } else if (facility.address.street) {
+                        addressValue = facility.address.street;
+                      }
+                    }
+                    
+                    setFormData({
+                      name: facility.name || '',
+                      address: addressValue,
+                      city: facility.city || facility.address?.city || '',
+                      state: facility.state || facility.address?.state || '',
+                      postal_code: facility.postal_code || facility.address?.zipCode || '',
+                      phone: facility.phone || '',
+                      email: facility.email || '',
+                      website: facility.website || '',
+                      description: facility.description || '',
+                      emergency_contact: facility.emergency_contact || (facility.emergency_contact === null ? '' : ''),
+                      accepts_insurance: Boolean(
+                        facility.accepts_insurance === true ||
+                        facility.accepts_insurance === 1 ||
+                        facility.accepts_insurance === '1' ||
+                        facility.accepts_insurance === 'true'
+                      ),
+                      has_delivery: Boolean(
+                        facility.has_delivery === true ||
+                        facility.has_delivery === 1 ||
+                        facility.has_delivery === '1' ||
+                        facility.has_delivery === 'true'
+                      ),
+                      has_consultation: Boolean(
+                        facility.has_consultation === true ||
+                        facility.has_consultation === 1 ||
+                        facility.has_consultation === '1' ||
+                        facility.has_consultation === 'true'
+                      ),
+                      is_active: Boolean(
+                        facility.is_active !== false &&
+                        facility.is_active !== 0 &&
+                        facility.is_active !== '0' &&
+                        facility.is_active !== 'false'
+                      ),
+                    });
+                  }
+                }}
+                disabled={loading}
+              >
+                <FontAwesome name="times" size={14} color="#2c3e50" />
+                <Text style={styles.settingsCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Basic Information */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Basic Information</Text>
+          
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Facility Name *</Text>
+            <TextInput
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+              value={formData.name}
+              onChangeText={(text) => setFormData({ ...formData, name: text })}
+              placeholder="Enter facility name"
+              editable={isEditing}
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Address *</Text>
+            <TextInput
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+              value={formData.address}
+              onChangeText={(text) => setFormData({ ...formData, address: text })}
+              placeholder="Enter address"
+              editable={isEditing}
+              multiline
+            />
+          </View>
+
+          <View style={styles.formRow}>
+            <View style={[styles.formGroup, { flex: 1, marginRight: 10 }]}>
+              <Text style={styles.label}>City *</Text>
+              <TextInput
+                style={[styles.input, !isEditing && styles.inputDisabled]}
+                value={formData.city}
+                onChangeText={(text) => setFormData({ ...formData, city: text })}
+                placeholder="Enter city"
+                editable={isEditing}
+              />
+            </View>
+            <View style={[styles.formGroup, { flex: 1 }]}>
+              <Text style={styles.label}>State/Region</Text>
+              <TextInput
+                style={[styles.input, !isEditing && styles.inputDisabled]}
+                value={formData.state}
+                onChangeText={(text) => setFormData({ ...formData, state: text })}
+                placeholder="Enter state"
+                editable={isEditing}
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* Contact Information */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Contact Information</Text>
+          
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Phone *</Text>
+            <TextInput
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+              value={formData.phone}
+              onChangeText={(text) => setFormData({ ...formData, phone: text })}
+              placeholder="Enter phone number"
+              editable={isEditing}
+              keyboardType="phone-pad"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+              value={formData.email}
+              onChangeText={(text) => setFormData({ ...formData, email: text })}
+              placeholder="Enter email"
+              editable={isEditing}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Website</Text>
+            <TextInput
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+              value={formData.website}
+              onChangeText={(text) => setFormData({ ...formData, website: text })}
+              placeholder="https://example.com"
+              editable={isEditing}
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Emergency Contact</Text>
+            <TextInput
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+              value={formData.emergency_contact}
+              onChangeText={(text) => setFormData({ ...formData, emergency_contact: text })}
+              placeholder="Enter emergency contact"
+              editable={isEditing}
+            />
+          </View>
+        </View>
+
+        {/* Operating Hours */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Operating Hours</Text>
+          {days.map((day, index) => {
+            const dayHours = operatingHours[day as keyof typeof operatingHours];
+            return (
+              <View key={day} style={styles.hoursRow}>
+                <View style={styles.hoursDay}>
+                  <Text style={styles.hoursDayLabel}>{dayLabels[index]}</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      style={[styles.toggleSwitch, dayHours.isOpen && styles.toggleSwitchActive]}
+                      onPress={() => updateOperatingHours(day, 'isOpen', !dayHours.isOpen)}
+                    >
+                      <View style={[styles.toggleThumb, dayHours.isOpen && styles.toggleThumbActive]} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {dayHours.isOpen ? (
+                  <View style={styles.hoursTime}>
+                    {isEditing ? (
+                      <>
+                        <TextInput
+                          style={[styles.timeInput, { flex: 1, marginRight: 8 }]}
+                          value={dayHours.open}
+                          onChangeText={(text) => updateOperatingHours(day, 'open', text)}
+                          placeholder="08:00"
+                        />
+                        <Text style={styles.hoursSeparator}>-</Text>
+                        <TextInput
+                          style={[styles.timeInput, { flex: 1, marginLeft: 8 }]}
+                          value={dayHours.close}
+                          onChangeText={(text) => updateOperatingHours(day, 'close', text)}
+                          placeholder="18:00"
+                        />
+                      </>
+                    ) : (
+                      <Text style={styles.hoursDisplay}>
+                        {dayHours.open} - {dayHours.close}
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.closedText}>Closed</Text>
+                )}
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Services */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Services</Text>
+          {services.length > 0 && (
+            <View style={styles.servicesList}>
+              {services.map((service, index) => (
+                <View key={index} style={styles.settingsServiceTag}>
+                  <Text style={styles.serviceTagText}>{service}</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      onPress={() => removeService(index)}
+                      style={styles.serviceRemoveButton}
+                    >
+                      <FontAwesome name="times" size={12} color="#e74c3c" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+          {isEditing && (
+            <View style={styles.addServiceRow}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginRight: 10 }]}
+                value={newService}
+                onChangeText={setNewService}
+                placeholder="Add a service"
+                onSubmitEditing={addService}
+              />
+              <TouchableOpacity style={styles.addServiceButton} onPress={addService}>
+                <FontAwesome name="plus" size={14} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Description */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Description</Text>
+          <TextInput
+            style={[styles.settingsTextArea, !isEditing && styles.inputDisabled]}
+            value={formData.description}
+            onChangeText={(text) => setFormData({ ...formData, description: text })}
+            placeholder="Enter facility description"
+            editable={isEditing}
+            multiline
+            numberOfLines={4}
+          />
+        </View>
+
+        {/* Features */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Features</Text>
+          <View style={styles.featureRow}>
+            <Text style={styles.featureLabel}>Accepts Insurance</Text>
+            {isEditing ? (
+              <TouchableOpacity
+                style={[styles.toggleSwitch, formData.accepts_insurance && styles.toggleSwitchActive]}
+                onPress={() => setFormData({ ...formData, accepts_insurance: !formData.accepts_insurance })}
+              >
+                <View style={[styles.toggleThumb, formData.accepts_insurance && styles.toggleThumbActive]} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.featureValue}>
+                {formData.accepts_insurance ? 'Yes' : 'No'}
+              </Text>
+            )}
+          </View>
+          <View style={styles.featureRow}>
+            <Text style={styles.featureLabel}>Has Delivery</Text>
+            {isEditing ? (
+              <TouchableOpacity
+                style={[styles.toggleSwitch, formData.has_delivery && styles.toggleSwitchActive]}
+                onPress={() => setFormData({ ...formData, has_delivery: !formData.has_delivery })}
+              >
+                <View style={[styles.toggleThumb, formData.has_delivery && styles.toggleThumbActive]} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.featureValue}>
+                {formData.has_delivery ? 'Yes' : 'No'}
+              </Text>
+            )}
+          </View>
+          <View style={styles.featureRow}>
+            <Text style={styles.featureLabel}>Has Consultation</Text>
+            {isEditing ? (
+              <TouchableOpacity
+                style={[styles.toggleSwitch, formData.has_consultation && styles.toggleSwitchActive]}
+                onPress={() => setFormData({ ...formData, has_consultation: !formData.has_consultation })}
+              >
+                <View style={[styles.toggleThumb, formData.has_consultation && styles.toggleThumbActive]} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.featureValue}>
+                {formData.has_consultation ? 'Yes' : 'No'}
+              </Text>
+            )}
+          </View>
+          <View style={styles.featureRow}>
+            <Text style={styles.featureLabel}>Active Status</Text>
+            {isEditing ? (
+              <TouchableOpacity
+                style={[styles.toggleSwitch, formData.is_active && styles.toggleSwitchActive]}
+                onPress={() => setFormData({ ...formData, is_active: !formData.is_active })}
+              >
+                <View style={[styles.toggleThumb, formData.is_active && styles.toggleThumbActive]} />
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.featureValue}>
+                {formData.is_active ? 'Active' : 'Inactive'}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Images */}
+        {isEditing && (
+          <View style={styles.settingsSection}>
+            <Text style={styles.sectionTitle}>Add Images</Text>
+            <TouchableOpacity style={styles.addImageButton} onPress={pickImages}>
+              <FontAwesome name="camera" size={20} color="#9b59b6" />
+              <Text style={styles.addImageButtonText}>Add Images</Text>
+            </TouchableOpacity>
+            {selectedImages.length > 0 && (
+              <View style={styles.imagesPreview}>
+                {selectedImages.map((image, index) => (
+                  <View key={index} style={styles.imagePreviewItem}>
+                    <Image source={{ uri: image.uri }} style={styles.previewImage} />
+                    <TouchableOpacity
+                      style={styles.settingsRemoveImageButton}
+                      onPress={() => removeImage(index)}
+                    >
+                      <FontAwesome name="times" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Status Info */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.sectionTitle}>Status Information</Text>
+          <View style={styles.statusRow}>
+            <Text style={styles.settingsStatusLabel}>Verification Status:</Text>
+            <View style={[styles.statusBadge, facility?.is_verified ? styles.settingsVerifiedBadge : styles.settingsPendingBadge]}>
+              <FontAwesome
+                name={facility?.is_verified ? "check-circle" : "clock-o"}
+                size={12}
+                color="#fff"
+              />
+              <Text style={styles.statusBadgeText}>
+                {facility?.is_verified ? 'Verified' : 'Pending'}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+// Staff Management Modal Component
+function StaffManagementModal({
+  visible,
+  staff,
+  onClose,
+  onUpdate,
+  onDelete,
+}: {
+  visible: boolean;
+  staff: StaffMember;
+  onClose: () => void;
+  onUpdate: () => void;
+  onDelete: () => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    firstName: staff.firstName,
+    lastName: staff.lastName,
+    email: staff.email,
+    phone: staff.phone,
+    specialty: staff.specialty,
+    licenseNumber: staff.licenseNumber,
+  });
+  const [isVerified, setIsVerified] = useState(staff.isVerified);
+  const [profileImage, setProfileImage] = useState<string | null>(staff.profileImage || null);
+  const [newProfileImage, setNewProfileImage] = useState<string | null>(null);
+  const [originalIsVerified, setOriginalIsVerified] = useState(staff.isVerified);
+
+  useEffect(() => {
+    if (visible) {
+      setFormData({
+        firstName: staff.firstName,
+        lastName: staff.lastName,
+        email: staff.email,
+        phone: staff.phone,
+        specialty: staff.specialty,
+        licenseNumber: staff.licenseNumber,
+      });
+      setIsVerified(staff.isVerified);
+      setOriginalIsVerified(staff.isVerified);
+      setProfileImage(staff.profileImage || null);
+      setNewProfileImage(null);
+      setIsEditing(false);
+    }
+  }, [visible, staff]);
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant camera roll permissions to upload images.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        setNewProfileImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      const updateData: any = {
+        first_name: formData.firstName.trim(),
+        last_name: formData.lastName.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        specialty: formData.specialty.trim(),
+        license_number: formData.licenseNumber.trim(),
+      };
+
+      // Only include is_verified if it was actually changed
+      if (isVerified !== originalIsVerified) {
+        updateData.is_verified = isVerified;
+        console.log('🔍 Verification status changed, will update:', isVerified);
+      } else {
+        console.log('🔍 Verification status unchanged, will not update:', isVerified, '===', originalIsVerified);
+      }
+
+      console.log('🔍 Update data being sent:', { ...updateData, profileImage: newProfileImage ? 'present' : 'none' });
+
+      const response = await professionalsService.updateProfessional(
+        staff.id,
+        updateData,
+        newProfileImage || undefined
+      );
+
+      if (response.success) {
+        console.log('🔍 Update response:', response.data);
+        
+        // Update the profile image state with the new image URL from response
+        if (response.data) {
+          // Update profile image if a new one was uploaded or if response has one
+          if (response.data.profile_image) {
+            const newImageUrl = response.data.profile_image;
+            console.log('🔍 Setting new profile image URL:', newImageUrl);
+            setProfileImage(newImageUrl);
+            setNewProfileImage(null);
+          } else if (newProfileImage) {
+            // If we uploaded an image but response doesn't have it yet, keep the local one temporarily
+            // It will be updated when parent reloads
+            console.log('🔍 Using local profile image temporarily:', newProfileImage);
+            setProfileImage(newProfileImage);
+          }
+
+          // Update verification status only if it was in the response (meaning we changed it)
+          if (response.data.is_verified !== undefined && updateData.is_verified !== undefined) {
+            console.log('🔍 Updating verification status from response:', response.data.is_verified);
+            setIsVerified(response.data.is_verified);
+            setOriginalIsVerified(response.data.is_verified);
+          }
+        }
+
+        Alert.alert('Success', 'Staff member updated successfully', [
+          {
+            text: 'OK',
+            onPress: () => {
+              setIsEditing(false);
+              // Update parent's selectedStaff with new data
+              onUpdate();
+            }
+          }
+        ]);
+      } else {
+        Alert.alert('Error', response.message || 'Failed to update staff member');
+      }
+    } catch (error: any) {
+      console.error('Error updating staff:', error);
+      Alert.alert('Error', error.message || 'Failed to update staff member');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = () => {
+    Alert.alert(
+      'Delete Staff Member',
+      `Are you sure you want to remove ${staff.firstName} ${staff.lastName} from your facility?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const response = await professionalsService.deleteProfessional(staff.id);
+              
+              if (response.success) {
+                Alert.alert('Success', 'Staff member removed successfully');
+                onDelete();
+              } else {
+                Alert.alert('Error', response.message || 'Failed to delete staff member');
+              }
+            } catch (error: any) {
+              console.error('Error deleting staff:', error);
+              Alert.alert('Error', error.message || 'Failed to delete staff member');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Manage Staff</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseButton}>
+              <FontAwesome name="times" size={20} color="#2c3e50" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+            {/* Profile Image */}
+            <View style={styles.profileImageSection}>
+              {(newProfileImage || profileImage) ? (
+                <Image
+                  key={newProfileImage || profileImage || 'profile-image'}
+                  source={{ uri: newProfileImage || profileImage || '' }}
+                  style={styles.profileImageLarge}
+                  onError={() => {
+                    console.error('Failed to load profile image');
+                    setProfileImage(null);
+                  }}
+                />
+              ) : (
+                <View style={styles.profileImagePlaceholder}>
+                  <FontAwesome name="user-md" size={40} color="#9b59b6" />
+                </View>
+              )}
+              {isEditing && (
+                <TouchableOpacity style={styles.changeImageButton} onPress={pickImage}>
+                  <FontAwesome name="camera" size={16} color="#fff" />
+                  <Text style={styles.changeImageText}>Change</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Staff Information */}
+            <View style={styles.modalFormSection}>
+              <Text style={styles.modalFormLabel}>First Name</Text>
+              <TextInput
+                style={[styles.modalFormInput, !isEditing && styles.formInputDisabled]}
+                value={formData.firstName}
+                onChangeText={(value) => handleInputChange('firstName', value)}
+                editable={isEditing}
+                placeholder="First Name"
+              />
+            </View>
+
+            <View style={styles.modalFormSection}>
+              <Text style={styles.modalFormLabel}>Last Name</Text>
+              <TextInput
+                style={[styles.modalFormInput, !isEditing && styles.formInputDisabled]}
+                value={formData.lastName}
+                onChangeText={(value) => handleInputChange('lastName', value)}
+                editable={isEditing}
+                placeholder="Last Name"
+              />
+            </View>
+
+            <View style={styles.modalFormSection}>
+              <Text style={styles.modalFormLabel}>Email</Text>
+              <TextInput
+                style={[styles.modalFormInput, !isEditing && styles.formInputDisabled]}
+                value={formData.email}
+                onChangeText={(value) => handleInputChange('email', value)}
+                editable={isEditing}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                placeholder="Email"
+              />
+            </View>
+
+            <View style={styles.modalFormSection}>
+              <Text style={styles.modalFormLabel}>Phone</Text>
+              <TextInput
+                style={[styles.modalFormInput, !isEditing && styles.formInputDisabled]}
+                value={formData.phone}
+                onChangeText={(value) => handleInputChange('phone', value)}
+                editable={isEditing}
+                keyboardType="phone-pad"
+                placeholder="Phone"
+              />
+            </View>
+
+            <View style={styles.modalFormSection}>
+              <Text style={styles.modalFormLabel}>Specialty</Text>
+              <TextInput
+                style={[styles.modalFormInput, !isEditing && styles.formInputDisabled]}
+                value={formData.specialty}
+                onChangeText={(value) => handleInputChange('specialty', value)}
+                editable={isEditing}
+                placeholder="Specialty"
+              />
+            </View>
+
+            <View style={styles.modalFormSection}>
+              <Text style={styles.modalFormLabel}>License Number</Text>
+              <TextInput
+                style={[styles.modalFormInput, !isEditing && styles.formInputDisabled]}
+                value={formData.licenseNumber}
+                onChangeText={(value) => handleInputChange('licenseNumber', value)}
+                editable={isEditing}
+                placeholder="License Number"
+              />
+            </View>
+
+            {/* Verification Status */}
+            {isEditing && (
+              <View style={styles.modalFormSection}>
+                <View style={styles.switchRow}>
+                  <Text style={styles.modalFormLabel}>Verified Status</Text>
+                  <TouchableOpacity
+                    style={[styles.toggleSwitch, isVerified && styles.toggleSwitchActive]}
+                    onPress={() => {
+                      const newValue = !isVerified;
+                      console.log('🔍 Toggle verification:', isVerified, '->', newValue);
+                      setIsVerified(newValue);
+                    }}
+                  >
+                    <View style={[styles.toggleThumb, isVerified && styles.toggleThumbActive]} />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.switchHint}>
+                  {isVerified ? 'Staff member is verified' : 'Staff member is pending verification'}
+                </Text>
+              </View>
+            )}
+
+            {!isEditing && (
+              <View style={styles.statusSection}>
+                <Text style={styles.modalStatusLabel}>Status:</Text>
+                {isVerified ? (
+                  <View style={styles.verifiedBadge}>
+                    <FontAwesome name="check-circle" size={14} color="#27ae60" />
+                    <Text style={styles.verifiedText}>Verified</Text>
+                  </View>
+                ) : (
+                  <View style={styles.pendingBadge}>
+                    <Text style={styles.pendingText}>Pending</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Action Buttons */}
+          <View style={styles.modalFooter}>
+            {!isEditing ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalEditButton]}
+                  onPress={() => setIsEditing(true)}
+                >
+                  <FontAwesome name="edit" size={16} color="#fff" />
+                  <Text style={styles.modalButtonText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.deleteButton]}
+                  onPress={handleDelete}
+                  disabled={loading}
+                >
+                  <FontAwesome name="trash" size={16} color="#fff" />
+                  <Text style={styles.modalButtonText}>Remove</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => {
+                    setIsEditing(false);
+                    setNewProfileImage(null);
+                    // Reset form data
+                    setFormData({
+                      firstName: staff.firstName,
+                      lastName: staff.lastName,
+                      email: staff.email,
+                      phone: staff.phone,
+                      specialty: staff.specialty,
+                      licenseNumber: staff.licenseNumber,
+                    });
+                    setIsVerified(staff.isVerified);
+                    setOriginalIsVerified(staff.isVerified);
+                    setProfileImage(staff.profileImage || null);
+                  }}
+                  disabled={loading}
+                >
+                  <Text style={[styles.modalButtonText, { color: '#2c3e50' }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={handleUpdate}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <FontAwesome name="check" size={16} color="#fff" />
+                      <Text style={styles.modalButtonText}>Save</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
       </View>
-    </View>
+    </Modal>
   );
 }
 
@@ -2170,21 +3471,31 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   staffActions: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  chatButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#ebf5fb',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   verifiedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#d5f4e6',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 12,
-    gap: 4,
   },
   verifiedText: {
     fontSize: 12,
     color: '#27ae60',
     fontWeight: '600',
+    marginLeft: 6,
   },
   pendingBadge: {
     backgroundColor: '#fff3cd',
@@ -2367,6 +3678,441 @@ const styles = StyleSheet.create({
   datePickerDoneText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileImageSection: {
+    alignItems: 'center',
+    marginBottom: 24,
+    marginTop: 20,
+  },
+  profileImageLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#f8f9fa',
+  },
+  profileImagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  changeImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#9b59b6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 12,
+    gap: 6,
+  },
+  changeImageText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalFormSection: {
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  modalFormLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  modalFormInput: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+  },
+  formInputDisabled: {
+    backgroundColor: '#f8f9fa',
+    color: '#7f8c8d',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  toggleSwitch: {
+    width: 50,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#bdc3c7',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleSwitchActive: {
+    backgroundColor: '#27ae60',
+  },
+  toggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignSelf: 'flex-start',
+  },
+  toggleThumbActive: {
+    alignSelf: 'flex-end',
+  },
+  switchHint: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 4,
+  },
+  statusSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    gap: 12,
+  },
+  modalStatusLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 8,
+  },
+  modalEditButton: {
+    backgroundColor: '#3498db',
+  },
+  deleteButton: {
+    backgroundColor: '#e74c3c',
+  },
+  cancelButton: {
+    backgroundColor: '#ecf0f1',
+  },
+  saveButton: {
+    backgroundColor: '#27ae60',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Settings Tab Styles
+  settingsScrollView: {
+    flex: 1,
+  },
+  settingsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  settingsTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  settingsEditButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#9b59b6',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  settingsSaveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#27ae60',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+  },
+  settingsSaveButtonDisabled: {
+    opacity: 0.6,
+  },
+  settingsSaveButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  settingsCancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecf0f1',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+  },
+  settingsCancelButtonText: {
+    color: '#2c3e50',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  settingsSection: {
+    backgroundColor: '#fff',
+    padding: 20,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+  },
+  formGroup: {
+    marginBottom: 16,
+  },
+  formRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  inputDisabled: {
+    backgroundColor: '#f8f9fa',
+    color: '#7f8c8d',
+  },
+  settingsTextArea: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  hoursRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  hoursDay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  hoursDayLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2c3e50',
+    minWidth: 100,
+  },
+  hoursTime: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  timeInput: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 6,
+    padding: 8,
+    fontSize: 14,
+    color: '#2c3e50',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    textAlign: 'center',
+  },
+  hoursSeparator: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    marginHorizontal: 8,
+  },
+  hoursDisplay: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  closedText: {
+    fontSize: 14,
+    color: '#e74c3c',
+    fontStyle: 'italic',
+  },
+  servicesList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  settingsServiceTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    gap: 8,
+  },
+  serviceTagText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  serviceRemoveButton: {
+    padding: 2,
+  },
+  addServiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  addServiceButton: {
+    backgroundColor: '#9b59b6',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  featureRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  featureLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2c3e50',
+  },
+  featureValue: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    fontWeight: '500',
+  },
+  addImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8f9fa',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#9b59b6',
+    borderStyle: 'dashed',
+    gap: 8,
+    marginBottom: 12,
+  },
+  addImageButtonText: {
+    fontSize: 14,
+    color: '#9b59b6',
+    fontWeight: '600',
+  },
+  imagesPreview: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  imagePreviewItem: {
+    position: 'relative',
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  settingsRemoveImageButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#e74c3c',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  settingsStatusLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2c3e50',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    gap: 6,
+  },
+  settingsVerifiedBadge: {
+    backgroundColor: '#27ae60',
+  },
+  settingsPendingBadge: {
+    backgroundColor: '#f39c12',
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '600',
   },
 });

@@ -11,17 +11,7 @@ import {
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
-import { notificationService } from '../../services/notificationService';
-
-interface NotificationItem {
-  id: string;
-  type: 'order' | 'staff' | 'medicine' | 'system' | 'emergency';
-  title: string;
-  message: string;
-  timestamp: string;
-  isRead: boolean;
-  data?: any;
-}
+import { notificationsApiService, NotificationItem } from '../../services/notificationsApiService';
 
 export default function FacilityNotifications() {
   const router = useRouter();
@@ -39,52 +29,32 @@ export default function FacilityNotifications() {
     try {
       setLoading(true);
       
-      // TODO: Load actual notifications from backend
-      // For now, we'll create some sample notifications for facility-admin
-      const sampleNotifications: NotificationItem[] = [
-        {
-          id: '1',
-          type: 'order',
-          title: 'New Order Received',
-          message: 'You have received a new order #ORD-12345 from John Doe',
-          timestamp: '2 minutes ago',
-          isRead: false,
-          data: { orderId: 12345 }
-        },
-        {
-          id: '2',
-          type: 'staff',
-          title: 'Staff Verification',
-          message: 'Pharmacist Jane Smith has been verified and is now active',
-          timestamp: '1 hour ago',
-          isRead: false,
-          data: { staffId: 789 }
-        },
-        {
-          id: '3',
-          type: 'medicine',
-          title: 'Low Stock Alert',
-          message: 'Paracetamol is running low (5 units remaining)',
-          timestamp: '3 hours ago',
-          isRead: true,
-          data: { medicineId: 112 }
-        },
-        {
-          id: '4',
-          type: 'order',
-          title: 'Order Delivered',
-          message: 'Order #ORD-12340 has been successfully delivered',
-          timestamp: '1 day ago',
-          isRead: true,
-          data: { orderId: 12340 }
-        },
-      ];
+      const response = await notificationsApiService.getNotifications({
+        page: 1,
+        limit: 50,
+      });
       
-      setNotifications(sampleNotifications);
-      setUnreadCount(sampleNotifications.filter(n => !n.isRead).length);
+      if (response.success && response.data) {
+        setNotifications(response.data);
+        const unread = response.data.filter(n => !n.isRead).length;
+        setUnreadCount(unread);
+      } else {
+        console.error('Failed to load notifications:', response.message);
+        console.error('Response details:', response);
+        // Show empty state but don't show alert on initial load
+        setNotifications([]);
+        setUnreadCount(0);
+        // Only show alert if we're refreshing (not initial load)
+        if (notifications.length > 0) {
+          Alert.alert('Error', response.message || 'Failed to load notifications');
+        }
+      }
     } catch (error) {
       console.error('Error loading notifications:', error);
-      Alert.alert('Error', 'Failed to load notifications');
+      // Only show alert if we had notifications before (refresh scenario)
+      if (notifications.length > 0) {
+        Alert.alert('Error', 'Failed to load notifications');
+      }
     } finally {
       setLoading(false);
     }
@@ -96,38 +66,80 @@ export default function FacilityNotifications() {
     setRefreshing(false);
   };
 
-  const handleNotificationPress = (notification: NotificationItem) => {
-    // Mark as read
-    setNotifications(prev => 
-      prev.map(n => n.id === notification.id ? { ...n, isRead: true } : n)
-    );
-    setUnreadCount(prev => Math.max(0, prev - 1));
+  const handleNotificationPress = async (notification: NotificationItem) => {
+    // Mark as read if not already read
+    if (!notification.isRead) {
+      const response = await notificationsApiService.markAsRead(notification.id);
+      if (response.success) {
+        setNotifications(prev => 
+          prev.map(n => n.id === notification.id ? { ...n, isRead: true } : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+    }
 
     // Navigate based on notification type
     switch (notification.type) {
       case 'order':
-        router.push('/(facility-tabs)/orders');
+        if (notification.data?.orderId) {
+          router.push(`/(facility-tabs)/orders?orderId=${notification.data.orderId}`);
+        } else {
+          router.push('/(facility-tabs)/orders');
+        }
         break;
-      case 'staff':
-        router.push('/(facility-tabs)/facilities');
+      case 'appointment':
+        if (notification.data?.appointmentId) {
+          router.push(`/(facility-tabs)/appointments?appointmentId=${notification.data.appointmentId}`);
+        } else {
+          router.push('/(facility-tabs)/appointments');
+        }
         break;
-      case 'medicine':
-        router.push('/(facility-tabs)/facilities');
+      case 'chat':
+        if (notification.data?.conversationId) {
+          router.push({
+            pathname: '/chat-screen',
+            params: {
+              conversationId: notification.data.conversationId.toString(),
+            }
+          });
+        } else {
+          router.push('/(facility-tabs)/chat');
+        }
+        break;
+      case 'system':
+      case 'promotion':
+        // System and promotion notifications don't navigate
         break;
       default:
+        router.push('/(facility-tabs)/facilities');
         break;
     }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-    setUnreadCount(0);
+  const markAllAsRead = async () => {
+    const response = await notificationsApiService.markAllAsRead();
+    if (response.success) {
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      setUnreadCount(0);
+    } else {
+      Alert.alert('Error', response.message || 'Failed to mark all notifications as read');
+    }
   };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'order':
         return 'shopping-cart';
+      case 'appointment':
+        return 'calendar';
+      case 'chat':
+        return 'comments';
+      case 'system':
+        return 'cog';
+      case 'reminder':
+        return 'clock-o';
+      case 'promotion':
+        return 'gift';
       case 'staff':
         return 'users';
       case 'medicine':
@@ -143,6 +155,16 @@ export default function FacilityNotifications() {
     switch (type) {
       case 'order':
         return '#3498db';
+      case 'appointment':
+        return '#9b59b6';
+      case 'chat':
+        return '#2ecc71';
+      case 'system':
+        return '#95a5a6';
+      case 'reminder':
+        return '#f39c12';
+      case 'promotion':
+        return '#f39c12';
       case 'staff':
         return '#9b59b6';
       case 'medicine':

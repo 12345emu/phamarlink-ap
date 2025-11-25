@@ -24,6 +24,7 @@ export interface DoctorRegistration {
   acceptsInsurance: boolean;
   userId?: string;
   profileImage?: string;
+  facilityId?: number;
 }
 
 export interface DoctorRegistrationResponse {
@@ -70,6 +71,9 @@ class DoctorService {
       }
       if (data.userId) {
         formData.append('userId', data.userId);
+      }
+      if (data.facilityId) {
+        formData.append('facilityId', data.facilityId.toString());
       }
       
       // Add profile image if provided

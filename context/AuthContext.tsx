@@ -38,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [firstTimeUser, setFirstTimeUser] = useState(true);
-  const { updateProfileImage, clearProfileImage } = useProfile();
+  const { profileImage: profileImageUrl, updateProfileImage, clearProfileImage } = useProfile();
 
   useEffect(() => {
     // Check if user is already logged in
@@ -61,6 +61,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearInterval(tokenCheckInterval);
     };
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    const syncProfileImageToUser = async () => {
+      setUser(prevUser => {
+        if (!prevUser) return prevUser;
+        
+        const normalizedProfileImage = profileImageUrl || null;
+        
+        if (prevUser.profileImage === normalizedProfileImage) {
+          return prevUser;
+        }
+        
+        const updatedUser = { ...prevUser, profileImage: normalizedProfileImage };
+        AsyncStorage.setItem('userData', JSON.stringify(updatedUser)).catch(error => {
+          console.error('❌ AuthContext - Failed to persist updated user profile image:', error);
+        });
+        
+        return updatedUser;
+      });
+    };
+    
+    syncProfileImageToUser();
+  }, [profileImageUrl]);
 
   // Handle automatic logout when token expires
   const handleTokenExpired = async () => {

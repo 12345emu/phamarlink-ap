@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { authenticateToken, requireRole, requireOwnership } = require('../middleware/auth');
 const { executeQuery, executeTransaction } = require('../config/database');
 const pushNotificationService = require('../services/pushNotificationService');
+const { createNotification, getFacilityOwnerId } = require('../utils/notificationHelper');
 
 const router = express.Router();
 
@@ -239,7 +240,7 @@ router.post('/', authenticateToken, requireRole(['patient']), [
     console.log('🔍 Checking facility existence...');
     // Check if facility exists and is active
     const facilityResult = await executeQuery(
-      'SELECT id, facility_type FROM healthcare_facilities WHERE id = ? AND is_active = true',
+      'SELECT id, facility_type, user_id FROM healthcare_facilities WHERE id = ? AND is_active = true',
       [appointmentData.facility_id]
     );
     
@@ -385,10 +386,52 @@ router.post('/', authenticateToken, requireRole(['patient']), [
       }
     }
     
+    const appointmentId = insertResult.data.insertId;
+    const appointmentSummary = {
+      appointmentId,
+      facilityId: appointmentData.facility_id,
+      appointmentDate: appointmentData.appointment_date,
+      appointmentTime: appointmentData.appointment_time,
+    };
+
+    // Notify patient
+    await createNotification({
+      userId,
+      type: 'appointment',
+      title: 'Appointment scheduled',
+      message: `Your appointment for ${appointmentData.appointment_date} at ${appointmentData.appointment_time} has been scheduled.`,
+      data: appointmentSummary,
+    });
+
+    // Notify facility owner
+    if (facilityOwnerId && facilityOwnerId !== userId) {
+      await createNotification({
+        userId: facilityOwnerId,
+        type: 'appointment',
+        title: 'New appointment request',
+        message: `A new appointment has been scheduled for ${appointmentData.appointment_date} at ${appointmentData.appointment_time}.`,
+        data: {
+          ...appointmentSummary,
+          patientId: userId,
+        },
+      });
+    }
+
+    // Notify preferred doctor if specified
+    if (preferredDoctorUserId) {
+      await createNotification({
+        userId: preferredDoctorUserId,
+        type: 'appointment',
+        title: 'New appointment assigned',
+        message: `You have a new appointment request for ${appointmentData.appointment_date} at ${appointmentData.appointment_time}.`,
+        data: appointmentSummary,
+      });
+    }
+
     res.status(201).json({ 
       success: true, 
       message: 'Appointment scheduled successfully',
-      data: { id: insertResult.data.insertId }
+      data: { id: appointmentId }
     });
   } catch (error) {
     console.error('❌ Error creating appointment:', error);
@@ -568,6 +611,25 @@ router.patch('/:id/status', authenticateToken, requireRole(['doctor', 'pharmacis
         } else {
           console.log('⚠️ Failed to send appointment status notification:', notificationResult.message);
         }
+
+        await createNotification({
+          userId: appointment.user_id,
+          type: 'appointment',
+          title: notificationData.title,
+          message: notificationData.body,
+          data: notificationData.data,
+        });
+
+        const facilityOwnerForStatus = await getFacilityOwnerId(appointment.facility_id);
+        if (facilityOwnerForStatus && facilityOwnerForStatus !== appointment.user_id) {
+          await createNotification({
+            userId: facilityOwnerForStatus,
+            type: 'appointment',
+            title: 'Appointment status updated',
+            message: `Appointment ${appointment.id} status changed to ${status}.`,
+            data: notificationData.data,
+          });
+        }
       } else {
         console.log('⚠️ Could not fetch doctor information for notification');
       }
@@ -728,6 +790,41 @@ router.patch('/:id/reschedule', authenticateToken, requireRole(['patient']), [
       }
     }
     
+    const rescheduleSummary = {
+      appointmentId: parseInt(id, 10),
+      appointmentDate: rescheduled_date,
+      appointmentTime: rescheduled_time,
+    };
+
+    await createNotification({
+      userId,
+      type: 'appointment',
+      title: 'Appointment rescheduled',
+      message: `Your appointment has been rescheduled to ${rescheduled_date} at ${rescheduled_time}.`,
+      data: rescheduleSummary,
+    });
+
+    const facilityOwnerForReschedule = await getFacilityOwnerId(appointment.facility_id);
+    if (facilityOwnerForReschedule && facilityOwnerForReschedule !== userId) {
+      await createNotification({
+        userId: facilityOwnerForReschedule,
+        type: 'appointment',
+        title: 'Appointment rescheduled',
+        message: `Appointment ${id} was rescheduled to ${rescheduled_date} at ${rescheduled_time}.`,
+        data: rescheduleSummary,
+      });
+    }
+
+    if (appointment.preferred_doctor) {
+      await createNotification({
+        userId: appointment.preferred_doctor,
+        type: 'appointment',
+        title: 'Appointment rescheduled',
+        message: `An appointment was rescheduled to ${rescheduled_date} at ${rescheduled_time}.`,
+        data: rescheduleSummary,
+      });
+    }
+
     res.json({ 
       success: true, 
       message: 'Appointment rescheduled successfully',
@@ -842,6 +939,42 @@ router.patch('/:id/cancel', authenticateToken, requireRole(['patient']), async (
       }
     }
     
+    const cancelSummary = {
+      appointmentId: appointment.id,
+      status: 'cancelled',
+      appointmentDate: appointment.appointment_date,
+      appointmentTime: appointment.appointment_time,
+    };
+
+    await createNotification({
+      userId,
+      type: 'appointment',
+      title: 'Appointment cancelled',
+      message: `Your appointment on ${appointment.appointment_date} at ${appointment.appointment_time} has been cancelled.`,
+      data: cancelSummary,
+    });
+
+    const facilityOwnerForCancel = await getFacilityOwnerId(appointment.facility_id);
+    if (facilityOwnerForCancel && facilityOwnerForCancel !== userId) {
+      await createNotification({
+        userId: facilityOwnerForCancel,
+        type: 'appointment',
+        title: 'Appointment cancelled',
+        message: `Appointment ${appointment.id} was cancelled by the patient.`,
+        data: cancelSummary,
+      });
+    }
+
+    if (appointment.preferred_doctor) {
+      await createNotification({
+        userId: appointment.preferred_doctor,
+        type: 'appointment',
+        title: 'Appointment cancelled',
+        message: `The appointment scheduled for ${appointment.appointment_date} at ${appointment.appointment_time} was cancelled.`,
+        data: cancelSummary,
+      });
+    }
+
     res.json({ success: true, message: 'Appointment cancelled successfully' });
   } catch (error) {
     console.error('Error cancelling appointment:', error);
@@ -873,6 +1006,7 @@ router.get('/facility/:facilityId/slots', async (req, res) => {
     }
     
     const facility = facilityResult.data[0];
+    const facilityOwnerId = facility.user_id;
     
     // Generate available time slots (basic implementation)
     const availableSlots = generateTimeSlots(date, facility.operating_hours);

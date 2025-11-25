@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, requireRole, requireOwnership } = require('../middleware/auth');
 const { executeQuery, executeTransaction } = require('../config/database');
+const { createNotification, getFacilityOwnerId } = require('../utils/notificationHelper');
 
 const router = express.Router();
 
@@ -239,7 +240,7 @@ router.post('/', authenticateToken, requireRole(['patient']), [
     
     // Check if pharmacy exists and is active
     const pharmacyResult = await executeQuery(
-      'SELECT id, facility_type FROM healthcare_facilities WHERE id = ? AND is_active = true AND facility_type = "pharmacy"',
+      'SELECT id, user_id, facility_type FROM healthcare_facilities WHERE id = ? AND is_active = true AND facility_type = "pharmacy"',
       [orderData.pharmacyId]
     );
     
@@ -248,6 +249,7 @@ router.post('/', authenticateToken, requireRole(['patient']), [
     }
     
     const pharmacy = pharmacyResult.data[0];
+    const pharmacyOwnerId = pharmacy.user_id;
     
     // Validate medicines exist
     const validatedItems = [];
@@ -334,6 +336,46 @@ router.post('/', authenticateToken, requireRole(['patient']), [
           // Continue with other items even if one fails
         }
       }
+    
+    const orderSummary = {
+      orderId,
+      orderNumber,
+      pharmacyId: orderData.pharmacyId,
+      finalAmount: orderData.finalAmount,
+    };
+
+    // Notify patient about successful order placement
+    await createNotification({
+      userId,
+      type: 'order',
+      title: 'Order placed successfully',
+      message: `Your order ${orderNumber} has been placed successfully.`,
+      data: orderSummary,
+    });
+
+    // Notify facility owner about new order
+    if (pharmacyOwnerId) {
+      let patientName = 'A customer';
+      const patientQuery = await executeQuery(
+        'SELECT first_name, last_name FROM users WHERE id = ? LIMIT 1',
+        [userId]
+      );
+      if (patientQuery.success && patientQuery.data && patientQuery.data.length > 0) {
+        const patient = patientQuery.data[0];
+        patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || patientName;
+      }
+
+      await createNotification({
+        userId: pharmacyOwnerId,
+        type: 'order',
+        title: 'New order received',
+        message: `${patientName} just placed order ${orderNumber}.`,
+        data: {
+          ...orderSummary,
+          patientId: userId,
+        },
+      });
+    }
     
     res.status(201).json({ 
       success: true, 
@@ -445,6 +487,18 @@ router.patch('/:id/status', authenticateToken, requireRole(['pharmacist', 'facil
       });
     }
     
+    // Notify patient about status update
+    await createNotification({
+      userId: order.patient_id,
+      type: 'order',
+      title: 'Order status updated',
+      message: `Your order ${order.order_number || `#${order.id}`} status is now ${status}.`,
+      data: {
+        orderId: order.id,
+        status,
+      },
+    });
+
     res.json({ 
       success: true, 
       message: 'Order status updated successfully',
@@ -511,6 +565,32 @@ router.patch('/:id/cancel', authenticateToken, requireRole(['patient']), async (
       }
     });
     
+    await createNotification({
+      userId,
+      type: 'order',
+      title: 'Order cancelled',
+      message: `You cancelled order ${order.order_number || `#${order.id}`}.`,
+      data: {
+        orderId: order.id,
+        status: 'cancelled',
+      },
+    });
+
+    const facilityOwnerId = await getFacilityOwnerId(order.pharmacy_id);
+    if (facilityOwnerId) {
+      await createNotification({
+        userId: facilityOwnerId,
+        type: 'order',
+        title: 'Order cancelled by customer',
+        message: `Order ${order.order_number || `#${order.id}`} was cancelled by the customer.`,
+        data: {
+          orderId: order.id,
+          status: 'cancelled',
+          patientId: userId,
+        },
+      });
+    }
+
     res.json({ success: true, message: 'Order cancelled successfully' });
   } catch (error) {
     console.error('Error cancelling order:', error);

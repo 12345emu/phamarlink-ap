@@ -9,7 +9,9 @@ import {
   Switch,
   Image,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../context/AuthContext';
@@ -20,12 +22,16 @@ import NotificationsSettingsModal from '../notifications-settings-modal';
 import HelpFAQModal from '../help-faq-modal';
 import ContactSupportModal from '../contact-support-modal';
 import AboutPharmaLinkModal from '../about-pharmalink-modal';
+import FacilityAdminEditProfileModal from '../facility-admin-edit-profile-modal';
 import { getSafeProfileImageUrl } from '../../utils/imageUtils';
 import { facilitiesService } from '../../services/facilitiesService';
+import { professionalsService } from '../../services/professionalsService';
+import { validateProfileImage } from '../../utils/imageValidation';
+import { notificationSettingsService } from '../../services/notificationSettingsService';
 
 export default function FacilityAdminProfile() {
   const { user, logout } = useAuth();
-  const { profileImage, refreshProfileImage, setProfileImageUpdateCallback } = useProfile();
+  const { profileImage, updateProfileImage, refreshProfileImage, setProfileImageUpdateCallback } = useProfile();
   const router = useRouter();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -38,10 +44,26 @@ export default function FacilityAdminProfile() {
   const [forceImageRefresh, setForceImageRefresh] = useState(0);
   const [facilitiesCount, setFacilitiesCount] = useState(0);
   const [loadingFacilities, setLoadingFacilities] = useState(false);
+  const [staffCount, setStaffCount] = useState(0);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   useEffect(() => {
     loadFacilitiesCount();
+    loadStaffCount();
+    loadNotificationSettings();
   }, []);
+
+  const loadNotificationSettings = async () => {
+    try {
+      const response = await notificationSettingsService.getPreferences();
+      if (response.success && response.data) {
+        setNotificationsEnabled(response.data.pushNotifications);
+      }
+    } catch (error) {
+      console.error('Error loading notification settings:', error);
+    }
+  };
 
   const loadFacilitiesCount = async () => {
     try {
@@ -54,6 +76,54 @@ export default function FacilityAdminProfile() {
       console.error('Error loading facilities count:', error);
     } finally {
       setLoadingFacilities(false);
+    }
+  };
+
+  const loadStaffCount = async () => {
+    try {
+      setLoadingStaff(true);
+      // First get all facilities
+      const facilitiesResponse = await facilitiesService.getMyFacilities();
+      if (!facilitiesResponse.success || !facilitiesResponse.data || facilitiesResponse.data.length === 0) {
+        setStaffCount(0);
+        return;
+      }
+
+      // Get staff from all facilities
+      const staffPromises = facilitiesResponse.data.map((facility: any) =>
+        professionalsService.getProfessionalsByFacility(facility.id, 100, true)
+      );
+
+      const staffResponses = await Promise.all(staffPromises);
+      
+      // Count unique staff members across all facilities
+      const uniqueStaffIds = new Set<number>();
+      
+      staffResponses.forEach((response) => {
+        if (response.success && response.data) {
+          const data = response.data as any;
+          const professionals = Array.isArray(data.professionals)
+            ? data.professionals
+            : Array.isArray(data?.data?.professionals)
+              ? data.data.professionals
+              : [];
+          
+          professionals.forEach((professional: any) => {
+            if (professional.user_id) {
+              uniqueStaffIds.add(professional.user_id);
+            } else if (professional.id) {
+              uniqueStaffIds.add(professional.id);
+            }
+          });
+        }
+      });
+
+      setStaffCount(uniqueStaffIds.size);
+    } catch (error) {
+      console.error('Error loading staff count:', error);
+      setStaffCount(0);
+    } finally {
+      setLoadingStaff(false);
     }
   };
 
@@ -97,32 +167,161 @@ export default function FacilityAdminProfile() {
     );
   };
 
-  const handleNotificationsToggle = () => {
+  const handleNotificationsToggle = async () => {
     if (notificationsEnabled) {
       Alert.alert(
         'Disable Notifications',
-        'Are you sure you want to disable all notifications? You can customize specific notification types in the settings.',
+        'Are you sure you want to disable all push notifications? You can customize specific notification types in the settings.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Disable',
             style: 'destructive',
-            onPress: () => setNotificationsEnabled(false)
+            onPress: async () => {
+              // Get current preferences and update push notifications
+              const currentPrefs = await notificationSettingsService.getPreferences();
+              if (currentPrefs.success && currentPrefs.data) {
+                const updatedPrefs = {
+                  ...currentPrefs.data,
+                  pushNotifications: false,
+                };
+                await notificationSettingsService.updatePreferences(updatedPrefs);
+                setNotificationsEnabled(false);
+              } else {
+                setNotificationsEnabled(false);
+              }
+            }
           }
         ]
       );
     } else {
-      setNotificationsEnabled(true);
+      // Get current preferences and update push notifications
+      const currentPrefs = await notificationSettingsService.getPreferences();
+      if (currentPrefs.success && currentPrefs.data) {
+        const updatedPrefs = {
+          ...currentPrefs.data,
+          pushNotifications: true,
+        };
+        await notificationSettingsService.updatePreferences(updatedPrefs);
+        setNotificationsEnabled(true);
+      } else {
+        setNotificationsEnabled(true);
+      }
     }
   };
 
   const handleEditProfile = () => {
-    // TODO: Create facility-admin edit profile modal
-    Alert.alert(
-      'Edit Profile',
-      'Profile editing feature coming soon. You can update your profile information here.',
-      [{ text: 'OK' }]
-    );
+    setEditModalVisible(true);
+  };
+
+  const handleProfileUpdated = () => {
+    // Refresh profile image if needed
+    refreshProfileImage();
+    // Reload facilities count in case it changed
+    loadFacilitiesCount();
+    // Reload staff count in case it changed
+    loadStaffCount();
+    // Reload notification settings in case they changed
+    loadNotificationSettings();
+  };
+
+  const requestImagePermission = async (source: 'camera' | 'library') => {
+    const permission =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (permission.status !== 'granted') {
+      Alert.alert(
+        'Permission Required',
+        `Please allow ${
+          source === 'camera' ? 'camera' : 'photo library'
+        } access to update your profile picture.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              if (Linking.openSettings) {
+                Linking.openSettings();
+              }
+            },
+          },
+        ]
+      );
+      return false;
+    }
+
+    return true;
+  };
+
+  const pickImage = async (source: 'camera' | 'library') => {
+    try {
+      setIsUploadingImage(true);
+
+      const hasPermission = await requestImagePermission(source);
+      if (!hasPermission) {
+        return;
+      }
+
+      const baseOptions: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+        exif: false,
+      };
+
+      const result =
+        source === 'camera'
+          ? await ImagePicker.launchCameraAsync({
+              ...baseOptions,
+              cameraType: ImagePicker.CameraType.front,
+            })
+          : await ImagePicker.launchImageLibraryAsync(baseOptions);
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      const validation = validateProfileImage(asset, {
+        maxFileSize: 8 * 1024 * 1024,
+        maxDimensions: 6144,
+        strictDimensions: false,
+        strictFormat: false,
+      });
+
+      if (!validation.isValid) {
+        Alert.alert('Invalid Image', validation.errors.join('\n'));
+        return;
+      }
+
+      if (validation.warnings.length > 0) {
+        console.log('⚠️ Profile image warnings:', validation.warnings);
+      }
+
+      await updateProfileImage(asset.uri);
+      Alert.alert('Success', 'Profile picture updated successfully.');
+    } catch (error) {
+      console.error('Error updating profile image:', error);
+      Alert.alert('Error', 'Failed to update profile picture. Please try again.');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleProfileImagePress = () => {
+    if (isUploadingImage) {
+      return;
+    }
+
+    Alert.alert('Update Profile Picture', 'Choose an option', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Take Photo', onPress: () => pickImage('camera') },
+      { text: 'Choose from Gallery', onPress: () => pickImage('library') },
+    ]);
   };
 
   const getProfileImageUrl = () => {
@@ -146,8 +345,9 @@ export default function FacilityAdminProfile() {
         <View style={styles.profileSection}>
           <TouchableOpacity
             style={styles.profileImageContainer}
-            onPress={handleEditProfile}
+            onPress={handleProfileImagePress}
             activeOpacity={0.8}
+            disabled={isUploadingImage}
           >
             {getProfileImageUrl() ? (
               <Image
@@ -162,6 +362,11 @@ export default function FacilityAdminProfile() {
             ) : (
               <View style={styles.profileImagePlaceholder}>
                 <FontAwesome name="building" size={40} color="#9b59b6" />
+              </View>
+            )}
+            {isUploadingImage && (
+              <View style={styles.imageUploadOverlay}>
+                <ActivityIndicator size="small" color="#fff" />
               </View>
             )}
             <View style={styles.editImageBadge}>
@@ -188,7 +393,9 @@ export default function FacilityAdminProfile() {
         </View>
         <View style={styles.statCard}>
           <FontAwesome name="users" size={24} color="#3498db" />
-          <Text style={styles.statValue}>-</Text>
+          <Text style={styles.statValue}>
+            {loadingStaff ? '...' : staffCount}
+          </Text>
           <Text style={styles.statLabel}>Staff</Text>
         </View>
         <View style={styles.statCard}>
@@ -387,6 +594,12 @@ export default function FacilityAdminProfile() {
         visible={aboutPharmaLinkModalVisible}
         onClose={() => setAboutPharmaLinkModalVisible(false)}
       />
+
+      <FacilityAdminEditProfileModal
+        visible={editModalVisible}
+        onClose={() => setEditModalVisible(false)}
+        onProfileUpdated={handleProfileUpdated}
+      />
     </ScrollView>
   );
 }
@@ -428,6 +641,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 4,
     borderColor: '#fff',
+  },
+  imageUploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderRadius: 50,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   editImageBadge: {
     position: 'absolute',

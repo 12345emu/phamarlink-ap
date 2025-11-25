@@ -256,11 +256,11 @@ class ProfessionalsService {
   }
 
   // Get professionals by facility ID
-  async getProfessionalsByFacility(facilityId: string | number, limit?: number): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
+  async getProfessionalsByFacility(facilityId: string | number, limit?: number, includeAll: boolean = false): Promise<ApiResponse<{ professionals: HealthcareProfessional[]; pagination: any }>> {
     try {
       const queryParams = new URLSearchParams();
-      queryParams.append('facility_id', facilityId.toString());
       if (limit) queryParams.append('limit', limit.toString());
+      if (includeAll) queryParams.append('includeAll', 'true');
 
       const url = `${API_ENDPOINTS.PROFESSIONALS.BASE}/facility/${facilityId}?${queryParams.toString()}`;
       const response = await apiClient.get(url);
@@ -318,6 +318,137 @@ class ProfessionalsService {
 
   formatRating(rating: number): string {
     return rating ? rating.toFixed(1) : 'No rating';
+  }
+
+  // Update professional
+  async updateProfessional(id: number, updateData: Partial<HealthcareProfessional>, profileImage?: string): Promise<ApiResponse<HealthcareProfessional>> {
+    try {
+      const formData = new FormData();
+      
+      // Append text fields
+      if (updateData.first_name) formData.append('firstName', updateData.first_name);
+      if (updateData.last_name) formData.append('lastName', updateData.last_name);
+      if (updateData.email) formData.append('email', updateData.email);
+      if (updateData.phone) formData.append('phone', updateData.phone);
+      if (updateData.address) formData.append('address', updateData.address);
+      if (updateData.city) formData.append('city', updateData.city);
+      if (updateData.specialty) formData.append('specialty', updateData.specialty);
+      if (updateData.license_number) formData.append('licenseNumber', updateData.license_number);
+      if (updateData.qualification) formData.append('qualification', updateData.qualification);
+      if (updateData.experience_years !== undefined) formData.append('experienceYears', updateData.experience_years.toString());
+      if (updateData.bio !== undefined) formData.append('bio', updateData.bio);
+      if (updateData.is_verified !== undefined) formData.append('isVerified', updateData.is_verified.toString());
+      if (updateData.is_available !== undefined) formData.append('isAvailable', updateData.is_available.toString());
+      
+      // Append image if provided
+      if (profileImage) {
+        const uriParts = profileImage.split('.');
+        const fileType = uriParts[uriParts.length - 1];
+        formData.append('profileImage', {
+          uri: profileImage,
+          name: `profile.${fileType}`,
+          type: `image/${fileType}`,
+        } as any);
+      }
+
+      const response = await apiClient.put(`${API_ENDPOINTS.PROFESSIONALS.BASE}/${id}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (response && response.data && typeof response.data === 'object') {
+        if ('success' in response.data) {
+          const responseData = response.data as ApiResponse<HealthcareProfessional>;
+          // Process profile image URL
+          if (responseData.data && responseData.data.profile_image) {
+            responseData.data.profile_image = responseData.data.profile_image.startsWith('http')
+              ? responseData.data.profile_image
+              : `${STATIC_BASE_URL}${responseData.data.profile_image}`;
+          }
+          return responseData;
+        } else {
+          const professional = response.data as HealthcareProfessional;
+          if (professional.profile_image) {
+            professional.profile_image = professional.profile_image.startsWith('http')
+              ? professional.profile_image
+              : `${STATIC_BASE_URL}${professional.profile_image}`;
+          }
+          return {
+            success: true,
+            data: professional
+          };
+        }
+      } else {
+        return {
+          success: false,
+          message: 'Invalid response from server',
+          error: 'Invalid Response',
+        };
+      }
+    } catch (error: any) {
+      console.error('Update professional error:', error);
+      
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        return {
+          success: false,
+          message: data?.message || `HTTP ${status} error`,
+          error: 'Network Error',
+        };
+      }
+      
+      return {
+        success: false,
+        message: 'Failed to update professional.',
+        error: 'Unknown Error',
+      };
+    }
+  }
+
+  // Delete professional
+  async deleteProfessional(id: number): Promise<ApiResponse<void>> {
+    try {
+      const response = await apiClient.delete(`${API_ENDPOINTS.PROFESSIONALS.BASE}/${id}`);
+      
+      if (response && response.data && typeof response.data === 'object') {
+        if ('success' in response.data) {
+          return response.data as ApiResponse<void>;
+        } else {
+          return {
+            success: true,
+            data: undefined
+          };
+        }
+      } else {
+        return {
+          success: false,
+          message: 'Invalid response from server',
+          error: 'Invalid Response',
+        };
+      }
+    } catch (error: any) {
+      console.error('Delete professional error:', error);
+      
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        return {
+          success: false,
+          message: data?.message || `HTTP ${status} error`,
+          error: 'Network Error',
+        };
+      }
+      
+      return {
+        success: false,
+        message: 'Failed to delete professional.',
+        error: 'Unknown Error',
+      };
+    }
   }
 }
 

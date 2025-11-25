@@ -6,6 +6,7 @@ const fs = require('fs');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { executeQuery } = require('../config/database');
 const pushNotificationService = require('../services/pushNotificationService');
+const { createNotification } = require('../utils/notificationHelper');
 
 const router = express.Router();
 
@@ -427,6 +428,17 @@ router.post('/doctor-conversations', authenticateToken, requireRole(['doctor', '
       }
       
       console.log('✅ New doctor conversation created:', conversationId);
+
+      await createNotification({
+        userId: doctorId,
+        type: 'chat',
+        title: 'New conversation started',
+        message: subject || 'You have a new chat conversation.',
+        data: {
+          conversationId,
+          patientId: patient_id,
+        },
+      });
       
       res.json({
         success: true,
@@ -550,6 +562,17 @@ router.post('/conversations/:id/messages', authenticateToken, [
           .catch(error => {
             console.error('❌ Chat API - Error sending push notification:', error);
           });
+
+        await createNotification({
+          userId: recipientId,
+          type: 'chat',
+          title: `New message from ${senderName}`,
+          message: notificationMessage.slice(0, 200),
+          data: {
+            conversationId: parseInt(id, 10),
+            senderId: userId,
+          },
+        });
       }
     }
     

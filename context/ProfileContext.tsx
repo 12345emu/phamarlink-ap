@@ -119,18 +119,57 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
   // Note: Profile image is also loaded by AuthContext when user logs in
   // This provides a fallback and ensures consistency
 
+  const persistProfileImage = async (imageUrl: string) => {
+    console.log('🔍 ProfileContext - Persisting profile image URL:', imageUrl);
+    setProfileImage(imageUrl);
+    await AsyncStorage.setItem('profileImage', imageUrl);
+    
+    try {
+      const storedUser = await AsyncStorage.getItem('userData');
+      if (storedUser) {
+        const parsedUser = JSON.parse(storedUser);
+        const updatedUser = { ...parsedUser, profileImage: imageUrl };
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+      }
+    } catch (persistError) {
+      console.error('⚠️ ProfileContext - Failed to persist profile image to user data:', persistError);
+    }
+  };
+
   const updateProfileImage = async (imageUri: string) => {
     try {
       console.log('🔍 ProfileContext - updateProfileImage called with:', imageUri);
       console.log('🔍 ProfileContext - Current profileImage state:', profileImage);
+
+      const extractProfileUrl = (data: any): string | null => {
+        if (!data) return null;
+        if (typeof data === 'string') return data;
+        if (data.profileImage) return data.profileImage;
+        if (data.user?.profileImage) return data.user.profileImage;
+        if (data.data) return extractProfileUrl(data.data);
+        return null;
+      };
       
-      // If imageUri is already a full URL (from login), just store it directly
-      if (imageUri.startsWith('http')) {
-        console.log('🔍 ProfileContext - ImageUri is already a full URL, storing directly:', imageUri);
-        setProfileImage(imageUri);
-        await AsyncStorage.setItem('profileImage', imageUri);
-        console.log('✅ ProfileContext - Stored full URL directly:', imageUri);
+      const isRemoteAsset = imageUri.startsWith('http');
+      const isServerPath = imageUri.startsWith('/uploads/');
+      const isLocalFile = imageUri.startsWith('file://');
+      
+      if (isRemoteAsset || isServerPath) {
+        const normalizedUrl = isRemoteAsset ? imageUri : (constructProfileImageUrl(imageUri) || imageUri);
+        if (!normalizedUrl) {
+          throw new Error('Invalid image URL provided');
+        }
+        console.log('🔍 ProfileContext - ImageUri already points to server asset, storing directly:', normalizedUrl);
+        await persistProfileImage(normalizedUrl);
+        
+        if (profileImageUpdateCallback) {
+          profileImageUpdateCallback();
+        }
         return;
+      }
+      
+      if (!isLocalFile) {
+        throw new Error('Invalid image source');
       }
       
       // Upload image to backend (for new uploads)
@@ -144,7 +183,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
       }
       
       // Get the uploaded image URL from backend response
-      const uploadedImageUrl = result.data?.profileImage || result.data?.user?.profileImage;
+      const uploadedImageUrl = extractProfileUrl(result.data);
       console.log('🔍 ProfileContext - Backend response data:', result.data);
       console.log('🔍 ProfileContext - Extracted uploadedImageUrl:', uploadedImageUrl);
       console.log('🔍 ProfileContext - ImageUri (original):', imageUri);
@@ -155,22 +194,26 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
         throw new Error('Backend did not return a valid image URL');
       }
       
+      const normalizedUploadedUrl = uploadedImageUrl as string;
+      
       // Check if the backend returned a valid path (starts with /uploads/)
-      if (uploadedImageUrl.startsWith('/uploads/')) {
-        console.log('✅ ProfileContext - Backend returned valid upload path:', uploadedImageUrl);
+      if (normalizedUploadedUrl.startsWith('/uploads/')) {
+        console.log('✅ ProfileContext - Backend returned valid upload path:', normalizedUploadedUrl);
+      } else if (normalizedUploadedUrl.startsWith('http')) {
+        console.log('✅ ProfileContext - Backend returned absolute URL:', normalizedUploadedUrl);
       } else {
-        console.warn('⚠️ ProfileContext - Backend returned unexpected URL format:', uploadedImageUrl);
+        console.warn('⚠️ ProfileContext - Backend returned unexpected URL format:', normalizedUploadedUrl);
       }
       
-      const fullImageUrl = constructProfileImageUrl(uploadedImageUrl);
-      console.log('🔍 ProfileContext - Backend uploaded URL:', fullImageUrl);
+      const constructedUrl = constructProfileImageUrl(normalizedUploadedUrl);
+      const finalUrl = constructedUrl || normalizedUploadedUrl;
+      console.log('🔍 ProfileContext - Backend uploaded URL:', finalUrl);
       
-      console.log('🔍 ProfileContext - About to set profileImage to:', fullImageUrl);
-      setProfileImage(fullImageUrl);
-      await AsyncStorage.setItem('profileImage', fullImageUrl);
+      console.log('🔍 ProfileContext - About to set profileImage to:', finalUrl);
+      await persistProfileImage(finalUrl);
       console.log('✅ ProfileContext - Profile image uploaded to backend and stored locally');
-      console.log('✅ ProfileContext - Updated profileImage state to:', fullImageUrl);
-      console.log('✅ ProfileContext - Stored in AsyncStorage as:', fullImageUrl);
+      console.log('✅ ProfileContext - Updated profileImage state to:', finalUrl);
+      console.log('✅ ProfileContext - Stored in AsyncStorage as:', finalUrl);
       
       // Call the callback to notify components of the update
       if (profileImageUpdateCallback) {
@@ -182,26 +225,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     } catch (error) {
       console.error('❌ Error uploading profile image to backend:', error);
       console.error('❌ Error details:', error);
-      
-      // Fallback to local storage if backend upload fails
-      // For local file URIs, don't try to construct a network URL
-      if (imageUri.startsWith('file://')) {
-        console.log('🔍 ProfileContext - Fallback: Setting profileImage to file URI:', imageUri);
-        setProfileImage(imageUri);
-        await AsyncStorage.setItem('profileImage', imageUri);
-        console.log('⚠️ ProfileContext - Fallback to local storage with file URI:', imageUri);
-        console.log('⚠️ ProfileContext - Updated profileImage state to:', imageUri);
-      } else {
-        const fullImageUrl = constructProfileImageUrl(imageUri);
-        console.log('🔍 ProfileContext - Fallback: Setting profileImage to constructed URL:', fullImageUrl);
-        setProfileImage(fullImageUrl);
-        await AsyncStorage.setItem('profileImage', fullImageUrl);
-        console.log('⚠️ ProfileContext - Fallback to local storage with constructed URL:', fullImageUrl);
-        console.log('⚠️ ProfileContext - Updated profileImage state to:', fullImageUrl);
-      }
-      
-      // You might want to show an alert to the user about the fallback
-      // Alert.alert('Upload Failed', 'Image saved locally. Upload failed.');
+      throw error;
     }
   };
 

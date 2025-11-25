@@ -13,7 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../context/AuthContext';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { facilitiesService } from '../../services/facilitiesService';
 import { useOrders } from '../../context/OrdersContext';
 
@@ -24,6 +24,31 @@ interface FacilityStats {
   activeOrders: number;
   pendingOrders: number;
   totalRevenue: number;
+}
+
+type QuickAction = {
+  title: string;
+  subtitle: string;
+  icon: keyof typeof FontAwesome.glyphMap;
+  iconBackground: string;
+  iconColor: string;
+  href: Href;
+  mode: 'tab' | 'stack';
+};
+
+type ActivityType = 'order' | 'facility';
+
+interface ActivityItem {
+  id: string;
+  type: ActivityType;
+  title: string;
+  description: string;
+  timestamp: string;
+  iconBackground: string;
+  iconColor: string;
+  icon: keyof typeof FontAwesome.glyphMap;
+  href: Href;
+  mode: 'tab' | 'stack';
 }
 
 export default function FacilityDashboard() {
@@ -40,6 +65,54 @@ export default function FacilityDashboard() {
   });
   const [myFacilities, setMyFacilities] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [recentActivities, setRecentActivities] = useState<ActivityItem[]>([]);
+  const quickActions = [
+    {
+      title: 'Facilities',
+      subtitle: 'Add or update',
+      icon: 'hospital-o',
+      iconBackground: '#f1e4ff',
+      iconColor: '#8e44ad',
+      href: '/(facility-tabs)/facilities',
+      mode: 'tab',
+    },
+    {
+      title: 'Orders',
+      subtitle: 'Track status',
+      icon: 'list',
+      iconBackground: '#e6f2ff',
+      iconColor: '#2980b9',
+      href: '/(facility-tabs)/orders',
+      mode: 'tab',
+    },
+    {
+      title: 'Messages',
+      subtitle: 'Chat with staff',
+      icon: 'comments',
+      iconBackground: '#e4fbf5',
+      iconColor: '#16a085',
+      href: '/(facility-tabs)/chat',
+      mode: 'tab',
+    },
+    {
+      title: 'Notifications',
+      subtitle: 'Alerts & updates',
+      icon: 'bell',
+      iconBackground: '#fff2e0',
+      iconColor: '#d35400',
+      href: '/(facility-tabs)/notifications',
+      mode: 'tab',
+    },
+    {
+      title: 'Add Facility',
+      subtitle: 'Register new',
+      icon: 'plus',
+      iconBackground: '#ffe7e7',
+      iconColor: '#c0392b',
+      href: '/pharmacy-registration',
+      mode: 'stack',
+    },
+  ] satisfies QuickAction[];
 
   useEffect(() => {
     loadDashboardData();
@@ -49,6 +122,10 @@ export default function FacilityDashboard() {
   useEffect(() => {
     calculateStats();
   }, [orders]);
+
+  useEffect(() => {
+    buildRecentActivities();
+  }, [orders, myFacilities]);
 
   const calculateStats = () => {
     if (!orders || orders.length === 0) {
@@ -108,10 +185,79 @@ export default function FacilityDashboard() {
     }
   };
 
+  const buildRecentActivities = () => {
+    const activities: ActivityItem[] = [];
+
+    if (orders && orders.length > 0) {
+      orders.slice(0, 5).forEach((order) => {
+        activities.push({
+          id: `order-${order.id}`,
+          type: 'order',
+          title: `Order ${order.order_number || order.id}`,
+          description: `Status: ${formatStatus(order.status)}`,
+          timestamp: order.updated_at || order.created_at,
+          iconBackground: '#e8f1ff',
+          iconColor: '#2980b9',
+          icon: 'shopping-cart',
+          href: '/(facility-tabs)/orders',
+          mode: 'tab',
+        });
+      });
+    }
+
+    if (myFacilities && myFacilities.length > 0) {
+      myFacilities.slice(0, 5).forEach((facility) => {
+        activities.push({
+          id: `facility-${facility.id}`,
+          type: 'facility',
+          title: facility.name,
+          description: `Facility • ${formatStatus(facility.facility_type)}`,
+          timestamp: facility.updated_at || facility.created_at || new Date().toISOString(),
+          iconBackground: '#f3e5f5',
+          iconColor: '#8e44ad',
+          icon: 'building',
+          href: '/(facility-tabs)/facilities',
+          mode: 'tab',
+        });
+      });
+    }
+
+    activities.sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      return timeB - timeA;
+    });
+
+    setRecentActivities(activities.slice(0, 6));
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([loadDashboardData(), refreshOrders()]);
     setRefreshing(false);
+  };
+
+  const formatStatus = (status?: string) => {
+    if (!status) return 'Unknown';
+    return status.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
+  const formatTimeAgo = (timestamp: string) => {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
+      return 'Just now';
+    }
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
   if (loading && !refreshing) {
@@ -126,6 +272,7 @@ export default function FacilityDashboard() {
   return (
     <ScrollView
       style={styles.container}
+      contentContainerStyle={styles.scrollContent}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       {/* Header */}
@@ -177,33 +324,48 @@ export default function FacilityDashboard() {
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionsGrid}>
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => router.push('/(facility-tabs)/facilities')}
-          >
-            <LinearGradient
-              colors={['#9b59b6', '#8e44ad']}
-              style={styles.actionGradient}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.actionsRow}
+        >
+          {quickActions.map((action, index) => (
+            <TouchableOpacity
+              key={action.title}
+              style={[
+                styles.actionCard,
+                index === quickActions.length - 1 && { marginRight: 20 },
+              ]}
+              onPress={() => {
+                if (action.mode === 'tab') {
+                  router.navigate(action.href);
+                } else {
+                  router.push(action.href);
+                }
+              }}
+              activeOpacity={0.9}
             >
-              <FontAwesome name="hospital-o" size={32} color="#fff" />
-              <Text style={styles.actionText}>Manage Facilities</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => router.push('/(facility-tabs)/orders')}
-          >
-            <LinearGradient
-              colors={['#3498db', '#2980b9']}
-              style={styles.actionGradient}
-            >
-              <FontAwesome name="list" size={32} color="#fff" />
-              <Text style={styles.actionText}>View Orders</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+              <View
+                style={[
+                  styles.actionIconContainer,
+                  { backgroundColor: action.iconBackground },
+                ]}
+              >
+                <FontAwesome
+                  name={action.icon}
+                  size={20}
+                  color={action.iconColor}
+                />
+              </View>
+              <Text style={styles.actionTitle}>{action.title}</Text>
+              <Text style={styles.actionSubtitle}>{action.subtitle}</Text>
+              <View style={styles.actionBadge}>
+                <Text style={styles.actionBadgeText}>Open</Text>
+                <FontAwesome name="chevron-right" size={10} color="#6c5ce7" />
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       {/* My Facilities */}
@@ -256,6 +418,45 @@ export default function FacilityDashboard() {
         )}
       </View>
 
+      {/* Recent Activity */}
+      {recentActivities.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <View style={styles.activityList}>
+            {recentActivities.map((activity) => (
+              <TouchableOpacity
+                key={activity.id}
+                style={styles.activityCard}
+                onPress={() => {
+                  if (activity.mode === 'tab') {
+                    router.navigate(activity.href);
+                  } else {
+                    router.push(activity.href);
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <View
+                  style={[
+                    styles.activityIcon,
+                    { backgroundColor: activity.iconBackground },
+                  ]}
+                >
+                  <FontAwesome name={activity.icon} size={18} color={activity.iconColor} />
+                </View>
+                <View style={styles.activityContent}>
+                  <View style={styles.activityHeader}>
+                    <Text style={styles.activityTitle}>{activity.title}</Text>
+                    <Text style={styles.activityTime}>{formatTimeAgo(activity.timestamp)}</Text>
+                  </View>
+                  <Text style={styles.activityDescription}>{activity.description}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
@@ -269,6 +470,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  scrollContent: {
+    paddingBottom: 110,
   },
   centerContainer: {
     flex: 1,
@@ -367,32 +571,99 @@ const styles = StyleSheet.create({
     color: '#9b59b6',
     fontWeight: '600',
   },
-  actionsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
   actionCard: {
-    flex: 1,
+    width: 150,
+    padding: 14,
+    marginRight: 12,
     borderRadius: 16,
-    overflow: 'hidden',
+    backgroundColor: '#fff',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
     elevation: 3,
   },
-  actionGradient: {
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 120,
+  actionsRow: {
+    paddingVertical: 4,
+    paddingRight: 20,
   },
-  actionText: {
-    color: '#fff',
-    fontSize: 14,
+  actionIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  actionTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    marginTop: 12,
-    textAlign: 'center',
+    color: '#2c3e50',
+  },
+  actionSubtitle: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  actionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#f2ecff',
+  },
+  actionBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6c5ce7',
+  },
+  activityList: {
+    gap: 12,
+  },
+  activityCard: {
+    flexDirection: 'row',
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  activityIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  activityTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  activityTime: {
+    fontSize: 12,
+    color: '#95a5a6',
+  },
+  activityDescription: {
+    fontSize: 13,
+    color: '#7f8c8d',
   },
   emptyState: {
     alignItems: 'center',

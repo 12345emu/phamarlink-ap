@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, View, Text, Dimensions, Alert, Platform, Image } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, View, Text, Dimensions, Alert, Platform, Image, ImageBackground } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -365,40 +365,68 @@ export default function MedicineDetailsScreen() {
       <StatusBar style="light" />
       
       {/* Header */}
-      <LinearGradient
-        colors={[ACCENT, '#2980b9']}
-        style={styles.header}
-      >
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.back()}
+      {medicine.image ? (
+        <ImageBackground
+          source={{ uri: medicine.image }}
+          style={styles.header}
+          imageStyle={styles.headerImage}
+          resizeMode="cover"
         >
-          <FontAwesome name="arrow-left" size={20} color="#fff" />
-        </TouchableOpacity>
-        
-        <View style={styles.headerContent}>
-          <View style={styles.medicineIcon}>
-            <FontAwesome name={getCategoryIcon(medicine.category) as any} size={32} color="#fff" />
+          <LinearGradient
+            colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.4)']}
+            style={styles.headerOverlay}
+          >
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => router.back()}
+            >
+              <FontAwesome name="arrow-left" size={20} color="#fff" />
+            </TouchableOpacity>
+            
+            <View style={styles.headerContent}>
+              <View style={styles.medicineIcon}>
+                <FontAwesome name={getCategoryIcon(medicine.category) as any} size={32} color="#fff" />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.medicineName}>{medicine.name}</Text>
+                <Text style={styles.medicineCategory}>{medicine.category}</Text>
+              </View>
+            </View>
+            
+            <TouchableOpacity style={styles.shareButton}>
+              <FontAwesome name="share" size={20} color="#fff" />
+            </TouchableOpacity>
+          </LinearGradient>
+        </ImageBackground>
+      ) : (
+        <LinearGradient
+          colors={[ACCENT, '#2980b9']}
+          style={styles.header}
+        >
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <FontAwesome name="arrow-left" size={20} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.headerContent}>
+            <View style={styles.medicineIcon}>
+              <FontAwesome name={getCategoryIcon(medicine.category) as any} size={32} color="#fff" />
+            </View>
+            <View style={styles.headerText}>
+              <Text style={styles.medicineName}>{medicine.name}</Text>
+              <Text style={styles.medicineCategory}>{medicine.category}</Text>
+            </View>
           </View>
-          <View style={styles.headerText}>
-            <Text style={styles.medicineName}>{medicine.name}</Text>
-            <Text style={styles.medicineCategory}>{medicine.category}</Text>
-          </View>
-        </View>
-        
-        <TouchableOpacity style={styles.shareButton}>
-          <FontAwesome name="share" size={20} color="#fff" />
-        </TouchableOpacity>
-      </LinearGradient>
+          
+          <TouchableOpacity style={styles.shareButton}>
+            <FontAwesome name="share" size={20} color="#fff" />
+          </TouchableOpacity>
+        </LinearGradient>
+      )}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Medicine Image */}
-        {medicine.image && (
-          <View style={styles.imageContainer}>
-            <Image source={{ uri: medicine.image }} style={styles.medicineImage} />
-          </View>
-        )}
-
         {/* Facility Information (if from facility) */}
         {fromFacility && medicine.facility_name && (
           <View style={styles.facilitySection}>
@@ -635,7 +663,24 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingTop: Platform.OS === 'ios' ? 50 : 30,
-    paddingBottom: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    minHeight: Platform.OS === 'ios' ? 160 : 140,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerImage: {
+    opacity: 0.8,
+  },
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    paddingBottom: 30,
     paddingHorizontal: 20,
     flexDirection: 'row',
     alignItems: 'center',

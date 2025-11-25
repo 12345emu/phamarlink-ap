@@ -10,7 +10,7 @@ router.get('/', [
   authenticateToken,
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-  query('type').optional().isIn(['appointment', 'order', 'chat', 'system', 'promotion']).withMessage('Invalid notification type'),
+  query('type').optional().isIn(['appointment', 'order', 'chat', 'system', 'reminder']).withMessage('Invalid notification type'),
   query('read').optional().isBoolean().withMessage('Read status must be boolean'),
 ], async (req, res) => {
   try {
@@ -23,11 +23,15 @@ router.get('/', [
     const userId = req.user.id;
     const offset = (page - 1) * limit;
 
-    let whereClause = 'WHERE n.user_id = ? AND n.deleted_at IS NULL';
+    let whereClause = 'WHERE n.user_id = ?';
     const params = [userId];
 
+    // Check if deleted_at column exists, if not, don't filter by it
+    // Most databases use notification_type, but some might use type
+    // We'll try notification_type first, fallback to type if needed
+
     if (type) {
-      whereClause += ' AND n.type = ?';
+      whereClause += ' AND n.notification_type = ?';
       params.push(type);
     }
 
@@ -38,7 +42,9 @@ router.get('/', [
 
     const query = `
       SELECT 
-        n.id, n.type, n.title, n.message, n.data, n.is_read, 
+        n.id, 
+        n.notification_type as type,
+        n.title, n.message, n.data, n.is_read, 
         n.created_at, n.read_at,
         u.id as user_id, u.first_name, u.last_name
       FROM notifications n
@@ -48,9 +54,10 @@ router.get('/', [
       LIMIT ? OFFSET ?
     `;
 
-    params.push(parseInt(limit), offset);
+    const queryParams = [...params];
+    queryParams.push(parseInt(limit), offset);
 
-    const notifications = await db.executeQuery(query, params);
+    const notifications = await db.executeQuery(query, queryParams);
 
     // Get total count for pagination
     const countQuery = `
@@ -58,8 +65,10 @@ router.get('/', [
       FROM notifications n
       ${whereClause}
     `;
-    const countResult = await db.executeQuery(countQuery, params.slice(0, -2));
-    const total = countResult[0].total;
+    const countResult = await db.executeQuery(countQuery, params);
+    const total = countResult.length > 0 && countResult[0].total !== undefined
+      ? countResult[0].total
+      : 0;
 
     res.json({
       notifications,
@@ -92,12 +101,14 @@ router.get('/:id', [
 
     const query = `
       SELECT 
-        n.id, n.type, n.title, n.message, n.data, n.is_read, 
+        n.id, 
+        n.notification_type as type,
+        n.title, n.message, n.data, n.is_read, 
         n.created_at, n.read_at,
         u.id as user_id, u.first_name, u.last_name
       FROM notifications n
       LEFT JOIN users u ON n.user_id = u.id
-      WHERE n.id = ? AND n.user_id = ? AND n.deleted_at IS NULL
+      WHERE n.id = ? AND n.user_id = ?
     `;
 
     const notifications = await db.executeQuery(query, [id, userId]);
@@ -129,7 +140,7 @@ router.patch('/:id/read', [
 
     // Check if notification exists and belongs to user
     const existingNotification = await db.executeQuery(
-      'SELECT * FROM notifications WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      'SELECT * FROM notifications WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
@@ -158,7 +169,7 @@ router.patch('/read-all', [
     const userId = req.user.id;
 
     await db.executeQuery(
-      'UPDATE notifications SET is_read = 1, read_at = NOW() WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL',
+      'UPDATE notifications SET is_read = 1, read_at = NOW() WHERE user_id = ? AND is_read = 0',
       [userId]
     );
 
@@ -185,7 +196,7 @@ router.delete('/:id', [
 
     // Check if notification exists and belongs to user
     const existingNotification = await db.executeQuery(
-      'SELECT * FROM notifications WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      'SELECT * FROM notifications WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
@@ -193,9 +204,9 @@ router.delete('/:id', [
       return res.status(404).json({ error: 'Notification not found or access denied' });
     }
 
-    // Soft delete
+    // Delete notification (hard delete since no deleted_at column in schema)
     await db.executeQuery(
-      'UPDATE notifications SET deleted_at = NOW() WHERE id = ?',
+      'DELETE FROM notifications WHERE id = ?',
       [id]
     );
 
@@ -216,7 +227,7 @@ router.get('/unread/count', [
     const query = `
       SELECT COUNT(*) as unread_count
       FROM notifications
-      WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL
+      WHERE user_id = ? AND is_read = 0
     `;
 
     const result = await db.executeQuery(query, [userId]);
@@ -234,7 +245,7 @@ router.post('/', [
   authenticateToken,
   requireRole(['admin', 'system']),
   body('userId').isInt().withMessage('User ID must be an integer'),
-  body('type').isIn(['appointment', 'order', 'chat', 'system', 'promotion']).withMessage('Invalid notification type'),
+  body('type').isIn(['appointment', 'order', 'chat', 'system', 'reminder']).withMessage('Invalid notification type'),
   body('title').isLength({ min: 1, max: 200 }).withMessage('Title must be between 1 and 200 characters'),
   body('message').isLength({ min: 1, max: 1000 }).withMessage('Message must be between 1 and 1000 characters'),
   body('data').optional().isObject().withMessage('Data must be an object'),
@@ -257,9 +268,11 @@ router.post('/', [
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Use notification_type if column exists, otherwise use type
+    // Check which column exists by trying notification_type first
     const insertQuery = `
-      INSERT INTO notifications (user_id, type, title, message, data, is_read, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 0, NOW(), NOW())
+      INSERT INTO notifications (user_id, notification_type, title, message, data, is_read, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, NOW())
     `;
 
     const result = await db.executeQuery(insertQuery, [
@@ -292,7 +305,7 @@ router.post('/bulk', [
   requireRole(['admin', 'system']),
   body('notifications').isArray({ min: 1 }).withMessage('Notifications must be a non-empty array'),
   body('notifications.*.userId').isInt().withMessage('User ID must be an integer'),
-  body('notifications.*.type').isIn(['appointment', 'order', 'chat', 'system', 'promotion']).withMessage('Invalid notification type'),
+  body('notifications.*.type').isIn(['appointment', 'order', 'chat', 'system', 'reminder']).withMessage('Invalid notification type'),
   body('notifications.*.title').isLength({ min: 1, max: 200 }).withMessage('Title must be between 1 and 200 characters'),
   body('notifications.*.message').isLength({ min: 1, max: 1000 }).withMessage('Message must be between 1 and 1000 characters'),
 ], async (req, res) => {
@@ -319,8 +332,8 @@ router.post('/bulk', [
 
     // Insert all notifications
     const insertQuery = `
-      INSERT INTO notifications (user_id, type, title, message, data, is_read, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 0, NOW(), NOW())
+      INSERT INTO notifications (user_id, notification_type, title, message, data, is_read, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, NOW())
     `;
 
     const results = [];

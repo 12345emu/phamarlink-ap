@@ -141,37 +141,52 @@ class FacilitiesService {
         const facility = response.data;
         
         // Transform backend data to match frontend Facility interface
-        const transformedFacility: Facility = {
+        // Also preserve original fields for facility management
+        const transformedFacility: any = {
           id: facility.id.toString(),
           name: facility.name,
           type: facility.facility_type,
+          facility_type: facility.facility_type, // Preserve original
           description: facility.description || '',
           address: {
             street: facility.address || '',
             city: facility.city || '',
             state: facility.state || '',
-            zipCode: '',
+            zipCode: facility.postal_code || '',
             country: facility.country || 'Ghana',
           },
+          // Preserve original fields for facility management
+          address_original: facility.address || '',
+          city: facility.city || '',
+          state: facility.state || '',
+          postal_code: facility.postal_code || '',
+          country: facility.country || 'Ghana',
           coordinates: {
-            latitude: parseFloat(facility.latitude),
-            longitude: parseFloat(facility.longitude),
+            latitude: parseFloat(facility.latitude) || 0,
+            longitude: parseFloat(facility.longitude) || 0,
           },
+          latitude: facility.latitude,
+          longitude: facility.longitude,
           phone: facility.phone || '',
           email: facility.email || '',
           website: facility.website || '',
           services: facility.services ? (Array.isArray(facility.services) ? facility.services : typeof facility.services === 'string' ? facility.services.split(',').map((s: string) => s.trim()) : []) : [],
           specialties: [],
           rating: parseFloat(facility.rating) || 0,
+          total_reviews: facility.total_reviews || 0,
           reviewCount: parseInt(facility.total_reviews) || 0,
           isOpen: true, // Default to true since we don't have this data from backend
+          is_verified: facility.is_verified || false,
+          is_active: facility.is_active !== false,
           distance: 0,
           images: facility.images || [],
           amenities: [],
           insuranceAccepted: [],
           emergencyServices: false,
           createdAt: facility.created_at || new Date().toISOString(),
+          created_at: facility.created_at,
           updatedAt: facility.updated_at || new Date().toISOString(),
+          updated_at: facility.updated_at,
           operatingHours: {
             monday: { open: '08:00', close: '18:00', isOpen: true },
             tuesday: { open: '08:00', close: '18:00', isOpen: true },
@@ -181,6 +196,13 @@ class FacilitiesService {
             saturday: { open: '09:00', close: '17:00', isOpen: true },
             sunday: { open: '09:00', close: '17:00', isOpen: true },
           },
+          // Preserve original operating_hours for facility management
+          operating_hours: facility.operating_hours || null,
+          // Preserve other fields that might be needed
+          emergency_contact: facility.emergency_contact || null,
+          accepts_insurance: facility.accepts_insurance,
+          has_delivery: facility.has_delivery,
+          has_consultation: facility.has_consultation,
         };
         
         return {
@@ -511,6 +533,66 @@ class FacilitiesService {
         success: false,
         message: 'Failed to fetch your facilities. Please try again.',
         error: 'My Facilities Error',
+      };
+    }
+  }
+
+  // Update facility (for facility-admin users)
+  async updateFacility(facilityId: string, updateData: any, images?: any[]): Promise<ApiResponse<any>> {
+    try {
+      const formData = new FormData();
+      
+      // Append all update fields
+      if (updateData.name) formData.append('name', updateData.name);
+      if (updateData.address) formData.append('address', updateData.address);
+      if (updateData.city) formData.append('city', updateData.city);
+      if (updateData.state !== undefined) formData.append('state', updateData.state || '');
+      if (updateData.postal_code !== undefined) formData.append('postal_code', updateData.postal_code || '');
+      if (updateData.phone) formData.append('phone', updateData.phone);
+      if (updateData.email) formData.append('email', updateData.email);
+      if (updateData.website !== undefined) formData.append('website', updateData.website || '');
+      if (updateData.description !== undefined) formData.append('description', updateData.description || '');
+      if (updateData.emergency_contact !== undefined) formData.append('emergency_contact', updateData.emergency_contact || '');
+      if (updateData.operating_hours) formData.append('operating_hours', JSON.stringify(updateData.operating_hours));
+      if (updateData.services) formData.append('services', JSON.stringify(updateData.services));
+      if (updateData.accepts_insurance !== undefined) formData.append('accepts_insurance', updateData.accepts_insurance.toString());
+      if (updateData.has_delivery !== undefined) formData.append('has_delivery', updateData.has_delivery.toString());
+      if (updateData.has_consultation !== undefined) formData.append('has_consultation', updateData.has_consultation.toString());
+      if (updateData.is_active !== undefined) formData.append('is_active', updateData.is_active.toString());
+
+      // Append images if provided
+      if (images && images.length > 0) {
+        images.forEach((image, index) => {
+          if (image.uri) {
+            const filename = image.uri.split('/').pop() || `image-${index}.jpg`;
+            const match = /\.(\w+)$/.exec(filename);
+            const type = match ? `image/${match[1]}` : 'image/jpeg';
+            formData.append('images', {
+              uri: image.uri,
+              name: filename,
+              type: type,
+            } as any);
+          }
+        });
+      }
+
+      const response = await apiClient.put<any>(
+        API_ENDPOINTS.FACILITIES.UPDATE(facilityId),
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+
+      return response;
+    } catch (error: any) {
+      console.error('Update facility error:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to update facility. Please try again.',
+        error: 'Update Facility Error',
       };
     }
   }

@@ -53,6 +53,7 @@ export const API_ENDPOINTS = {
   FACILITIES: {
     LIST: '/facilities',
     GET_BY_ID: (id: string) => `/facilities/${id}`,
+    UPDATE: (id: string) => `/facilities/${id}`,
     GET_MEDICINES: (id: string) => `/facilities/${id}/medicines`,
     SEARCH_NEARBY: '/facilities/nearby',
     ADD_REVIEW: (id: string) => `/facilities/${id}/reviews`,

@@ -354,7 +354,7 @@ router.get('/specialties/list', async (req, res) => {
 router.get('/facility/:facilityId', async (req, res) => {
   try {
     const { facilityId } = req.params;
-    const { limit = 10 } = req.query;
+    const { limit = 10, includeAll = false } = req.query;
     
     // First check if facility exists
     const facilityResult = await executeQuery(
@@ -371,22 +371,30 @@ router.get('/facility/:facilityId', async (req, res) => {
     
     const facility = facilityResult.data[0];
     
+    // Build WHERE clause - if includeAll is true, don't filter by verification/availability
+    let whereClause = 'WHERE p.facility_id = ?';
+    if (includeAll !== 'true' && includeAll !== true) {
+      whereClause += ' AND p.is_verified = true AND p.is_available = true';
+    }
+    
     const query = `
       SELECT 
         p.id, p.user_id, p.first_name, p.last_name, p.specialty, p.qualification,
-        p.experience_years, p.rating, p.total_reviews, p.is_available,
-        p.profile_image, p.bio, p.facility_id,
+        p.experience_years, p.rating, p.total_reviews, p.is_available, p.is_verified,
+        p.profile_image, p.bio, p.facility_id, p.email, p.phone, p.license_number,
         f.name as facility_name, f.facility_type
       FROM healthcare_professionals p
       LEFT JOIN healthcare_facilities f ON p.facility_id = f.id
-      WHERE p.facility_id = ? 
-      AND p.is_verified = true 
-      AND p.is_available = true
-      ORDER BY p.rating DESC, p.experience_years DESC
+      ${whereClause}
+      ORDER BY p.created_at DESC
       LIMIT ?
     `;
     
-    const result = await executeQuery(query, [facilityId, parseInt(limit)]);
+    const queryParams = includeAll === 'true' || includeAll === true 
+      ? [facilityId, parseInt(limit)]
+      : [facilityId, parseInt(limit)];
+    
+    const result = await executeQuery(query, queryParams);
     
     if (!result.success) {
       console.error('❌ Query failed:', result.error);
@@ -394,6 +402,12 @@ router.get('/facility/:facilityId', async (req, res) => {
     }
     
     const professionals = result.data;
+    
+    console.log('🔍 Facility professionals query result:', {
+      facilityId,
+      includeAll,
+      count: professionals.length
+    });
     
     res.json({ 
       success: true, 
@@ -438,7 +452,19 @@ router.post('/register', upload.single('profileImage'), [
   body('hasCompounding').notEmpty().withMessage('Has compounding is required'),
   body('hasVaccination').notEmpty().withMessage('Has vaccination is required'),
   body('acceptsInsurance').notEmpty().withMessage('Accepts insurance is required'),
-  body('userId').optional().trim()
+  body('userId').optional().trim(),
+  body('facilityId').optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') {
+        return true; // Optional field, skip validation
+      }
+      const num = parseInt(value, 10);
+      if (isNaN(num) || num < 1) {
+        throw new Error('Facility ID must be a positive integer');
+      }
+      return true;
+    })
+    .toInt()
 ], async (req, res) => {
   try {
     console.log('🔍 Raw request body:', req.body);
@@ -447,6 +473,8 @@ router.post('/register', upload.single('profileImage'), [
     console.log('🔍 Content-Type:', req.headers['content-type']);
     console.log('🔍 Multer error:', req.fileValidationError);
     console.log('🔍 Multer errors:', req.fileValidationErrors);
+    console.log('🔍 FacilityId from request:', req.body.facilityId);
+    console.log('🔍 FacilityId type:', typeof req.body.facilityId);
     // Check for validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -476,7 +504,8 @@ router.post('/register', upload.single('profileImage'), [
       hasCompounding,
       hasVaccination,
       acceptsInsurance,
-      userId
+      userId,
+      facilityId
     } = req.body;
 
     // Process uploaded profile image
@@ -554,7 +583,15 @@ router.post('/register', upload.single('profileImage'), [
       if (existingUser.user_type === 'pharmacist') {
         return res.status(400).json({
           success: false,
-          message: 'A pharmacist with this email already exists'
+          message: 'A pharmacist with this email address already exists. Please use a different email address or contact support if you need to recover your account.'
+        });
+      }
+      
+      // If user exists with a different user type (not patient), return error
+      if (existingUser.user_type !== 'patient') {
+        return res.status(400).json({
+          success: false,
+          message: `This email address is already registered as a ${existingUser.user_type}. Please use a different email address to register as a pharmacist.`
         });
       }
       
@@ -582,19 +619,28 @@ router.post('/register', upload.single('profileImage'), [
         // Send new credentials email to converted user
         try {
           console.log('📧 Attempting to send credentials email to converted user:', email);
+          console.log('📧 Email details:', {
+            email,
+            firstName,
+            passwordLength: password.length
+          });
           const emailSent = await sendPharmacistCredentials(email, firstName, password);
           if (emailSent) {
             console.log('✅ New credentials email sent successfully to converted user:', email);
           } else {
             console.log('⚠️ Failed to send credentials email to converted user:', email);
+            console.log('⚠️ sendPharmacistCredentials returned false');
           }
         } catch (emailError) {
           console.error('❌ Error sending credentials email to converted user:', emailError);
+          console.error('❌ Error stack:', emailError.stack);
+          console.error('❌ Error details:', {
+            message: emailError.message,
+            code: emailError.code,
+            command: emailError.command
+          });
           // Don't fail the registration if email fails
         }
-      } else if (existingUser.user_type === 'pharmacist') {
-        // User is already a pharmacist, don't send email again
-        console.log('ℹ️ User is already a pharmacist, skipping email sending');
       }
     } else {
       // Generate secure password for new user
@@ -617,19 +663,31 @@ router.post('/register', upload.single('profileImage'), [
       finalUserId = createUserResult.data.insertId;
       console.log('✅ Created new user for pharmacist:', finalUserId);
       
-        // Send credentials email to new user
-        try {
-          console.log('📧 Attempting to send credentials email to:', email);
-          const emailSent = await sendPharmacistCredentials(email, firstName, password);
-          if (emailSent) {
-            console.log('✅ Credentials email sent successfully to:', email);
-          } else {
-            console.log('⚠️ Failed to send credentials email to:', email);
-          }
-        } catch (emailError) {
-          console.error('❌ Error sending credentials email:', emailError);
-          // Don't fail the registration if email fails
+      // Send credentials email to new user
+      try {
+        console.log('📧 Attempting to send credentials email to:', email);
+        console.log('📧 Email details:', {
+          email,
+          firstName,
+          passwordLength: password.length
+        });
+        const emailSent = await sendPharmacistCredentials(email, firstName, password);
+        if (emailSent) {
+          console.log('✅ Credentials email sent successfully to:', email);
+        } else {
+          console.log('⚠️ Failed to send credentials email to:', email);
+          console.log('⚠️ sendPharmacistCredentials returned false');
         }
+      } catch (emailError) {
+        console.error('❌ Error sending credentials email:', emailError);
+        console.error('❌ Error stack:', emailError.stack);
+        console.error('❌ Error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          command: emailError.command
+        });
+        // Don't fail the registration if email fails
+      }
     }
 
     // Check if email already exists in healthcare_professionals table
@@ -641,7 +699,7 @@ router.post('/register', upload.single('profileImage'), [
     if (existingProfessionalResult.success && existingProfessionalResult.data && existingProfessionalResult.data.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'A professional with this email already exists'
+        message: 'A healthcare professional with this email address already exists in our system. Please use a different email address or contact support for assistance.'
       });
     }
 
@@ -654,7 +712,7 @@ router.post('/register', upload.single('profileImage'), [
     if (existingLicenseResult.success && existingLicenseResult.data && existingLicenseResult.data.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'A professional with this license number already exists'
+        message: 'A healthcare professional with this license number already exists. Please verify your license number or contact support if you believe this is an error.'
       });
     }
 
@@ -664,8 +722,8 @@ router.post('/register', upload.single('profileImage'), [
         first_name, last_name, email, phone, address, city, license_number,
         qualification, experience_years, specializations, current_workplace,
         emergency_contact, bio, has_consultation, has_compounding, 
-        has_vaccination, accepts_insurance, user_id, specialty, is_verified, profile_image
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        has_vaccination, accepts_insurance, user_id, specialty, is_verified, profile_image, facility_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const experienceYears = parseInt(experience) || 0;
@@ -692,7 +750,8 @@ router.post('/register', upload.single('profileImage'), [
       acceptsInsuranceBool,
       finalUserId,
       specialty,
-      profileImagePath
+      profileImagePath,
+      facilityId: facilityId || null
     });
 
     const insertResult = await executeQuery(insertQuery, [
@@ -716,7 +775,8 @@ router.post('/register', upload.single('profileImage'), [
       finalUserId,
       specialty,
       false, // is_verified starts as false
-      profileImagePath
+      profileImagePath,
+      facilityId || null
     ]);
 
     console.log('🔍 Insert result:', insertResult);
@@ -774,7 +834,19 @@ router.post('/register-doctor', upload.single('profileImage'), [
   body('hasEmergency').notEmpty().withMessage('Has emergency is required'),
   body('hasSurgery').notEmpty().withMessage('Has surgery is required'),
   body('acceptsInsurance').notEmpty().withMessage('Accepts insurance is required'),
-  body('userId').optional().trim()
+  body('userId').optional().trim(),
+  body('facilityId').optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') {
+        return true; // Optional field, skip validation
+      }
+      const num = parseInt(value, 10);
+      if (isNaN(num) || num < 1) {
+        throw new Error('Facility ID must be a positive integer');
+      }
+      return true;
+    })
+    .toInt()
 ], async (req, res) => {
   try {
     console.log('🔍 Raw request body:', req.body);
@@ -783,6 +855,8 @@ router.post('/register-doctor', upload.single('profileImage'), [
     console.log('🔍 Content-Type:', req.headers['content-type']);
     console.log('🔍 Multer error:', req.fileValidationError);
     console.log('🔍 Multer errors:', req.fileValidationErrors);
+    console.log('🔍 FacilityId from request:', req.body.facilityId);
+    console.log('🔍 FacilityId type:', typeof req.body.facilityId);
     
     // Check for validation errors
     const errors = validationResult(req);
@@ -814,7 +888,8 @@ router.post('/register-doctor', upload.single('profileImage'), [
       hasEmergency,
       hasSurgery,
       acceptsInsurance,
-      userId
+      userId,
+      facilityId
     } = req.body;
 
     // Process uploaded profile image
@@ -923,14 +998,26 @@ router.post('/register-doctor', upload.single('profileImage'), [
         // Send new credentials email to converted user
         try {
           console.log('📧 Attempting to send credentials email to converted user:', email);
+          console.log('📧 Email details:', {
+            email,
+            firstName,
+            passwordLength: password.length
+          });
           const emailSent = await sendDoctorCredentials(email, firstName, password);
           if (emailSent) {
             console.log('✅ New credentials email sent successfully to converted user:', email);
           } else {
             console.log('⚠️ Failed to send credentials email to converted user:', email);
+            console.log('⚠️ sendDoctorCredentials returned false');
           }
         } catch (emailError) {
           console.error('❌ Error sending credentials email to converted user:', emailError);
+          console.error('❌ Error stack:', emailError.stack);
+          console.error('❌ Error details:', {
+            message: emailError.message,
+            code: emailError.code,
+            command: emailError.command
+          });
           // Don't fail the registration if email fails
         }
       } else if (existingUser.user_type === 'doctor') {
@@ -962,14 +1049,26 @@ router.post('/register-doctor', upload.single('profileImage'), [
       // Send credentials email to new user
       try {
         console.log('📧 Attempting to send credentials email to:', email);
+        console.log('📧 Email details:', {
+          email,
+          firstName,
+          passwordLength: password.length
+        });
         const emailSent = await sendDoctorCredentials(email, firstName, password);
         if (emailSent) {
           console.log('✅ Credentials email sent successfully to:', email);
         } else {
           console.log('⚠️ Failed to send credentials email to:', email);
+          console.log('⚠️ sendDoctorCredentials returned false');
         }
       } catch (emailError) {
         console.error('❌ Error sending credentials email:', emailError);
+        console.error('❌ Error stack:', emailError.stack);
+        console.error('❌ Error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          command: emailError.command
+        });
         // Don't fail the registration if email fails
       }
     }
@@ -1006,8 +1105,8 @@ router.post('/register-doctor', upload.single('profileImage'), [
         first_name, last_name, email, phone, address, city, license_number,
         qualification, experience_years, specializations, current_workplace,
         emergency_contact, bio, has_consultation, has_compounding, 
-        has_vaccination, accepts_insurance, user_id, specialty, is_verified, profile_image
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        has_vaccination, accepts_insurance, user_id, specialty, is_verified, profile_image, facility_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const experienceYears = parseInt(experience) || 0;
@@ -1035,7 +1134,8 @@ router.post('/register-doctor', upload.single('profileImage'), [
       acceptsInsurance: acceptsInsuranceBool,
       finalUserId,
       specialty,
-      profileImagePath
+      profileImagePath,
+      facilityId: facilityId || null
     });
 
     const insertResult = await executeQuery(insertQuery, [
@@ -1059,7 +1159,8 @@ router.post('/register-doctor', upload.single('profileImage'), [
       finalUserId,
       specialty,
       false, // is_verified starts as false
-      profileImagePath
+      profileImagePath,
+      facilityId || null
     ]);
 
     console.log('🔍 Insert result:', insertResult);
@@ -1124,11 +1225,13 @@ router.get('/:id', async (req, res) => {
     
     const query = `
       SELECT 
-        id, first_name, last_name, email, phone, specialty, qualification,
-        experience_years, rating, total_reviews, is_available, is_verified,
-        profile_image, bio, created_at
-      FROM healthcare_professionals 
-      WHERE id = ? AND is_verified = true
+        p.id, p.first_name, p.last_name, p.email, p.phone, p.specialty, p.qualification,
+        p.experience_years, p.rating, p.total_reviews, p.is_available, p.is_verified,
+        p.profile_image, p.bio, p.created_at, p.license_number, p.address, p.city,
+        p.facility_id, f.name as facility_name
+      FROM healthcare_professionals p
+      LEFT JOIN healthcare_facilities f ON p.facility_id = f.id
+      WHERE p.id = ?
     `;
     
     const professionalResult = await executeQuery(query, [id]);
@@ -1142,6 +1245,229 @@ router.get('/:id', async (req, res) => {
     res.json({ success: true, data: professional });
   } catch (error) {
     console.error('Error fetching professional:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Update professional (for facility admins)
+router.put('/:id', authenticateToken, requireRole(['facility-admin', 'admin']), upload.single('profileImage'), [
+  body('firstName').optional().trim().isLength({ min: 2, max: 100 }),
+  body('lastName').optional().trim().isLength({ min: 2, max: 100 }),
+  body('email').optional().isEmail().normalizeEmail(),
+  body('phone').optional().trim().isLength({ min: 10, max: 20 }),
+  body('address').optional().trim().isLength({ min: 5, max: 500 }),
+  body('city').optional().trim().isLength({ min: 2, max: 100 }),
+  body('specialty').optional().trim().isLength({ min: 2, max: 100 }),
+  body('licenseNumber').optional().trim().isLength({ min: 5, max: 50 }),
+  body('qualification').optional().trim().isLength({ min: 2, max: 200 }),
+  body('experienceYears').optional().isInt({ min: 0, max: 100 }),
+  body('bio').optional().trim().isLength({ max: 1000 }),
+  body('isVerified').optional().isBoolean(),
+  body('isAvailable').optional().isBoolean(),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Check if professional exists and belongs to the facility
+    const checkQuery = `SELECT facility_id, user_id FROM healthcare_professionals WHERE id = ?`;
+    const checkResult = await executeQuery(checkQuery, [id]);
+
+    if (!checkResult.success || !checkResult.data || checkResult.data.length === 0) {
+      return res.status(404).json({ success: false, message: 'Professional not found' });
+    }
+
+    const professional = checkResult.data[0];
+    
+    // If user is facility-admin, verify they manage this facility
+    if (req.user.role === 'facility-admin' && professional.facility_id) {
+      const facilityCheckQuery = `SELECT id FROM healthcare_facilities WHERE id = ? AND admin_id = ?`;
+      const facilityCheckResult = await executeQuery(facilityCheckQuery, [professional.facility_id, req.user.id]);
+      
+      if (!facilityCheckResult.success || !facilityCheckResult.data || facilityCheckResult.data.length === 0) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to manage this staff member' });
+      }
+    }
+
+    // Build update query dynamically
+    const updateFields = [];
+    const updateValues = [];
+
+    if (updateData.firstName) {
+      updateFields.push('first_name = ?');
+      updateValues.push(updateData.firstName);
+    }
+    if (updateData.lastName) {
+      updateFields.push('last_name = ?');
+      updateValues.push(updateData.lastName);
+    }
+    if (updateData.email) {
+      // Check if email is already taken by another professional
+      const emailCheckQuery = `SELECT id FROM healthcare_professionals WHERE email = ? AND id != ?`;
+      const emailCheckResult = await executeQuery(emailCheckQuery, [updateData.email, id]);
+      
+      if (emailCheckResult.success && emailCheckResult.data && emailCheckResult.data.length > 0) {
+        return res.status(400).json({ success: false, message: 'Email address is already in use' });
+      }
+      
+      updateFields.push('email = ?');
+      updateValues.push(updateData.email);
+    }
+    if (updateData.phone) {
+      updateFields.push('phone = ?');
+      updateValues.push(updateData.phone);
+    }
+    if (updateData.address) {
+      updateFields.push('address = ?');
+      updateValues.push(updateData.address);
+    }
+    if (updateData.city) {
+      updateFields.push('city = ?');
+      updateValues.push(updateData.city);
+    }
+    if (updateData.specialty) {
+      updateFields.push('specialty = ?');
+      updateValues.push(updateData.specialty);
+    }
+    if (updateData.licenseNumber) {
+      // Check if license number is already taken
+      const licenseCheckQuery = `SELECT id FROM healthcare_professionals WHERE license_number = ? AND id != ?`;
+      const licenseCheckResult = await executeQuery(licenseCheckQuery, [updateData.licenseNumber, id]);
+      
+      if (licenseCheckResult.success && licenseCheckResult.data && licenseCheckResult.data.length > 0) {
+        return res.status(400).json({ success: false, message: 'License number is already in use' });
+      }
+      
+      updateFields.push('license_number = ?');
+      updateValues.push(updateData.licenseNumber);
+    }
+    if (updateData.qualification) {
+      updateFields.push('qualification = ?');
+      updateValues.push(updateData.qualification);
+    }
+    if (updateData.experienceYears !== undefined) {
+      updateFields.push('experience_years = ?');
+      updateValues.push(updateData.experienceYears);
+    }
+    if (updateData.bio !== undefined) {
+      updateFields.push('bio = ?');
+      updateValues.push(updateData.bio);
+    }
+    if (updateData.isVerified !== undefined) {
+      updateFields.push('is_verified = ?');
+      updateValues.push(updateData.isVerified ? 1 : 0);
+    }
+    if (updateData.isAvailable !== undefined) {
+      updateFields.push('is_available = ?');
+      updateValues.push(updateData.isAvailable ? 1 : 0);
+    }
+    let profileImagePath = null;
+    if (req.file) {
+      profileImagePath = `/uploads/professionals/${req.file.filename}`;
+      updateFields.push('profile_image = ?');
+      updateValues.push(profileImagePath);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ success: false, message: 'No fields to update' });
+    }
+
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(id);
+
+    const updateQuery = `UPDATE healthcare_professionals SET ${updateFields.join(', ')} WHERE id = ?`;
+    const updateResult = await executeQuery(updateQuery, updateValues);
+
+    if (!updateResult.success) {
+      return res.status(500).json({ success: false, message: 'Failed to update professional' });
+    }
+
+    // Also update the profile image in the users table if it was updated
+    if (profileImagePath && professional.user_id) {
+      const updateUserQuery = `UPDATE users SET profile_image = ?, updated_at = NOW() WHERE id = ?`;
+      const updateUserResult = await executeQuery(updateUserQuery, [profileImagePath, professional.user_id]);
+      
+      if (!updateUserResult.success) {
+        console.error('⚠️ Failed to update profile image in users table, but professional was updated');
+        // Don't fail the request, just log the warning
+      } else {
+        console.log('✅ Profile image updated in both healthcare_professionals and users tables');
+      }
+    }
+
+    // Fetch updated professional
+    const fetchQuery = `
+      SELECT 
+        p.id, p.first_name, p.last_name, p.email, p.phone, p.specialty, p.qualification,
+        p.experience_years, p.rating, p.total_reviews, p.is_available, p.is_verified,
+        p.profile_image, p.bio, p.license_number, p.address, p.city, p.facility_id,
+        f.name as facility_name
+      FROM healthcare_professionals p
+      LEFT JOIN healthcare_facilities f ON p.facility_id = f.id
+      WHERE p.id = ?
+    `;
+    const fetchResult = await executeQuery(fetchQuery, [id]);
+
+    res.json({
+      success: true,
+      message: 'Professional updated successfully',
+      data: fetchResult.data[0]
+    });
+  } catch (error) {
+    console.error('Error updating professional:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Delete professional (for facility admins)
+router.delete('/:id', authenticateToken, requireRole(['facility-admin', 'admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if professional exists and belongs to the facility
+    const checkQuery = `SELECT facility_id FROM healthcare_professionals WHERE id = ?`;
+    const checkResult = await executeQuery(checkQuery, [id]);
+
+    if (!checkResult.success || !checkResult.data || checkResult.data.length === 0) {
+      return res.status(404).json({ success: false, message: 'Professional not found' });
+    }
+
+    const professional = checkResult.data[0];
+    
+    // If user is facility-admin, verify they manage this facility
+    if (req.user.role === 'facility-admin' && professional.facility_id) {
+      const facilityCheckQuery = `SELECT id FROM healthcare_facilities WHERE id = ? AND admin_id = ?`;
+      const facilityCheckResult = await executeQuery(facilityCheckQuery, [professional.facility_id, req.user.id]);
+      
+      if (!facilityCheckResult.success || !facilityCheckResult.data || facilityCheckResult.data.length === 0) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to delete this staff member' });
+      }
+    }
+
+    // Soft delete by setting is_available to false and is_verified to false
+    // Or hard delete - let's use soft delete for safety
+    const deleteQuery = `UPDATE healthcare_professionals SET is_available = 0, is_verified = 0, updated_at = NOW() WHERE id = ?`;
+    const deleteResult = await executeQuery(deleteQuery, [id]);
+
+    if (!deleteResult.success) {
+      return res.status(500).json({ success: false, message: 'Failed to delete professional' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Staff member removed successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting professional:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

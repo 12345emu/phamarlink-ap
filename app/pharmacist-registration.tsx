@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, View, Text, TextInput, Alert, Switch, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
@@ -17,7 +17,15 @@ const DANGER = '#e74c3c';
 
 export default function PharmacistRegistrationScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { user } = useAuth();
+  const facilityId = params.facilityId as string;
+  
+  // Debug: Log facilityId
+  console.log('🔍 Pharmacist Registration - All params:', params);
+  console.log('🔍 Pharmacist Registration - facilityId:', facilityId);
+  console.log('🔍 Pharmacist Registration - facilityId type:', typeof facilityId);
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [formData, setFormData] = useState<PharmacistRegistration>({
@@ -154,11 +162,18 @@ export default function PharmacistRegistrationScreen() {
     try {
       console.log('🔍 Submitting pharmacist registration:', formData);
       
-      // Add profile image to form data
+      // Add profile image and facilityId to form data
       const registrationData = {
         ...formData,
-        profileImage: profileImage
+        profileImage: profileImage,
+        facilityId: facilityId ? parseInt(facilityId) : undefined
       };
+      
+      console.log('🔍 Registration data being sent:', {
+        ...registrationData,
+        profileImage: profileImage ? 'provided' : 'not provided',
+        facilityId: registrationData.facilityId
+      });
       
       const response = await pharmacistServiceNew.registerPharmacist(registrationData);
       
@@ -174,11 +189,25 @@ export default function PharmacistRegistrationScreen() {
           ]
         );
       } else {
-        Alert.alert('Registration Failed', response.message);
+        Alert.alert('Registration Failed', response.message || 'Failed to register pharmacist. Please check your information and try again.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Pharmacist registration error:', error);
-      Alert.alert('Error', 'Failed to submit registration. Please try again.');
+      
+      // Extract error message from response if available
+      let errorMessage = 'Failed to submit registration. Please try again.';
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        // If there are validation errors, show the first one
+        const firstError = error.response.data.errors[0];
+        errorMessage = firstError.msg || firstError.message || errorMessage;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      Alert.alert('Registration Error', errorMessage);
     } finally {
       setIsSubmitting(false);
     }

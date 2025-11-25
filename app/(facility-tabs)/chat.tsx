@@ -14,6 +14,7 @@ import {
   Image,
   Modal,
   Keyboard,
+  AppState,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -22,6 +23,11 @@ import { apiClient } from '../../services/apiClient';
 import { API_CONFIG } from '../../constants/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { professionalsService, HealthcareProfessional } from '../../services/professionalsService';
+import { facilitiesService } from '../../services/facilitiesService';
+import { notificationService } from '../../services/notificationService';
+import { useAuth } from '../../context/AuthContext';
+
+const STATIC_BASE_URL = API_CONFIG.BASE_URL.replace('/api', '');
 
 interface Message {
   id: number;
@@ -50,6 +56,7 @@ interface ChatConversation {
 
 function PatientChatList() {
   const router = useRouter();
+  const { user } = useAuth();
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,11 +65,41 @@ function PatientChatList() {
   const [professionals, setProfessionals] = useState<HealthcareProfessional[]>([]);
   const [loadingProfessionals, setLoadingProfessionals] = useState(false);
   const [professionalSearchQuery, setProfessionalSearchQuery] = useState('');
+  const [loadingFacilities, setLoadingFacilities] = useState(true);
+  const [facilityIds, setFacilityIds] = useState<number[]>([]);
+  const [facilityError, setFacilityError] = useState<string | null>(null);
+  const [appState, setAppState] = useState(AppState.currentState);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsConnectionRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
+    loadMyFacilities();
     loadConversations();
+    initializeNotifications();
+    initializeWebSocketForList();
+    
+    // Listen to app state changes
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      setAppState(nextAppState);
+    });
+
+    return () => {
+      subscription.remove();
+      if (wsConnectionRef.current) {
+        wsConnectionRef.current.close();
+        wsConnectionRef.current = null;
+      }
+    };
   }, []);
+
+  // Track screen focus for notifications
+  useFocusEffect(
+    React.useCallback(() => {
+      setIsScreenFocused(true);
+      return () => setIsScreenFocused(false);
+    }, [])
+  );
 
   // Refresh conversations when screen comes into focus (when navigating back from chat)
   useFocusEffect(
@@ -77,34 +114,105 @@ function PatientChatList() {
   );
 
   useEffect(() => {
-    if (showProfessionalsModal) {
+    if (showProfessionalsModal && !loadingFacilities) {
       loadProfessionals();
     }
-  }, [showProfessionalsModal]);
+  }, [showProfessionalsModal, loadingFacilities]);
+
+  const loadMyFacilities = async () => {
+    try {
+      setLoadingFacilities(true);
+      setFacilityError(null);
+      const response = await facilitiesService.getMyFacilities();
+      if (response.success && Array.isArray(response.data)) {
+        const ids = response.data
+          .map((facility: any) => Number(facility.id))
+          .filter((id: number) => !Number.isNaN(id));
+        setFacilityIds(ids);
+      } else {
+        setFacilityIds([]);
+        setFacilityError(response.message || 'Failed to load facilities');
+      }
+    } catch (err: any) {
+      setFacilityIds([]);
+      setFacilityError(err?.message || 'Failed to load facilities');
+    } finally {
+      setLoadingFacilities(false);
+    }
+  };
+
+  const normalizeImageUrl = (url?: string | null) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    return `${STATIC_BASE_URL}${url}`;
+  };
 
   const loadProfessionals = async () => {
+    if (loadingFacilities) {
+      return;
+    }
+    if (!facilityIds.length) {
+      setProfessionals([]);
+      setLoadingProfessionals(false);
+      return;
+    }
+
     try {
       setLoadingProfessionals(true);
-      // Use the new endpoint that fetches from users table (compatible with chat system)
-      const response = await professionalsService.getProfessionalsFromUsers({
-        search: professionalSearchQuery.trim() || undefined,
-        limit: 100
-      });
-      
-      // Debug: Log the response
-      if (response) {
-        if (response.success && response.data && response.data.professionals) {
-          const professionals = Array.isArray(response.data.professionals) ? response.data.professionals : [];
-          // Filter out any professionals without valid IDs
-          const validProfessionals = professionals.filter(p => p && p.id);
-          setProfessionals(validProfessionals);
-        } else {
-          // No professionals found or error in response
-          setProfessionals([]);
+      const query = professionalSearchQuery.trim().toLowerCase();
+
+      const responses = await Promise.all(
+        facilityIds.map((facilityId) =>
+          professionalsService.getProfessionalsByFacility(facilityId, 100, true)
+        )
+      );
+
+      const aggregated: HealthcareProfessional[] = [];
+
+      responses.forEach((response) => {
+        if (response && response.success && response.data) {
+          const data = response.data as any;
+          const professionalsList = Array.isArray(data.professionals)
+            ? data.professionals
+            : Array.isArray(data?.data?.professionals)
+              ? data.data.professionals
+              : [];
+
+          professionalsList.forEach((pro: any) => {
+            if (!pro) return;
+            aggregated.push({
+              ...pro,
+              user_id: pro.user_id || pro.id,
+              facility_id: pro.facility_id,
+              profile_image: normalizeImageUrl(pro.profile_image),
+            });
+          });
         }
-      } else {
-        setProfessionals([]);
-      }
+      });
+
+      // Deduplicate by user_id (fallback to professional id)
+      const uniqueProfessionals: HealthcareProfessional[] = [];
+      const seen = new Set<number>();
+
+      aggregated.forEach((pro) => {
+        const key = pro.user_id || pro.id;
+        if (!key || seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+
+        if (query) {
+          const fullName = `${pro.first_name || ''} ${pro.last_name || ''}`.toLowerCase();
+          const email = (pro.email || '').toLowerCase();
+          if (!fullName.includes(query) && !email.includes(query)) {
+            return;
+          }
+        }
+
+        uniqueProfessionals.push(pro);
+      });
+
+      setProfessionals(uniqueProfessionals);
     } catch (err: any) {
       // Error loading professionals
       setProfessionals([]);
@@ -191,6 +299,110 @@ function PatientChatList() {
     } catch (err: any) {
       const errorMessage = err.message || err.response?.data?.message || 'Failed to start conversation. Please try again.';
       Alert.alert('Error', errorMessage);
+    }
+  };
+
+  const initializeNotifications = async () => {
+    try {
+      if (!user) return;
+      
+      console.log('🔔 Facility Chat - Initializing notifications...');
+      
+      // Initialize notification service
+      const initialized = await notificationService.initialize();
+      if (!initialized) {
+        console.log('❌ Facility Chat - Failed to initialize notifications');
+        return;
+      }
+
+      // Register device for push notifications
+      const userId = typeof user.id === 'string' ? parseInt(user.id) : user.id;
+      await notificationService.registerDevice(userId, user.role || 'facility-admin');
+      await notificationService.registerWithBackend(userId, user.role || 'facility-admin');
+
+      console.log('✅ Facility Chat - Notifications initialized successfully');
+    } catch (error) {
+      console.error('❌ Facility Chat - Error initializing notifications:', error);
+    }
+  };
+
+  const initializeWebSocketForList = async () => {
+    try {
+      if (wsConnectionRef.current && wsConnectionRef.current.readyState === WebSocket.OPEN) {
+        return;
+      }
+
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        return;
+      }
+
+      const wsUrl = `ws://172.20.10.3:3000/ws/chat?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        wsConnectionRef.current = ws;
+        console.log('✅ Facility Chat - WebSocket connected for list');
+      };
+      
+      ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'new_message' && data.data) {
+            const message = data.data;
+            const currentUserId = user?.id ? (typeof user.id === 'string' ? parseInt(user.id) : user.id) : null;
+            
+            // Only show notification if message is for current user
+            if (message.receiver_id && currentUserId && message.receiver_id === currentUserId) {
+              // Check if we should show notification
+              const shouldShowNotification = 
+                appState !== 'active' || // App is in background
+                !isScreenFocused; // Chat screen is not focused
+              
+              if (shouldShowNotification) {
+                // Get sender name from conversations or use default
+                const conversation = conversations.find(
+                  conv => conv.id === message.conversation_id || 
+                  conv.professionalId === message.sender_id
+                );
+                
+                const senderName = conversation?.professionalName || 'New message';
+                const messageText = message.message || 'New message';
+                
+                await notificationService.scheduleLocalNotification({
+                  type: 'chat',
+                  title: senderName,
+                  body: messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText,
+                  data: {
+                    conversationId: message.conversation_id,
+                    senderId: message.sender_id,
+                    type: 'chat'
+                  },
+                  sound: true,
+                });
+              }
+              
+              // Reload conversations to update unread count
+              loadConversations();
+            }
+          }
+        } catch (error) {
+          console.error('❌ Facility Chat - WebSocket message error:', error);
+        }
+      };
+      
+      ws.onclose = () => {
+        wsConnectionRef.current = null;
+        console.log('⚠️ Facility Chat - WebSocket disconnected for list');
+      };
+      
+      ws.onerror = (error) => {
+        console.error('❌ Facility Chat - WebSocket error:', error);
+        wsConnectionRef.current = null;
+      };
+    } catch (error) {
+      console.error('❌ Facility Chat - WebSocket initialization error:', error);
     }
   };
 
@@ -300,6 +512,8 @@ function PatientChatList() {
     }
   };
 
+  const hasFacilities = facilityIds.length > 0;
+
   const filteredConversations = conversations.filter(conv =>
     conv.professionalName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     conv.professionalEmail.toLowerCase().includes(searchQuery.toLowerCase())
@@ -397,7 +611,20 @@ function PatientChatList() {
           </View>
 
           <ScrollView style={styles.modalContent}>
-            {loadingProfessionals ? (
+            {loadingFacilities ? (
+              <View style={styles.modalLoadingContainer}>
+                <ActivityIndicator size="large" color="#3498db" />
+                <Text style={styles.modalLoadingText}>Loading your facilities...</Text>
+              </View>
+            ) : !hasFacilities ? (
+              <View style={styles.modalEmptyContainer}>
+                <FontAwesome name="building" size={60} color="#bdc3c7" />
+                <Text style={styles.modalEmptyText}>No facilities found</Text>
+                <Text style={styles.modalEmptySubtext}>
+                  {facilityError || 'Add a facility to start chatting with your staff.'}
+                </Text>
+              </View>
+            ) : loadingProfessionals ? (
               <View style={styles.modalLoadingContainer}>
                 <ActivityIndicator size="large" color="#3498db" />
                 <Text style={styles.modalLoadingText}>Loading professionals...</Text>
@@ -407,7 +634,9 @@ function PatientChatList() {
                 <FontAwesome name="user-md" size={60} color="#bdc3c7" />
                 <Text style={styles.modalEmptyText}>No professionals found</Text>
                 <Text style={styles.modalEmptySubtext}>
-                  Try adjusting your search terms
+                  {professionalSearchQuery
+                    ? 'Try adjusting your search terms'
+                    : 'No staff found for your facilities yet'}
                 </Text>
               </View>
             ) : (
@@ -589,6 +818,7 @@ function PatientChatList() {
 
 export default function PatientChat() {
   const router = useRouter();
+  const { user } = useAuth();
   const { patientId, patientName, patientEmail, patientAvatar, conversationId: conversationIdParam } = useLocalSearchParams();
   
   // If no patient is selected, show the main chat page with conversations
@@ -610,8 +840,26 @@ export default function PatientChat() {
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [appState, setAppState] = useState(AppState.currentState);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
   const scrollViewRef = useRef<ScrollView>(null);
   const textInputRef = useRef<TextInput>(null);
+
+  // Track screen focus
+  useFocusEffect(
+    React.useCallback(() => {
+      setIsScreenFocused(true);
+      return () => setIsScreenFocused(false);
+    }, [])
+  );
+
+  // Listen to app state changes
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      setAppState(nextAppState);
+    });
+    return () => subscription.remove();
+  }, []);
   
   const handleClose = () => {
     router.back();
@@ -676,7 +924,7 @@ export default function PatientChat() {
         setIsConnected(true);
       };
       
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
           
@@ -695,6 +943,31 @@ export default function PatientChat() {
                 }
                 return prev;
               });
+
+              // Show notification if app is in background or screen is not focused
+              const currentUserId = user?.id ? (typeof user.id === 'string' ? parseInt(user.id) : user.id) : null;
+              if (message.receiver_id && currentUserId && message.receiver_id === currentUserId) {
+                const shouldShowNotification = 
+                  appState !== 'active' || // App is in background
+                  !isScreenFocused; // Chat screen is not focused
+                
+                if (shouldShowNotification) {
+                  const senderName = patientNameStr || 'New message';
+                  const messageText = message.message || 'New message';
+                  
+                  await notificationService.scheduleLocalNotification({
+                    type: 'chat',
+                    title: senderName,
+                    body: messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText,
+                    data: {
+                      conversationId: message.conversation_id || conversationIdNum,
+                      senderId: message.sender_id,
+                      type: 'chat'
+                    },
+                    sound: true,
+                  });
+                }
+              }
             }
           }
         } catch (error) {
@@ -749,6 +1022,7 @@ export default function PatientChat() {
     }
 
     const messageToSend = newMessage.trim();
+    const safeConversationId = conversationIdNum ?? 0;
 
     try {
       setSending(true);
@@ -756,8 +1030,8 @@ export default function PatientChat() {
       // Create a temporary message object for immediate UI update
       const tempMessage = {
         id: Date.now(),
-        sender_id: conversationIdNum,
-        receiver_id: conversationIdNum,
+        sender_id: safeConversationId,
+        receiver_id: safeConversationId,
         message: messageToSend,
         timestamp: new Date().toISOString(),
         is_doctor: false,

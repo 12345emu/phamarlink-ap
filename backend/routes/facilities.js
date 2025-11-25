@@ -565,6 +565,8 @@ router.post('/pharmacy/register', upload.array('images', 5), [
 
     // Handle user creation/update
     let finalUserId = userId;
+    let emailSent = false;
+    let emailError = null;
     
     // Check if user exists with this email
     const existingUserQuery = 'SELECT id, user_type FROM users WHERE email = ?';
@@ -580,6 +582,7 @@ router.post('/pharmacy/register', upload.array('images', 5), [
       
       if (updateResult.success) {
         console.log('✅ Updated existing user to facility-admin:', finalUserId);
+        console.log('ℹ️  User already exists - credentials email not sent (user should use existing credentials)');
       } else {
         console.error('⚠️ Failed to update user type:', updateResult.error);
       }
@@ -619,14 +622,32 @@ router.post('/pharmacy/register', upload.array('images', 5), [
       // Send credentials email to new user
       try {
         console.log('📧 Attempting to send pharmacy credentials email to:', email);
-        const emailSent = await sendPharmacyCredentials(email, ownerName, pharmacyName, password);
+        console.log('📧 Email details:', {
+          email,
+          ownerName,
+          pharmacyName,
+          passwordLength: password.length
+        });
+        
+        emailSent = await sendPharmacyCredentials(email, ownerName, pharmacyName, password);
+        
         if (emailSent) {
           console.log('✅ Pharmacy credentials email sent successfully to:', email);
+          console.log('✅ Email message ID logged above');
         } else {
           console.log('⚠️ Failed to send pharmacy credentials email to:', email);
+          console.log('⚠️ sendPharmacyCredentials returned false');
+          emailError = 'Email service returned false';
         }
-      } catch (emailError) {
-        console.error('❌ Error sending pharmacy credentials email:', emailError);
+      } catch (err) {
+        console.error('❌ Error sending pharmacy credentials email:', err);
+        console.error('❌ Error stack:', err.stack);
+        console.error('❌ Error details:', {
+          message: err.message,
+          code: err.code,
+          command: err.command
+        });
+        emailError = err.message || 'Unknown email error';
         // Don't fail the registration if email fails
       }
     }
@@ -707,11 +728,26 @@ router.post('/pharmacy/register', upload.array('images', 5), [
       pharmacy.images = JSON.parse(pharmacy.images);
     }
 
+    // Build response message based on email status
+    let responseMessage = 'Pharmacy registration submitted successfully. We will review your application and contact you within 3-5 business days.';
+    
+    if (emailSent) {
+      responseMessage += ' Your login credentials have been sent to your email address. Please check your inbox and spam folder.';
+    } else if (emailError) {
+      console.log('⚠️  Registration succeeded but email failed - user may need manual credential delivery');
+      responseMessage += ' Note: We encountered an issue sending your credentials email. Please contact support for your login credentials.';
+    } else {
+      // User already exists
+      responseMessage += ' Please use your existing account credentials to log in.';
+    }
+
     res.status(201).json({
       success: true,
-      message: 'Pharmacy registration submitted successfully. We will review your application and contact you within 3-5 business days.',
+      message: responseMessage,
       data: {
-        pharmacy
+        pharmacy,
+        emailSent: emailSent,
+        emailError: emailError || null
       }
     });
 
@@ -1592,6 +1628,275 @@ router.post('/:id/medicines', authenticateToken, requireRole(['facility-admin', 
 
   } catch (error) {
     console.error('❌ Add medicine to pharmacy error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Update facility (facility-admin only)
+router.put('/:id', authenticateToken, requireRole(['facility-admin', 'admin']), upload.array('images', 5), [
+  body('name').optional().trim().isLength({ min: 2, max: 200 }),
+  body('address').optional().trim().isLength({ min: 5, max: 500 }),
+  body('city').optional().trim().isLength({ min: 2, max: 100 }),
+  body('state').optional().trim().isLength({ max: 100 }),
+  body('postal_code').optional().trim().isLength({ max: 20 }),
+  body('phone').optional().trim().isLength({ min: 10, max: 20 }),
+  body('email').optional().isEmail().normalizeEmail(),
+  body('website').optional().isURL().optional({ nullable: true, checkFalsy: true }),
+  body('description').optional().trim().isLength({ max: 1000 }),
+  body('emergency_contact').optional().trim().isLength({ max: 100 }),
+  body('operating_hours').optional().custom((value) => {
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return typeof parsed === 'object' && parsed !== null;
+      } catch {
+        return false;
+      }
+    }
+    return typeof value === 'object' && value !== null;
+  }),
+  body('services').optional().custom((value) => {
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed);
+      } catch {
+        return false;
+      }
+    }
+    return Array.isArray(value);
+  }),
+  body('accepts_insurance').optional().isBoolean(),
+  body('has_delivery').optional().isBoolean(),
+  body('has_consultation').optional().isBoolean(),
+  body('is_active').optional().isBoolean(),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const facilityId = parseInt(req.params.id, 10);
+    const userId = parseInt(req.user.id, 10);
+
+    // Check if facility exists and user owns it
+    const facilityQuery = `
+      SELECT id, user_id, facility_type, images 
+      FROM healthcare_facilities 
+      WHERE id = ? AND user_id = ?
+    `;
+    const facilityResult = await executeQuery(facilityQuery, [facilityId, userId]);
+
+    if (!facilityResult.success || facilityResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found or you do not have permission to update it'
+      });
+    }
+
+    const existingFacility = facilityResult.data[0];
+
+    // Build update query dynamically
+    const updateFields = [];
+    const updateValues = [];
+
+    if (req.body.name) {
+      updateFields.push('name = ?');
+      updateValues.push(req.body.name.trim());
+    }
+    if (req.body.address) {
+      updateFields.push('address = ?');
+      updateValues.push(req.body.address.trim());
+    }
+    if (req.body.city) {
+      updateFields.push('city = ?');
+      updateValues.push(req.body.city.trim());
+    }
+    if (req.body.state !== undefined) {
+      updateFields.push('state = ?');
+      updateValues.push(req.body.state ? req.body.state.trim() : null);
+    }
+    if (req.body.postal_code !== undefined) {
+      updateFields.push('postal_code = ?');
+      updateValues.push(req.body.postal_code ? req.body.postal_code.trim() : null);
+    }
+    if (req.body.phone) {
+      updateFields.push('phone = ?');
+      updateValues.push(req.body.phone.trim());
+    }
+    if (req.body.email) {
+      // Check if email is already taken by another facility
+      const emailCheckQuery = 'SELECT id FROM healthcare_facilities WHERE email = ? AND id != ?';
+      const emailCheckResult = await executeQuery(emailCheckQuery, [req.body.email, facilityId]);
+      
+      if (emailCheckResult.success && emailCheckResult.data.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'A facility with this email address already exists'
+        });
+      }
+      
+      updateFields.push('email = ?');
+      updateValues.push(req.body.email);
+    }
+    if (req.body.website !== undefined) {
+      updateFields.push('website = ?');
+      updateValues.push(req.body.website ? req.body.website.trim() : null);
+    }
+    if (req.body.description !== undefined) {
+      updateFields.push('description = ?');
+      updateValues.push(req.body.description ? req.body.description.trim() : null);
+    }
+    if (req.body.emergency_contact !== undefined) {
+      updateFields.push('emergency_contact = ?');
+      updateValues.push(req.body.emergency_contact ? req.body.emergency_contact.trim() : null);
+    }
+    if (req.body.operating_hours) {
+      const operatingHours = typeof req.body.operating_hours === 'string' 
+        ? JSON.parse(req.body.operating_hours) 
+        : req.body.operating_hours;
+      updateFields.push('operating_hours = ?');
+      updateValues.push(JSON.stringify(operatingHours));
+    }
+    if (req.body.services) {
+      const services = typeof req.body.services === 'string' 
+        ? JSON.parse(req.body.services) 
+        : req.body.services;
+      updateFields.push('services = ?');
+      updateValues.push(JSON.stringify(services));
+    }
+    if (req.body.accepts_insurance !== undefined) {
+      updateFields.push('accepts_insurance = ?');
+      updateValues.push(req.body.accepts_insurance === true || req.body.accepts_insurance === 'true');
+    }
+    if (req.body.has_delivery !== undefined) {
+      updateFields.push('has_delivery = ?');
+      updateValues.push(req.body.has_delivery === true || req.body.has_delivery === 'true');
+    }
+    if (req.body.has_consultation !== undefined) {
+      updateFields.push('has_consultation = ?');
+      updateValues.push(req.body.has_consultation === true || req.body.has_consultation === 'true');
+    }
+    if (req.body.is_active !== undefined) {
+      updateFields.push('is_active = ?');
+      updateValues.push(req.body.is_active === true || req.body.is_active === 'true');
+    }
+
+    // Handle image uploads
+    if (req.files && req.files.length > 0) {
+      let existingImages = [];
+      if (existingFacility.images) {
+        try {
+          existingImages = typeof existingFacility.images === 'string' 
+            ? JSON.parse(existingFacility.images) 
+            : existingFacility.images;
+        } catch (e) {
+          existingImages = [];
+        }
+      }
+
+      const newImageUrls = req.files.map(file => {
+        const prefix = existingFacility.facility_type === 'hospital' ? 'hospital' : 'pharmacy';
+        return `/uploads/${prefix}-images/${file.filename}`;
+      });
+
+      const allImages = [...existingImages, ...newImageUrls];
+      updateFields.push('images = ?');
+      updateValues.push(JSON.stringify(allImages));
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update'
+      });
+    }
+
+    // Add updated_at
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(facilityId);
+
+    const updateQuery = `
+      UPDATE healthcare_facilities 
+      SET ${updateFields.join(', ')}
+      WHERE id = ?
+    `;
+
+    const updateResult = await executeQuery(updateQuery, updateValues);
+
+    if (!updateResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update facility'
+      });
+    }
+
+    // Get updated facility
+    const getUpdatedQuery = `
+      SELECT 
+        id, name, facility_type, address, city, state, postal_code,
+        phone, email, website, operating_hours, emergency_contact,
+        services, description, accepts_insurance, has_delivery,
+        has_consultation, images, is_active, is_verified, created_at, updated_at
+      FROM healthcare_facilities 
+      WHERE id = ?
+    `;
+    const updatedResult = await executeQuery(getUpdatedQuery, [facilityId]);
+
+    if (!updatedResult.success || updatedResult.data.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to retrieve updated facility'
+      });
+    }
+
+    let updatedFacility = updatedResult.data[0];
+
+    // Parse JSON fields
+    if (updatedFacility.operating_hours) {
+      try {
+        updatedFacility.operating_hours = typeof updatedFacility.operating_hours === 'string'
+          ? JSON.parse(updatedFacility.operating_hours)
+          : updatedFacility.operating_hours;
+      } catch (e) {
+        updatedFacility.operating_hours = null;
+      }
+    }
+    if (updatedFacility.services) {
+      try {
+        updatedFacility.services = typeof updatedFacility.services === 'string'
+          ? JSON.parse(updatedFacility.services)
+          : updatedFacility.services;
+      } catch (e) {
+        updatedFacility.services = [];
+      }
+    }
+    if (updatedFacility.images) {
+      try {
+        updatedFacility.images = typeof updatedFacility.images === 'string'
+          ? JSON.parse(updatedFacility.images)
+          : updatedFacility.images;
+      } catch (e) {
+        updatedFacility.images = [];
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Facility updated successfully',
+      data: updatedFacility
+    });
+
+  } catch (error) {
+    console.error('❌ Update facility error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'

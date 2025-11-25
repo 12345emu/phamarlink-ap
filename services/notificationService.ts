@@ -156,9 +156,19 @@ class NotificationService {
 
   /**
    * Schedule a local notification
+   * Checks user preferences before showing
    */
   async scheduleLocalNotification(notificationData: NotificationData): Promise<string | null> {
     try {
+      // Check if notifications are enabled for this type
+      const { notificationSettingsService } = await import('./notificationSettingsService');
+      const isEnabled = await notificationSettingsService.isNotificationEnabled(notificationData.type);
+      
+      if (!isEnabled) {
+        console.log(`🔕 NotificationService - ${notificationData.type} notifications are disabled, skipping`);
+        return null;
+      }
+
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: notificationData.title,

@@ -13,30 +13,11 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { notificationSettingsService, NotificationPreferences } from '../services/notificationSettingsService';
 
-interface NotificationSettings {
-  // General Notifications
-  pushNotifications: boolean;
-  emailNotifications: boolean;
-  smsNotifications: boolean;
-  
-  // Appointment Notifications
-  appointmentReminders: boolean;
-  appointmentCancellations: boolean;
-  appointmentReschedules: boolean;
-  newAppointmentRequests: boolean;
-  
-  // Patient Notifications
-  patientMessages: boolean;
-  patientPrescriptionRequests: boolean;
-  patientEmergencyAlerts: boolean;
-  
-  // System Notifications
-  systemUpdates: boolean;
-  maintenanceAlerts: boolean;
-  securityAlerts: boolean;
-  
-  // Reminder Settings
+interface NotificationSettings extends NotificationPreferences {
+  // Additional UI-only settings (stored locally)
   reminderTime: string; // '15min', '30min', '1hour', '2hours', '1day'
   quietHours: boolean;
   quietHoursStart: string;
@@ -62,23 +43,14 @@ export default function NotificationsSettingsModal({
     emailNotifications: true,
     smsNotifications: false,
     
-    // Appointment Notifications
-    appointmentReminders: true,
-    appointmentCancellations: true,
-    appointmentReschedules: true,
-    newAppointmentRequests: true,
+    // Category Notifications
+    appointmentNotifications: true,
+    orderNotifications: true,
+    chatNotifications: true,
+    systemNotifications: true,
+    promotionNotifications: false,
     
-    // Patient Notifications
-    patientMessages: true,
-    patientPrescriptionRequests: true,
-    patientEmergencyAlerts: true,
-    
-    // System Notifications
-    systemUpdates: true,
-    maintenanceAlerts: true,
-    securityAlerts: true,
-    
-    // Reminder Settings
+    // Reminder Settings (UI-only, stored locally)
     reminderTime: '30min',
     quietHours: false,
     quietHoursStart: '22:00',
@@ -95,12 +67,32 @@ export default function NotificationsSettingsModal({
   const loadNotificationSettings = async () => {
     setLoading(true);
     try {
-      // TODO: Load from backend/AsyncStorage
       console.log('🔍 NotificationsModal - Loading notification settings...');
-      // For now, using default settings
-      setLoading(false);
+      
+      const response = await notificationSettingsService.getPreferences();
+      
+      if (response.success && response.data) {
+        // Load UI-only settings from AsyncStorage
+        const reminderTime = await AsyncStorage.getItem('notification_reminder_time') || '30min';
+        const quietHours = await AsyncStorage.getItem('notification_quiet_hours') === 'true';
+        const quietHoursStart = await AsyncStorage.getItem('notification_quiet_hours_start') || '22:00';
+        const quietHoursEnd = await AsyncStorage.getItem('notification_quiet_hours_end') || '08:00';
+        
+        setSettings({
+          ...response.data,
+          reminderTime,
+          quietHours,
+          quietHoursStart,
+          quietHoursEnd,
+        });
+      } else {
+        // Use defaults if loading fails
+        console.warn('⚠️ NotificationsModal - Using default settings');
+      }
     } catch (error) {
       console.error('❌ NotificationsModal - Error loading settings:', error);
+      Alert.alert('Error', 'Failed to load notification settings. Using defaults.');
+    } finally {
       setLoading(false);
     }
   };
@@ -117,21 +109,40 @@ export default function NotificationsSettingsModal({
     try {
       console.log('🔍 NotificationsModal - Saving notification settings:', settings);
       
-      // TODO: Save to backend
-      // await saveNotificationSettings(settings);
+      // Extract backend preferences (exclude UI-only settings)
+      const backendPreferences: NotificationPreferences = {
+        pushNotifications: settings.pushNotifications,
+        emailNotifications: settings.emailNotifications,
+        smsNotifications: settings.smsNotifications,
+        appointmentNotifications: settings.appointmentNotifications,
+        orderNotifications: settings.orderNotifications,
+        chatNotifications: settings.chatNotifications,
+        systemNotifications: settings.systemNotifications,
+        promotionNotifications: settings.promotionNotifications,
+      };
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Save to backend
+      const response = await notificationSettingsService.updatePreferences(backendPreferences);
       
-      Alert.alert('Success', 'Notification settings updated successfully', [
-        {
-          text: 'OK',
-          onPress: () => {
-            onSettingsUpdated();
-            onClose();
+      if (response.success) {
+        // Save UI-only settings to AsyncStorage
+        await AsyncStorage.setItem('notification_reminder_time', settings.reminderTime);
+        await AsyncStorage.setItem('notification_quiet_hours', settings.quietHours.toString());
+        await AsyncStorage.setItem('notification_quiet_hours_start', settings.quietHoursStart);
+        await AsyncStorage.setItem('notification_quiet_hours_end', settings.quietHoursEnd);
+        
+        Alert.alert('Success', response.message || 'Notification settings updated successfully', [
+          {
+            text: 'OK',
+            onPress: () => {
+              onSettingsUpdated();
+              onClose();
+            }
           }
-        }
-      ]);
+        ]);
+      } else {
+        Alert.alert('Error', response.message || 'Failed to save notification settings. Please try again.');
+      }
     } catch (error) {
       console.error('❌ NotificationsModal - Error saving settings:', error);
       Alert.alert('Error', 'Failed to save notification settings. Please try again.');
@@ -140,7 +151,7 @@ export default function NotificationsSettingsModal({
     }
   };
 
-  const handleResetToDefaults = () => {
+  const handleResetToDefaults = async () => {
     Alert.alert(
       'Reset to Defaults',
       'Are you sure you want to reset all notification settings to default values?',
@@ -149,26 +160,41 @@ export default function NotificationsSettingsModal({
         {
           text: 'Reset',
           style: 'destructive',
-          onPress: () => {
-            setSettings({
+          onPress: async () => {
+            const defaultSettings: NotificationSettings = {
               pushNotifications: true,
               emailNotifications: true,
               smsNotifications: false,
-              appointmentReminders: true,
-              appointmentCancellations: true,
-              appointmentReschedules: true,
-              newAppointmentRequests: true,
-              patientMessages: true,
-              patientPrescriptionRequests: true,
-              patientEmergencyAlerts: true,
-              systemUpdates: true,
-              maintenanceAlerts: true,
-              securityAlerts: true,
+              appointmentNotifications: true,
+              orderNotifications: true,
+              chatNotifications: true,
+              systemNotifications: true,
+              promotionNotifications: false,
               reminderTime: '30min',
               quietHours: false,
               quietHoursStart: '22:00',
               quietHoursEnd: '08:00',
-            });
+            };
+            
+            setSettings(defaultSettings);
+            
+            // Also save to backend
+            const backendPrefs: NotificationPreferences = {
+              pushNotifications: defaultSettings.pushNotifications,
+              emailNotifications: defaultSettings.emailNotifications,
+              smsNotifications: defaultSettings.smsNotifications,
+              appointmentNotifications: defaultSettings.appointmentNotifications,
+              orderNotifications: defaultSettings.orderNotifications,
+              chatNotifications: defaultSettings.chatNotifications,
+              systemNotifications: defaultSettings.systemNotifications,
+              promotionNotifications: defaultSettings.promotionNotifications,
+            };
+            
+            await notificationSettingsService.updatePreferences(backendPrefs);
+            await AsyncStorage.setItem('notification_reminder_time', defaultSettings.reminderTime);
+            await AsyncStorage.setItem('notification_quiet_hours', defaultSettings.quietHours.toString());
+            await AsyncStorage.setItem('notification_quiet_hours_start', defaultSettings.quietHoursStart);
+            await AsyncStorage.setItem('notification_quiet_hours_end', defaultSettings.quietHoursEnd);
           }
         }
       ]
@@ -306,92 +332,43 @@ export default function NotificationsSettingsModal({
             </View>
           </View>
 
-          {/* Appointment Notifications */}
+          {/* Category Notifications */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Appointment Notifications</Text>
+            <Text style={styles.sectionTitle}>Category Notifications</Text>
             <View style={styles.sectionContent}>
               {renderToggleSetting(
-                'Appointment Reminders',
-                'Get reminded about upcoming appointments',
-                'appointmentReminders',
+                'Appointment Notifications',
+                'Get notified about appointments, cancellations, and reschedules',
+                'appointmentNotifications',
                 'calendar',
                 '#9b59b6'
               )}
               {renderToggleSetting(
-                'Cancellation Alerts',
-                'Be notified when appointments are cancelled',
-                'appointmentCancellations',
-                'times-circle',
+                'Order Notifications',
+                'Be notified about order updates and status changes',
+                'orderNotifications',
+                'shopping-cart',
                 '#e67e22'
               )}
               {renderToggleSetting(
-                'Reschedule Notifications',
-                'Be notified when appointments are rescheduled',
-                'appointmentReschedules',
-                'clock-o',
-                '#f39c12'
-              )}
-              {renderToggleSetting(
-                'New Appointment Requests',
-                'Be notified of new appointment requests',
-                'newAppointmentRequests',
-                'plus-circle',
-                '#2ecc71'
-              )}
-            </View>
-          </View>
-
-          {/* Patient Notifications */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Patient Notifications</Text>
-            <View style={styles.sectionContent}>
-              {renderToggleSetting(
-                'Patient Messages',
-                'Be notified of new patient messages',
-                'patientMessages',
+                'Chat Notifications',
+                'Be notified of new messages and conversations',
+                'chatNotifications',
                 'comments',
                 '#3498db'
               )}
               {renderToggleSetting(
-                'Prescription Requests',
-                'Be notified of prescription requests',
-                'patientPrescriptionRequests',
-                'file-text',
-                '#e74c3c'
-              )}
-              {renderToggleSetting(
-                'Emergency Alerts',
-                'Be notified of patient emergency alerts',
-                'patientEmergencyAlerts',
-                'exclamation-triangle',
-                '#e74c3c'
-              )}
-            </View>
-          </View>
-
-          {/* System Notifications */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>System Notifications</Text>
-            <View style={styles.sectionContent}>
-              {renderToggleSetting(
-                'System Updates',
-                'Be notified of system updates and new features',
-                'systemUpdates',
+                'System Notifications',
+                'Be notified of system updates, maintenance, and security alerts',
+                'systemNotifications',
                 'cog',
                 '#95a5a6'
               )}
               {renderToggleSetting(
-                'Maintenance Alerts',
-                'Be notified of scheduled maintenance',
-                'maintenanceAlerts',
-                'wrench',
-                '#f39c12'
-              )}
-              {renderToggleSetting(
-                'Security Alerts',
-                'Be notified of security-related events',
-                'securityAlerts',
-                'shield',
+                'Promotion Notifications',
+                'Receive promotional offers and special deals',
+                'promotionNotifications',
+                'gift',
                 '#e74c3c'
               )}
             </View>

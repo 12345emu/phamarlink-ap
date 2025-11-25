@@ -23,6 +23,7 @@ export interface PharmacistRegistration {
   acceptsInsurance: boolean;
   userId?: string;
   profileImage?: string;
+  facilityId?: number;
 }
 
 export interface PharmacistRegistrationResponse {
@@ -55,6 +56,12 @@ class PharmacistServiceNew {
       formData.append('emergencyContact', data.emergencyContact);
       if (data.userId) {
         formData.append('userId', data.userId);
+      }
+      if (data.facilityId) {
+        console.log('🔍 Service - Adding facilityId to FormData:', data.facilityId);
+        formData.append('facilityId', data.facilityId.toString());
+      } else {
+        console.log('🔍 Service - No facilityId provided in data');
       }
       
       // Add optional fields
@@ -127,9 +134,22 @@ class PharmacistServiceNew {
     } catch (error: any) {
       console.error('❌ Pharmacist registration error:', error);
       
+      // Extract error message from response if available
+      let errorMessage = 'Failed to register pharmacist. Please try again.';
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        // If there are validation errors, show the first one
+        const firstError = error.response.data.errors[0];
+        errorMessage = firstError.msg || firstError.message || errorMessage;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       return {
         success: false,
-        message: 'Failed to register pharmacist. Please try again.'
+        message: errorMessage
       };
     }
   }
