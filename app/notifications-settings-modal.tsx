@@ -206,7 +206,7 @@ export default function NotificationsSettingsModal({
     subtitle: string,
     key: keyof NotificationSettings,
     icon: string,
-    color: string = '#3498db'
+    color: string = '#8b7355'
   ) => (
     <View style={styles.settingItem}>
       <View style={styles.settingLeft}>
@@ -230,8 +230,8 @@ export default function NotificationsSettingsModal({
   const renderReminderTimeSelector = () => (
     <View style={styles.settingItem}>
       <View style={styles.settingLeft}>
-        <View style={[styles.settingIcon, { backgroundColor: '#e67e22' + '20' }]}>
-          <FontAwesome name="clock-o" size={20} color="#e67e22" />
+        <View style={[styles.settingIcon, { backgroundColor: '#8b7355' + '20' }]}>
+          <FontAwesome name="clock-o" size={20} color="#8b7355" />
         </View>
         <View style={styles.settingText}>
           <Text style={styles.settingTitle}>Reminder Time</Text>
@@ -264,7 +264,7 @@ export default function NotificationsSettingsModal({
     return (
       <Modal visible={visible} transparent>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3498db" />
+          <ActivityIndicator size="large" color="#8b7355" />
           <Text style={styles.loadingText}>Loading notification settings...</Text>
         </View>
       </Modal>
@@ -281,7 +281,7 @@ export default function NotificationsSettingsModal({
       <View style={styles.container}>
         {/* Header */}
         <LinearGradient
-          colors={['#3498db', '#2980b9']}
+          colors={['#8b7355', '#6b5d4f', '#5a4f3f']}
           style={styles.header}
         >
           <View style={styles.headerContent}>
@@ -313,21 +313,21 @@ export default function NotificationsSettingsModal({
                 'Receive push notifications on your device',
                 'pushNotifications',
                 'bell',
-                '#3498db'
+                '#8b7355'
               )}
               {renderToggleSetting(
                 'Email Notifications',
                 'Receive notifications via email',
                 'emailNotifications',
                 'envelope',
-                '#e74c3c'
+                '#8b7355'
               )}
               {renderToggleSetting(
                 'SMS Notifications',
                 'Receive notifications via SMS',
                 'smsNotifications',
                 'mobile',
-                '#27ae60'
+                '#8b7355'
               )}
             </View>
           </View>
@@ -341,35 +341,35 @@ export default function NotificationsSettingsModal({
                 'Get notified about appointments, cancellations, and reschedules',
                 'appointmentNotifications',
                 'calendar',
-                '#9b59b6'
+                '#8b7355'
               )}
               {renderToggleSetting(
                 'Order Notifications',
                 'Be notified about order updates and status changes',
                 'orderNotifications',
                 'shopping-cart',
-                '#e67e22'
+                '#8b7355'
               )}
               {renderToggleSetting(
                 'Chat Notifications',
                 'Be notified of new messages and conversations',
                 'chatNotifications',
                 'comments',
-                '#3498db'
+                '#8b7355'
               )}
               {renderToggleSetting(
                 'System Notifications',
                 'Be notified of system updates, maintenance, and security alerts',
                 'systemNotifications',
                 'cog',
-                '#95a5a6'
+                '#8b7355'
               )}
               {renderToggleSetting(
                 'Promotion Notifications',
                 'Receive promotional offers and special deals',
                 'promotionNotifications',
                 'gift',
-                '#e74c3c'
+                '#8b7355'
               )}
             </View>
           </View>
@@ -385,7 +385,7 @@ export default function NotificationsSettingsModal({
                 'Disable notifications during specified hours',
                 'quietHours',
                 'moon-o',
-                '#34495e'
+                '#8b7355'
               )}
             </View>
           </View>
@@ -521,8 +521,8 @@ const styles = StyleSheet.create({
     borderColor: '#bdc3c7',
   },
   reminderTimeOptionSelected: {
-    backgroundColor: '#3498db',
-    borderColor: '#3498db',
+    backgroundColor: '#8b7355',
+    borderColor: '#8b7355',
   },
   reminderTimeText: {
     fontSize: 12,

@@ -212,8 +212,8 @@ router.get('/conversations/:id/messages', authenticateToken, async (req, res) =>
 });
 
 // Create new conversation
-// Patient or facility-admin creates conversation with doctor
-router.post('/conversations', authenticateToken, requireRole(['patient', 'facility-admin']), [
+// Patient, facility-admin, or pharmacist creates conversation with doctor/professional
+router.post('/conversations', authenticateToken, requireRole(['patient', 'facility-admin', 'pharmacist']), [
   body('professional_id').isInt({ min: 1 }),
   body('subject').isLength({ min: 1, max: 100 }).trim(),
   body('initial_message').isLength({ min: 1, max: 500 }).trim()
@@ -737,7 +737,19 @@ router.post('/conversations/:id/upload', authenticateToken, upload.single('file'
           parseInt(id)
         );
         
-        // Send notification asynchronously (don't wait for it)
+        // Create notification in database
+        await createNotification({
+          userId: recipientId,
+          type: 'chat',
+          title: `New message from ${senderName}`,
+          message: notificationMessage.length > 200 ? notificationMessage.slice(0, 200) : notificationMessage,
+          data: {
+            conversationId: parseInt(id, 10),
+            senderId: userId,
+          },
+        });
+        
+        // Send push notification asynchronously (don't wait for it)
         pushNotificationService.sendNotificationToUser(recipientId, notificationData)
           .then(result => {
             if (result.success) {

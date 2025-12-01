@@ -127,6 +127,14 @@ export const API_ENDPOINTS = {
     MARK_AS_READ: (id: string) => `/notifications/${id}/read`,
     DELETE: (id: string) => `/notifications/${id}`,
     PREFERENCES: '/notifications/preferences',
+    UNREAD_COUNT: '/notifications/unread/count',
+  },
+  
+  // Push Notifications
+  PUSH_NOTIFICATIONS: {
+    REGISTER: '/push-notifications/register',
+    DEACTIVATE: '/push-notifications/deactivate',
+    DEVICES: '/push-notifications/devices',
   },
   
   // Search

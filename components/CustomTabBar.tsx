@@ -41,6 +41,15 @@ const facilityTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; la
   { name: 'user', label: 'Profile', route: 'profile' },
 ];
 
+// Pharmacist tabs (home will be floating in middle)
+const pharmacistTabs: { name: React.ComponentProps<typeof FontAwesome>["name"]; label: string; route: string }[] = [
+  { name: 'archive', label: 'Inventory', route: 'inventory' },
+  { name: 'list-alt', label: 'Orders', route: 'orders' },
+  { name: 'home', label: 'Home', route: 'index' },
+  { name: 'comments', label: 'Chat', route: 'chat' },
+  { name: 'user', label: 'Profile', route: 'profile' },
+];
+
 export default function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { cart } = useCart();
   const { orders } = useOrders();
@@ -81,51 +90,57 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
   // Determine which tabs to show based on user role
   const isDoctor = user?.role === 'doctor';
   const isFacilityAdmin = (user?.role as string) === 'facility-admin'; // Type assertion to handle facility-admin role
-  const currentTabs = isDoctor ? doctorTabs : isFacilityAdmin ? facilityTabs : patientTabs;
+  const isPharmacist = (user?.role as string) === 'pharmacist';
+  const currentTabs = isDoctor ? doctorTabs : isFacilityAdmin ? facilityTabs : isPharmacist ? pharmacistTabs : patientTabs;
   
-  // For facility admin, calculate spacing differently (home in middle)
-  const homeTabIndex = isFacilityAdmin ? facilityTabs.findIndex(t => t.route === 'index') : -1;
-  const TAB_SPACING = isFacilityAdmin && homeTabIndex >= 0 
+  // For facility admin and pharmacist, calculate spacing differently (home in middle)
+  const hasFloatingHome = isFacilityAdmin || isPharmacist;
+  const homeTabIndex = hasFloatingHome ? currentTabs.findIndex(t => t.route === 'index') : -1;
+  const TAB_SPACING = hasFloatingHome && homeTabIndex >= 0 
     ? (width - FLOATING_BUTTON_SPACE) / (currentTabs.length - 1) // Reserve space for floating home button
     : width / currentTabs.length;
 
   // Map currentTabs to their actual index in state.routes
   const getTabIndex = (routeName: string) => state.routes.findIndex(r => r.name === routeName);
 
-  const styles = createStyles(TAB_SPACING, isFacilityAdmin);
+  const styles = createStyles(TAB_SPACING, hasFloatingHome);
 
   return (
     <View style={styles.wrapper}>
         {/* Modern Background with Gradient */}
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           <LinearGradient
-            colors={['rgba(52, 152, 219, 0.15)', 'rgba(41, 128, 185, 0.1)', 'rgba(255, 255, 255, 0.98)']}
+            colors={isPharmacist 
+              ? ['rgba(212, 175, 55, 0.12)', 'rgba(201, 169, 97, 0.08)', 'rgba(255, 255, 255, 0.98)']
+              : ['rgba(52, 152, 219, 0.15)', 'rgba(41, 128, 185, 0.1)', 'rgba(255, 255, 255, 0.98)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
             style={StyleSheet.absoluteFill}
           />
           {/* Subtle accent gradient at top */}
           <LinearGradient
-            colors={['rgba(52, 152, 219, 0.08)', 'transparent']}
+            colors={isPharmacist 
+              ? ['rgba(212, 175, 55, 0.06)', 'transparent']
+              : ['rgba(52, 152, 219, 0.08)', 'transparent']}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 0.3 }}
             style={StyleSheet.absoluteFill}
           />
-          <View style={styles.backgroundGradient} />
+          <View style={[styles.backgroundGradient, isPharmacist && { borderTopColor: 'rgba(212, 175, 55, 0.25)' }]} />
           <BlurView intensity={50} tint="light" style={StyleSheet.absoluteFill} />
         </View>
         {/* All Tabs with equal spacing */}
         {currentTabs.map((tab, idx) => {
           const tabIndex = getTabIndex(tab.route);
           const isActive = state.index === tabIndex;
-          const isHomeTab = tab.route === 'index' && isFacilityAdmin;
+          const isHomeTab = tab.route === 'index' && hasFloatingHome;
           
-          // Calculate position for facility admin tabs (home in center)
+          // Calculate position for facility admin and pharmacist tabs (home in center)
           let leftPosition = idx * TAB_SPACING;
-          if (isFacilityAdmin && isHomeTab) {
+          if (hasFloatingHome && isHomeTab) {
             // Center the home button perfectly
             leftPosition = width / 2 - FLOATING_BUTTON_SIZE / 2;
-          } else if (isFacilityAdmin) {
+          } else if (hasFloatingHome) {
             // For other tabs, distribute them evenly on both sides of the floating button
             const tabsBeforeHome = homeTabIndex;
             const tabsAfterHome = currentTabs.length - homeTabIndex - 1;
@@ -167,13 +182,16 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
               >
                 <View style={[
                   styles.iconContainer,
-                  isActive && !isHomeTab && styles.activeIconContainer,
+                  isActive && !isHomeTab && (isPharmacist ? styles.activeIconContainerPharmacist : styles.activeIconContainer),
                   isHomeTab && styles.floatingHomeIconContainer,
-                  isHomeTab && isActive && styles.floatingHomeIconContainerActive
+                  isHomeTab && isActive && styles.floatingHomeIconContainerActive,
+                  isHomeTab && isPharmacist && isActive && { shadowColor: '#d4af37' }
                 ]}>
                   {isHomeTab ? (
                     <LinearGradient
-                      colors={isActive ? ['#9b59b6', '#8e44ad', '#7d3c98'] : ['#9b59b6', '#8e44ad']}
+                      colors={isActive 
+                        ? (isPharmacist ? ['#d4af37', '#c9a961', '#b8941d'] : ['#9b59b6', '#8e44ad', '#7d3c98'])
+                        : (isPharmacist ? ['#d4af37', '#c9a961'] : ['#9b59b6', '#8e44ad'])}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={styles.floatingHomeGradient}
@@ -188,7 +206,7 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
                     <FontAwesome 
                       name={tab.name} 
                       size={22} 
-                      color={isActive ? '#43e97b' : '#8e8e93'} 
+                      color={isActive ? (isPharmacist ? '#d4af37' : '#43e97b') : '#8e8e93'} 
                     />
                   )}
                   {/* Orders Badge - Only for patients and facility-admin */}
@@ -211,7 +229,8 @@ export default function CustomTabBar({ state, descriptors, navigation }: BottomT
                 {!isHomeTab && (
                   <Text style={[
                     styles.tabLabel,
-                    isActive && styles.activeTabLabel
+                    isActive && styles.activeTabLabel,
+                    isActive && isPharmacist && { color: '#d4af37' }
                   ]}>
                     {tab.label}
                   </Text>
@@ -266,6 +285,14 @@ const createStyles = (tabSpacing: number, isFacilityAdmin: boolean = false) => S
   activeIconContainer: {
     backgroundColor: 'rgba(67, 233, 123, 0.2)',
     shadowColor: '#43e97b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  activeIconContainerPharmacist: {
+    backgroundColor: 'rgba(212, 175, 55, 0.2)',
+    shadowColor: '#d4af37',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.4,
     shadowRadius: 6,

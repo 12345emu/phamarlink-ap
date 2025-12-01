@@ -1,6 +1,6 @@
 const { executeQuery } = require('../config/database');
 
-const VALID_NOTIFICATION_TYPES = ['appointment', 'order', 'chat', 'system', 'reminder'];
+const VALID_NOTIFICATION_TYPES = ['appointment', 'order', 'chat', 'system', 'reminder', 'medicine'];
 
 async function createNotification({ userId, type = 'system', title, message, data = null }) {
   try {
@@ -11,7 +11,15 @@ async function createNotification({ userId, type = 'system', title, message, dat
 
     const normalizedType = VALID_NOTIFICATION_TYPES.includes(type) ? type : 'system';
 
-    await executeQuery(
+    console.log('🔔 Creating notification:', {
+      userId,
+      type: normalizedType,
+      title: title.substring(0, 50),
+      messageLength: message.length,
+      hasData: !!data,
+    });
+
+    const result = await executeQuery(
       `INSERT INTO notifications (
         user_id,
         notification_type,
@@ -30,7 +38,13 @@ async function createNotification({ userId, type = 'system', title, message, dat
       ]
     );
 
-    return { success: true };
+    if (result.success) {
+      console.log('✅ Notification created successfully for user:', userId, 'ID:', result.insertId);
+    } else {
+      console.error('❌ Failed to create notification:', result.error);
+    }
+
+    return { success: result.success, insertId: result.insertId };
   } catch (error) {
     console.error('❌ Error creating notification:', error);
     return { success: false, message: error.message };

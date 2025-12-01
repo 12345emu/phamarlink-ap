@@ -18,8 +18,8 @@ const emailConfig = {
   greetingTimeout: 20000, // 20 seconds
   socketTimeout: 20000, // 20 seconds
   pool: false, // Disable pooling for troubleshooting
-  debug: false, // Disable debug to reduce noise
-  logger: false // Disable logger
+  debug: true, // Enable debug to see what's happening
+  logger: true // Enable logger to see email sending details
 };
 
 // Test email connection on startup
@@ -241,34 +241,40 @@ async function sendDoctorCredentials(email, firstName, password) {
   }
 }
 
-async function sendPasswordResetEmail(email, firstName, resetToken) {
+async function sendPasswordResetOTP(email, firstName, otpCode) {
   try {
-    const resetUrl = `http://172.20.10.3:3000/reset-password?token=${resetToken}`;
+    console.log('📧 sendPasswordResetOTP - Starting email send...');
+    console.log('📧 sendPasswordResetOTP - Email:', email);
+    console.log('📧 sendPasswordResetOTP - First Name:', firstName);
+    console.log('📧 sendPasswordResetOTP - OTP Code:', otpCode);
+    console.log('📧 sendPasswordResetOTP - From:', emailConfig.auth.user);
     
     const mailOptions = {
       from: `"PharmaLink" <${emailConfig.auth.user}>`,
       to: email,
-      subject: 'PharmaLink - Password Reset Request',
+      subject: 'PharmaLink - Password Reset OTP',
       html: `
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Password Reset - PharmaLink</title>
+          <title>Password Reset OTP - PharmaLink</title>
           <style>
             body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
             .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
             .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
-            .button { display: inline-block; background: #667eea; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+            .otp-box { background: #fff; border: 3px solid #667eea; border-radius: 10px; padding: 20px; text-align: center; margin: 20px 0; }
+            .otp-code { font-size: 32px; font-weight: bold; color: #667eea; letter-spacing: 8px; font-family: 'Courier New', monospace; }
             .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
           </style>
         </head>
         <body>
           <div class="container">
             <div class="header">
-              <h1>🔒 Password Reset Request</h1>
+              <h1>🔒 Password Reset Verification</h1>
             </div>
             
             <div class="content">
@@ -276,18 +282,24 @@ async function sendPasswordResetEmail(email, firstName, resetToken) {
               
               <p>We received a request to reset your password for your PharmaLink account.</p>
               
-              <p>Click the button below to reset your password:</p>
+              <p>Use the following One-Time Password (OTP) to verify your identity:</p>
               
-              <p style="text-align: center;">
-                <a href="${resetUrl}" class="button">Reset Password</a>
-              </p>
+              <div class="otp-box">
+                <div class="otp-code">${otpCode}</div>
+              </div>
               
-              <p>If the button doesn't work, copy and paste this link into your browser:</p>
-              <p style="word-break: break-all; color: #667eea;">${resetUrl}</p>
+              <div class="warning">
+                <p><strong>⚠️ Important Security Information:</strong></p>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                  <li>This OTP is valid for <strong>10 minutes</strong> only</li>
+                  <li>Do not share this OTP with anyone</li>
+                  <li>If you didn't request this, please ignore this email</li>
+                </ul>
+              </div>
               
-              <p><strong>This link will expire in 1 hour for security reasons.</strong></p>
+              <p>Enter this code in the app to proceed with resetting your password.</p>
               
-              <p>If you didn't request this password reset, please ignore this email or contact our support team if you have concerns.</p>
+              <p>If you have any concerns, please contact our support team immediately.</p>
               
               <p>Best regards,<br>
               The PharmaLink Team</p>
@@ -303,11 +315,56 @@ async function sendPasswordResetEmail(email, firstName, resetToken) {
       `
     };
 
+    console.log('📧 sendPasswordResetOTP - Sending email via transporter...');
+    console.log('📧 sendPasswordResetOTP - Transporter configured:', {
+      host: emailConfig.host,
+      port: emailConfig.port,
+      secure: emailConfig.secure,
+      user: emailConfig.auth.user,
+    });
+    
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Password reset email sent successfully:', info.messageId);
+    console.log('✅ Password reset OTP email sent successfully!');
+    console.log('✅ Email Message ID:', info.messageId);
+    console.log('✅ Email Response:', info.response);
+    console.log('✅ Email Accepted:', info.accepted);
+    console.log('✅ Email Rejected:', info.rejected);
     return true;
   } catch (error) {
-    console.error('❌ Error sending password reset email:', error);
+    console.error('❌ Error sending password reset OTP email:', error);
+    console.error('❌ Error name:', error.name);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error code:', error.code);
+    console.error('❌ Error command:', error.command);
+    console.error('❌ Full error stack:', error.stack);
+    
+    // Check for specific error types
+    if (error.code === 'EAUTH') {
+      console.error('❌ Authentication failed - check email credentials');
+    } else if (error.code === 'ECONNECTION') {
+      console.error('❌ Connection failed - check SMTP settings');
+    } else if (error.code === 'ETIMEDOUT') {
+      console.error('❌ Connection timeout - check network/SMTP server');
+    }
+    
+    return false;
+  }
+}
+
+// Keep old function for backward compatibility (if needed)
+async function sendPasswordResetEmail(email, firstName, resetToken) {
+  return sendPasswordResetOTP(email, firstName, '000000'); // Fallback
+}
+
+// Test email connection
+async function testEmailConnection() {
+  try {
+    console.log('🧪 Testing email connection...');
+    await transporter.verify();
+    console.log('✅ Email connection test successful');
+    return true;
+  } catch (error) {
+    console.error('❌ Email connection test failed:', error);
     return false;
   }
 }
@@ -567,7 +624,8 @@ module.exports = {
   sendPharmacistCredentials,
   sendDoctorCredentials,
   sendPharmacyCredentials,
-  sendPasswordResetEmail,
+  sendPasswordResetOTP,
+  sendPasswordResetEmail, // Keep for backward compatibility
   sendAppointmentConfirmationEmail,
   testEmailConnection
 };

@@ -269,6 +269,24 @@ class ChatWebSocketServer {
       }
       await this.sendPushNotificationToRecipient(recipientId, sender, notificationMessage, conversationId);
       
+      // Create notification in database for the recipient
+      if (recipientId && sender) {
+        const { createNotification } = require('../utils/notificationHelper');
+        const senderName = `${sender.first_name} ${sender.last_name}`;
+        await createNotification({
+          userId: recipientId,
+          type: 'chat',
+          title: `New message from ${senderName}`,
+          message: notificationMessage.length > 200 ? notificationMessage.slice(0, 200) : notificationMessage,
+          data: {
+            conversationId: conversationIdNum,
+            senderId: senderIdNum,
+          },
+        }).catch(error => {
+          console.error('❌ WebSocket - Error creating notification:', error);
+        });
+      }
+      
       console.log(`📨 Message sent from ${senderId} to ${recipientId} in conversation ${conversationId}`);
       
     } catch (error) {
@@ -366,46 +384,43 @@ class ChatWebSocketServer {
    */
   async sendPushNotificationToRecipient(recipientId, sender, message, conversationId) {
     try {
+      if (!recipientId || !sender) {
+        console.log('⚠️ WebSocket - Cannot send push notification: missing recipientId or sender');
+        return;
+      }
+      
       // Check if recipient is online
       const isRecipientOnline = this.clients.has(recipientId);
       
+      // Send push notification even if online (for better UX), but log differently
       if (!isRecipientOnline) {
         console.log('🔔 WebSocket - Recipient not online, sending push notification');
+      } else {
+        console.log('🔔 WebSocket - Recipient online, but sending push notification anyway');
+      }
+      
+      // Get recipient info to determine notification type
+      const recipientQuery = 'SELECT user_type FROM users WHERE id = ?';
+      const recipientResult = await executeQuery(recipientQuery, [recipientId]);
+      
+      if (recipientResult.success && recipientResult.data.length > 0) {
+        const recipientType = recipientResult.data[0].user_type;
+        const senderName = `${sender.first_name} ${sender.last_name}`;
         
-        // Get recipient info to determine notification type
-        const recipientQuery = 'SELECT user_type FROM users WHERE id = ?';
-        const recipientResult = await executeQuery(recipientQuery, [recipientId]);
+        // Create chat notification (same for all user types)
+        const notificationData = pushNotificationService.createChatNotification(
+          senderName, 
+          message, 
+          conversationId
+        );
         
-        if (recipientResult.success && recipientResult.data.length > 0) {
-          const recipientType = recipientResult.data[0].user_type;
-          const senderName = `${sender.first_name} ${sender.last_name}`;
-          
-          let notificationData;
-          
-          if (recipientType === 'doctor') {
-            // Doctor receiving message from patient
-            notificationData = pushNotificationService.createChatNotification(
-              senderName, 
-              message, 
-              conversationId
-            );
-          } else {
-            // Patient receiving message from doctor
-            notificationData = pushNotificationService.createChatNotification(
-              senderName, 
-              message, 
-              conversationId
-            );
-          }
-          
-          // Send push notification
-          const result = await pushNotificationService.sendNotificationToUser(recipientId, notificationData);
-          
-          if (result.success) {
-            console.log('✅ WebSocket - Push notification sent successfully');
-          } else {
-            console.log('⚠️ WebSocket - Failed to send push notification:', result.message);
-          }
+        // Send push notification
+        const result = await pushNotificationService.sendNotificationToUser(recipientId, notificationData);
+        
+        if (result.success) {
+          console.log('✅ WebSocket - Push notification sent successfully');
+        } else {
+          console.log('⚠️ WebSocket - Failed to send push notification:', result.message);
         }
       } else {
         console.log('🔔 WebSocket - Recipient is online, no push notification needed');

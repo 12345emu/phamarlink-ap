@@ -23,8 +23,12 @@ export default function NotificationTester() {
         123
       );
 
-      await notificationService.scheduleLocalNotification(notificationData);
-      Alert.alert('Success', 'Chat notification sent!');
+      const notificationId = await notificationService.scheduleLocalNotification(notificationData, true);
+      if (notificationId) {
+        Alert.alert('Success', 'Chat notification sent!');
+      } else {
+        Alert.alert('Error', 'Failed to send chat notification. Please check notification permissions.');
+      }
     } catch (error) {
       console.error('❌ Error sending chat notification:', error);
       Alert.alert('Error', 'Failed to send chat notification');
@@ -43,8 +47,12 @@ export default function NotificationTester() {
         '10:00 AM'
       );
 
-      await notificationService.scheduleLocalNotification(notificationData);
-      Alert.alert('Success', 'Appointment notification sent!');
+      const notificationId = await notificationService.scheduleLocalNotification(notificationData, true);
+      if (notificationId) {
+        Alert.alert('Success', 'Appointment notification sent!');
+      } else {
+        Alert.alert('Error', 'Failed to send appointment notification. Please check notification permissions.');
+      }
     } catch (error) {
       console.error('❌ Error sending appointment notification:', error);
       Alert.alert('Error', 'Failed to send appointment notification');
@@ -62,8 +70,12 @@ export default function NotificationTester() {
         'Paracetamol'
       );
 
-      await notificationService.scheduleLocalNotification(notificationData);
-      Alert.alert('Success', 'Prescription notification sent!');
+      const notificationId = await notificationService.scheduleLocalNotification(notificationData, true);
+      if (notificationId) {
+        Alert.alert('Success', 'Prescription notification sent!');
+      } else {
+        Alert.alert('Error', 'Failed to send prescription notification. Please check notification permissions.');
+      }
     } catch (error) {
       console.error('❌ Error sending prescription notification:', error);
       Alert.alert('Error', 'Failed to send prescription notification');
@@ -81,8 +93,12 @@ export default function NotificationTester() {
         'I am experiencing severe chest pain and need immediate help!'
       );
 
-      await notificationService.scheduleLocalNotification(notificationData);
-      Alert.alert('Success', 'Emergency notification sent!');
+      const notificationId = await notificationService.scheduleLocalNotification(notificationData, true);
+      if (notificationId) {
+        Alert.alert('Success', 'Emergency notification sent!');
+      } else {
+        Alert.alert('Error', 'Failed to send emergency notification. Please check notification permissions.');
+      }
     } catch (error) {
       console.error('❌ Error sending emergency notification:', error);
       Alert.alert('Error', 'Failed to send emergency notification');
@@ -147,7 +163,7 @@ export default function NotificationTester() {
       disabled={isLoading}
     >
       <View style={styles.buttonContent}>
-        <FontAwesome name={icon} size={20} color={color} />
+        <FontAwesome className={icon} size={20} color={color} />
         <View style={styles.buttonText}>
           <Text style={[styles.buttonTitle, { color }]}>{title}</Text>
           <Text style={styles.buttonDescription}>{description}</Text>

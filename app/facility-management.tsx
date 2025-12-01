@@ -1468,9 +1468,15 @@ function OverviewTab({
               <FontAwesome name="star" size={16} color="#f39c12" />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoLabel}>Rating</Text>
-                <Text style={styles.infoText}>
-                  {facility.rating.toFixed(1)} ⭐ ({facility.total_reviews || 0} reviews)
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.infoText}>
+                    {facility.rating.toFixed(1)}
+                  </Text>
+                  <FontAwesome name="star" size={12} color="#f39c12" style={{ marginHorizontal: 4 }} />
+                  <Text style={styles.infoText}>
+                    ({facility.total_reviews || 0} reviews)
+                  </Text>
+                </View>
               </View>
             </View>
           )}
@@ -1838,6 +1844,38 @@ function OrdersTab({ facilityId }: { facilityId: string }) {
 
 // Settings Tab Component
 function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => void }) {
+  // Helper function to convert database boolean values to JavaScript boolean
+  const toBoolean = (value: any): boolean => {
+    // Handle null/undefined
+    if (value === null || value === undefined) {
+      return false;
+    }
+    
+    // Handle boolean values
+    if (value === true || value === false) {
+      return value;
+    }
+    
+    // Handle numeric values (MySQL returns TINYINT(1) as 0 or 1)
+    if (typeof value === 'number') {
+      return value !== 0;
+    }
+    
+    // Handle string values
+    if (typeof value === 'string') {
+      const lowerValue = value.toLowerCase().trim();
+      if (lowerValue === '1' || lowerValue === 'true' || lowerValue === 'yes') {
+        return true;
+      }
+      if (lowerValue === '0' || lowerValue === 'false' || lowerValue === 'no' || lowerValue === '') {
+        return false;
+      }
+    }
+    
+    // For any other truthy value, return true
+    return Boolean(value);
+  };
+
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState(() => {
@@ -1864,25 +1902,10 @@ function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => vo
       website: facility?.website || '',
       description: facility?.description || '',
       emergency_contact: (facility?.emergency_contact !== null && facility?.emergency_contact !== undefined) ? facility.emergency_contact : '',
-      accepts_insurance: Boolean(
-        facility?.accepts_insurance === true ||
-        facility?.accepts_insurance === 1 ||
-        facility?.accepts_insurance === '1' ||
-        facility?.accepts_insurance === 'true'
-      ),
-      has_delivery: Boolean(
-        facility?.has_delivery === true ||
-        facility?.has_delivery === 1 ||
-        facility?.has_delivery === '1' ||
-        facility?.has_delivery === 'true'
-      ),
-      has_consultation: Boolean(
-        facility?.has_consultation === true ||
-        facility?.has_consultation === 1 ||
-        facility?.has_consultation === '1' ||
-        facility?.has_consultation === 'true'
-      ),
-      is_active: Boolean(facility?.is_active !== false && facility?.is_active !== 0 && facility?.is_active !== '0' && facility?.is_active !== 'false'),
+      accepts_insurance: toBoolean(facility?.accepts_insurance),
+      has_delivery: toBoolean(facility?.has_delivery),
+      has_consultation: toBoolean(facility?.has_consultation),
+      is_active: toBoolean(facility?.is_active),
     };
   });
 
@@ -1927,6 +1950,17 @@ function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => vo
 
   useEffect(() => {
     if (facility) {
+      // Debug: Log the raw values from facility
+      console.log('🔍 Facility data in SettingsTab:', {
+        id: facility.id,
+        accepts_insurance: facility.accepts_insurance,
+        accepts_insurance_type: typeof facility.accepts_insurance,
+        has_delivery: facility.has_delivery,
+        has_delivery_type: typeof facility.has_delivery,
+        has_consultation: facility.has_consultation,
+        has_consultation_type: typeof facility.has_consultation,
+      });
+      
       // Use original fields if available, otherwise check transformed structure
       let addressValue = '';
       if (facility.address_original) {
@@ -1939,6 +1973,16 @@ function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => vo
         }
       }
       
+      const convertedAcceptsInsurance = toBoolean(facility.accepts_insurance);
+      const convertedHasDelivery = toBoolean(facility.has_delivery);
+      const convertedHasConsultation = toBoolean(facility.has_consultation);
+      
+      console.log('🔍 Converted boolean values:', {
+        accepts_insurance: convertedAcceptsInsurance,
+        has_delivery: convertedHasDelivery,
+        has_consultation: convertedHasConsultation,
+      });
+      
       setFormData({
         name: facility.name || '',
         address: addressValue,
@@ -1950,25 +1994,10 @@ function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => vo
         website: facility.website || '',
         description: facility.description || '',
         emergency_contact: (facility.emergency_contact !== null && facility.emergency_contact !== undefined) ? facility.emergency_contact : '',
-        accepts_insurance: Boolean(
-          facility.accepts_insurance === true ||
-          facility.accepts_insurance === 1 ||
-          facility.accepts_insurance === '1' ||
-          facility.accepts_insurance === 'true'
-        ),
-        has_delivery: Boolean(
-          facility.has_delivery === true ||
-          facility.has_delivery === 1 ||
-          facility.has_delivery === '1' ||
-          facility.has_delivery === 'true'
-        ),
-        has_consultation: Boolean(
-          facility.has_consultation === true ||
-          facility.has_consultation === 1 ||
-          facility.has_consultation === '1' ||
-          facility.has_consultation === 'true'
-        ),
-        is_active: Boolean(facility.is_active !== false && facility.is_active !== 0 && facility.is_active !== '0' && facility.is_active !== 'false'),
+        accepts_insurance: convertedAcceptsInsurance,
+        has_delivery: convertedHasDelivery,
+        has_consultation: convertedHasConsultation,
+        is_active: toBoolean(facility.is_active),
       });
 
       // Handle both operating_hours (snake_case) and operatingHours (camelCase)
@@ -2171,30 +2200,10 @@ function SettingsTab({ facility, onUpdate }: { facility: any; onUpdate: () => vo
                       website: facility.website || '',
                       description: facility.description || '',
                       emergency_contact: facility.emergency_contact || (facility.emergency_contact === null ? '' : ''),
-                      accepts_insurance: Boolean(
-                        facility.accepts_insurance === true ||
-                        facility.accepts_insurance === 1 ||
-                        facility.accepts_insurance === '1' ||
-                        facility.accepts_insurance === 'true'
-                      ),
-                      has_delivery: Boolean(
-                        facility.has_delivery === true ||
-                        facility.has_delivery === 1 ||
-                        facility.has_delivery === '1' ||
-                        facility.has_delivery === 'true'
-                      ),
-                      has_consultation: Boolean(
-                        facility.has_consultation === true ||
-                        facility.has_consultation === 1 ||
-                        facility.has_consultation === '1' ||
-                        facility.has_consultation === 'true'
-                      ),
-                      is_active: Boolean(
-                        facility.is_active !== false &&
-                        facility.is_active !== 0 &&
-                        facility.is_active !== '0' &&
-                        facility.is_active !== 'false'
-                      ),
+                      accepts_insurance: toBoolean(facility.accepts_insurance),
+                      has_delivery: toBoolean(facility.has_delivery),
+                      has_consultation: toBoolean(facility.has_consultation),
+                      is_active: toBoolean(facility.is_active),
                     });
                   }
                 }}

@@ -10,7 +10,7 @@ router.get('/', [
   authenticateToken,
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-  query('type').optional().isIn(['appointment', 'order', 'chat', 'system', 'reminder']).withMessage('Invalid notification type'),
+  query('type').optional().isIn(['appointment', 'order', 'chat', 'system', 'reminder', 'medicine']).withMessage('Invalid notification type'),
   query('read').optional().isBoolean().withMessage('Read status must be boolean'),
 ], async (req, res) => {
   try {
@@ -57,7 +57,24 @@ router.get('/', [
     const queryParams = [...params];
     queryParams.push(parseInt(limit), offset);
 
-    const notifications = await db.executeQuery(query, queryParams);
+    const notificationsResult = await db.executeQuery(query, queryParams);
+
+    console.log('🔔 Backend - Fetching notifications for user:', userId);
+    console.log('🔔 Backend - Query params:', { page, limit, type, read });
+    console.log('🔔 Backend - Query result success:', notificationsResult.success);
+    
+    // Extract notifications array from result
+    const notifications = notificationsResult.success ? (notificationsResult.data || []) : [];
+    
+    console.log('🔔 Backend - Found notifications:', notifications.length);
+    if (notifications.length > 0) {
+      console.log('🔔 Backend - Sample notification:', {
+        id: notifications[0].id,
+        type: notifications[0].type,
+        title: notifications[0].title,
+        is_read: notifications[0].is_read,
+      });
+    }
 
     // Get total count for pagination
     const countQuery = `
@@ -66,19 +83,22 @@ router.get('/', [
       ${whereClause}
     `;
     const countResult = await db.executeQuery(countQuery, params);
-    const total = countResult.length > 0 && countResult[0].total !== undefined
-      ? countResult[0].total
+    const total = countResult.success && countResult.data && countResult.data.length > 0 && countResult.data[0].total !== undefined
+      ? countResult.data[0].total
       : 0;
 
-    res.json({
-      notifications,
+    const responseData = {
+      notifications: notifications,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
         pages: Math.ceil(total / limit)
       }
-    });
+    };
+
+    console.log('🔔 Backend - Sending response with', responseData.notifications.length, 'notifications');
+    res.json(responseData);
   } catch (error) {
     console.error('Error fetching notifications:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -231,7 +251,28 @@ router.get('/unread/count', [
     `;
 
     const result = await db.executeQuery(query, [userId]);
-    const unreadCount = result[0].unread_count || 0;
+    
+    console.log('🔔 Backend - Unread count query result:', {
+      success: result.success,
+      hasData: !!result.data,
+      dataLength: result.data?.length || 0,
+      firstRow: result.data?.[0],
+    });
+    
+    let unreadCount = 0;
+    if (result.success && result.data && result.data.length > 0) {
+      // MySQL COUNT(*) returns a BigInt, which might be a string or number
+      const count = result.data[0].unread_count;
+      if (typeof count === 'string') {
+        unreadCount = parseInt(count, 10) || 0;
+      } else if (typeof count === 'number') {
+        unreadCount = count;
+      } else if (typeof count === 'bigint') {
+        unreadCount = Number(count);
+      }
+    }
+
+    console.log('🔔 Backend - Unread count for user', userId, ':', unreadCount);
 
     res.json({ unread_count: unreadCount });
   } catch (error) {
@@ -245,7 +286,7 @@ router.post('/', [
   authenticateToken,
   requireRole(['admin', 'system']),
   body('userId').isInt().withMessage('User ID must be an integer'),
-  body('type').isIn(['appointment', 'order', 'chat', 'system', 'reminder']).withMessage('Invalid notification type'),
+  body('type').isIn(['appointment', 'order', 'chat', 'system', 'reminder', 'medicine']).withMessage('Invalid notification type'),
   body('title').isLength({ min: 1, max: 200 }).withMessage('Title must be between 1 and 200 characters'),
   body('message').isLength({ min: 1, max: 1000 }).withMessage('Message must be between 1 and 1000 characters'),
   body('data').optional().isObject().withMessage('Data must be an object'),
@@ -305,7 +346,7 @@ router.post('/bulk', [
   requireRole(['admin', 'system']),
   body('notifications').isArray({ min: 1 }).withMessage('Notifications must be a non-empty array'),
   body('notifications.*.userId').isInt().withMessage('User ID must be an integer'),
-  body('notifications.*.type').isIn(['appointment', 'order', 'chat', 'system', 'reminder']).withMessage('Invalid notification type'),
+  body('notifications.*.type').isIn(['appointment', 'order', 'chat', 'system', 'reminder', 'medicine']).withMessage('Invalid notification type'),
   body('notifications.*.title').isLength({ min: 1, max: 200 }).withMessage('Title must be between 1 and 200 characters'),
   body('notifications.*.message').isLength({ min: 1, max: 1000 }).withMessage('Message must be between 1 and 1000 characters'),
 ], async (req, res) => {

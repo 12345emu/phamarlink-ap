@@ -65,6 +65,9 @@ export default function LoginScreen() {
         } else if (result.user.role === 'facility-admin') {
           console.log('🔍 Navigating facility-admin to facility tabs');
           router.replace('/(facility-tabs)' as any);
+        } else if (result.user.role === 'pharmacist') {
+          console.log('🔍 Navigating pharmacist to pharmacist tabs');
+          router.replace('/(pharmacist-tabs)' as any);
         } else {
           console.log('🔍 Navigating patient to patient tabs');
           router.replace('/(tabs)');

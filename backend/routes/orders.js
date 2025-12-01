@@ -30,10 +30,14 @@ router.get('/', authenticateToken, async (req, res) => {
       whereClause += ' AND o.patient_id = ?';
       params.push(userId);
     } else if (userRole === 'pharmacist' || userRole === 'facility-admin') {
-      // Only show orders from facilities owned by this user
-      whereClause += ' AND o.pharmacy_id IN (SELECT id FROM healthcare_facilities WHERE user_id = ?)';
-      params.push(userId);
-      console.log(`🔍 Filtering orders for ${userRole} (userId: ${userId}) - Only showing orders from their facilities`);
+      // Show orders from facilities owned by this user OR facilities they're associated with
+      whereClause += ` AND o.pharmacy_id IN (
+        SELECT id FROM healthcare_facilities WHERE user_id = ?
+        UNION
+        SELECT facility_id FROM healthcare_professionals WHERE user_id = ? AND facility_id IS NOT NULL
+      )`;
+      params.push(userId, userId);
+      console.log(`🔍 Filtering orders for ${userRole} (userId: ${userId}) - Showing orders from owned and associated facilities`);
     }
     // Admin can see all orders
     
@@ -645,35 +649,37 @@ router.get('/:id/tracking', authenticateToken, async (req, res) => {
 
 // Helper function to check pharmacy access
 async function checkPharmacyAccess(userId, pharmacyId) {
-  // Check if the facility belongs to the user (for both pharmacist and facility-admin)
+  // Check if the facility belongs to the user OR if they're associated with it
   console.log(`🔍 Checking pharmacy access - User ID: ${userId} (type: ${typeof userId}), Pharmacy ID: ${pharmacyId} (type: ${typeof pharmacyId})`);
   
   // Convert userId to integer to ensure type matching
   const userIdInt = parseInt(userId, 10);
   
+  // Check if user owns the facility
   const pharmacyResult = await executeQuery(
     'SELECT id, name, user_id, facility_type FROM healthcare_facilities WHERE id = ? AND user_id = ?',
     [pharmacyId, userIdInt]
   );
   
-  console.log(`🔍 Pharmacy query result:`, JSON.stringify(pharmacyResult, null, 2));
-  
-  const hasAccess = pharmacyResult.success && pharmacyResult.data && pharmacyResult.data.length > 0;
-  
-  if (!hasAccess) {
-    // Try with string comparison as well for debugging
-    const pharmacyResultString = await executeQuery(
-      'SELECT id, name, user_id, facility_type FROM healthcare_facilities WHERE id = ? AND CAST(user_id AS CHAR) = ?',
-      [pharmacyId, userId.toString()]
-    );
-    console.log(`🔍 Pharmacy query result (string comparison):`, JSON.stringify(pharmacyResultString, null, 2));
-    
-    console.log(`❌ Access denied: User ${userId} does not own facility ${pharmacyId}`);
-  } else {
-    console.log(`✅ Access granted: User ${userId} owns facility ${pharmacyId}`);
+  if (pharmacyResult.success && pharmacyResult.data.length > 0) {
+    return true;
   }
   
-  return hasAccess;
+  // Check if user is associated with the facility via healthcare_professionals
+  const professionalResult = await executeQuery(
+    'SELECT id FROM healthcare_professionals WHERE user_id = ? AND (facility_id = ? OR CAST(facility_id AS CHAR) = ?)',
+    [userIdInt, pharmacyId, pharmacyId.toString()]
+    );
+  
+  console.log(`🔍 Professional association check result:`, professionalResult);
+  
+  if (professionalResult.success && professionalResult.data.length > 0) {
+    console.log(`✅ User ${userIdInt} has access to pharmacy ${pharmacyId} via professional association`);
+    return true;
+  }
+  
+  console.log(`❌ User ${userIdInt} does not have access to pharmacy ${pharmacyId}`);
+  return false;
 }
 
 // Helper function to generate tracking timeline

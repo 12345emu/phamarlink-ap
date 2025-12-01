@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,13 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Switch,
+  AppState,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { notificationsApiService, NotificationItem } from '../../services/notificationsApiService';
+import { notificationSettingsService, NotificationPreferences } from '../../services/notificationSettingsService';
 
 export default function FacilityNotifications() {
   const router = useRouter();
@@ -20,27 +23,91 @@ export default function FacilityNotifications() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [preferences, setPreferences] = useState<NotificationPreferences>({
+    pushNotifications: true,
+    emailNotifications: true,
+    smsNotifications: false,
+    appointmentNotifications: true,
+    orderNotifications: true,
+    chatNotifications: true,
+    systemNotifications: true,
+    promotionNotifications: false,
+  });
 
   useEffect(() => {
     loadNotifications();
-  }, []);
+    if (activeTab === 'settings') {
+      loadSettings();
+    }
+  }, [activeTab]);
+
+  // Refresh notifications when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab === 'notifications') {
+        loadNotifications();
+      }
+    }, [activeTab])
+  );
+
+  // Refresh notifications when app comes to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && activeTab === 'notifications') {
+        loadNotifications();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [activeTab]);
 
   const loadNotifications = async () => {
     try {
       setLoading(true);
       
+      console.log('🔔 Loading notifications...');
+      
+      // Load all notification types - no filter to show everything
       const response = await notificationsApiService.getNotifications({
         page: 1,
-        limit: 50,
+        limit: 100, // Increased limit to show more notifications
+      });
+      
+      console.log('🔔 Notifications API Response:', {
+        success: response.success,
+        hasData: !!response.data,
+        dataLength: response.data?.length || 0,
+        message: response.message,
+        data: response.data,
       });
       
       if (response.success && response.data) {
-        setNotifications(response.data);
-        const unread = response.data.filter(n => !n.isRead).length;
+        // Sort notifications by date (newest first) and ensure all types are included
+        const sortedNotifications = response.data.sort((a, b) => {
+          // Handle timestamp comparison - timestamp might be a string like "2h ago"
+          // For proper sorting, we need to use created_at if available, or parse timestamp
+          try {
+            // If timestamp is a relative time string, we'll sort by the notification order
+            // The backend should already return them sorted by created_at DESC
+            return 0; // Keep original order from backend
+          } catch (error) {
+            return 0;
+          }
+        });
+        
+        console.log('🔔 Processed notifications:', sortedNotifications.length);
+        console.log('🔔 Notification types:', sortedNotifications.map(n => n.type));
+        
+        setNotifications(sortedNotifications);
+        const unread = sortedNotifications.filter(n => !n.isRead).length;
         setUnreadCount(unread);
       } else {
-        console.error('Failed to load notifications:', response.message);
-        console.error('Response details:', response);
+        console.error('❌ Failed to load notifications:', response.message);
+        console.error('❌ Response details:', JSON.stringify(response, null, 2));
         // Show empty state but don't show alert on initial load
         setNotifications([]);
         setUnreadCount(0);
@@ -50,7 +117,8 @@ export default function FacilityNotifications() {
         }
       }
     } catch (error) {
-      console.error('Error loading notifications:', error);
+      console.error('❌ Error loading notifications:', error);
+      console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack');
       // Only show alert if we had notifications before (refresh scenario)
       if (notifications.length > 0) {
         Alert.alert('Error', 'Failed to load notifications');
@@ -88,11 +156,9 @@ export default function FacilityNotifications() {
         }
         break;
       case 'appointment':
-        if (notification.data?.appointmentId) {
-          router.push(`/(facility-tabs)/appointments?appointmentId=${notification.data.appointmentId}`);
-        } else {
-          router.push('/(facility-tabs)/appointments');
-        }
+        // Appointments are handled in doctor/patient context, not facility context
+        // For facility admins, we can navigate to facilities or show a message
+        router.push('/(facility-tabs)/facilities' as any);
         break;
       case 'chat':
         if (notification.data?.conversationId) {
@@ -106,9 +172,41 @@ export default function FacilityNotifications() {
           router.push('/(facility-tabs)/chat');
         }
         break;
+      case 'medicine':
+      case 'reminder':
+        // Medicine expiration or stock alerts - navigate to facilities management
+        if (notification.data?.facilityId) {
+          router.push({
+            pathname: '/facility-management',
+            params: {
+              id: notification.data.facilityId.toString(),
+              type: notification.data.facilityType || 'pharmacy',
+            }
+          });
+        } else {
+          router.push('/(facility-tabs)/facilities' as any);
+        }
+        break;
+      case 'staff':
+        // Staff-related notifications - navigate to facilities
+        router.push('/(facility-tabs)/facilities' as any);
+        break;
+      case 'emergency':
+        // Emergency notifications - show alert and navigate to relevant page
+        if (notification.data?.facilityId) {
+          router.push({
+            pathname: '/facility-management',
+            params: {
+              id: notification.data.facilityId.toString(),
+              type: notification.data.facilityType || 'pharmacy',
+            }
+          });
+        } else {
+          router.push('/(facility-tabs)/facilities' as any);
+        }
+        break;
       case 'system':
-      case 'promotion':
-        // System and promotion notifications don't navigate
+        // System notifications don't navigate
         break;
       default:
         router.push('/(facility-tabs)/facilities');
@@ -123,6 +221,44 @@ export default function FacilityNotifications() {
       setUnreadCount(0);
     } else {
       Alert.alert('Error', response.message || 'Failed to mark all notifications as read');
+    }
+  };
+
+  const loadSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const response = await notificationSettingsService.getPreferences();
+      if (response.success && response.data) {
+        setPreferences(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading notification settings:', error);
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const handlePreferenceChange = (key: keyof NotificationPreferences, value: boolean) => {
+    setPreferences(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const saveSettings = async () => {
+    setSaving(true);
+    try {
+      const response = await notificationSettingsService.updatePreferences(preferences);
+      if (response.success) {
+        Alert.alert('Success', response.message || 'Notification settings updated successfully');
+      } else {
+        Alert.alert('Error', response.message || 'Failed to save notification settings');
+      }
+    } catch (error) {
+      console.error('Error saving notification settings:', error);
+      Alert.alert('Error', 'Failed to save notification settings. Please try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -244,9 +380,178 @@ export default function FacilityNotifications() {
       
       case 'settings':
         return (
-          <View style={styles.settingsContainer}>
-            <Text style={styles.settingsText}>Notification settings coming soon</Text>
-          </View>
+          <ScrollView 
+            style={styles.content}
+            contentContainerStyle={styles.settingsScrollContent}
+          >
+            {settingsLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#9b59b6" />
+                <Text style={styles.loadingText}>Loading settings...</Text>
+              </View>
+            ) : (
+              <View style={styles.settingsContainer}>
+                {/* General Notifications Section */}
+                <View style={styles.settingsSection}>
+                  <Text style={styles.settingsSectionTitle}>General Notifications</Text>
+                  
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="bell" size={18} color="#9b59b6" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>Push Notifications</Text>
+                        <Text style={styles.settingDescription}>Receive push notifications on your device</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.pushNotifications}
+                      onValueChange={(value) => handlePreferenceChange('pushNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.pushNotifications ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="envelope" size={18} color="#9b59b6" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>Email Notifications</Text>
+                        <Text style={styles.settingDescription}>Receive notifications via email</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.emailNotifications}
+                      onValueChange={(value) => handlePreferenceChange('emailNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.emailNotifications ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="mobile" size={18} color="#9b59b6" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>SMS Notifications</Text>
+                        <Text style={styles.settingDescription}>Receive notifications via SMS</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.smsNotifications}
+                      onValueChange={(value) => handlePreferenceChange('smsNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.smsNotifications ? '#fff' : '#f4f3f4'}
+                    />
+                  </View>
+                </View>
+
+                {/* Category Notifications Section */}
+                <View style={styles.settingsSection}>
+                  <Text style={styles.settingsSectionTitle}>Notification Categories</Text>
+                  
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="shopping-cart" size={18} color="#3498db" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>Order Notifications</Text>
+                        <Text style={styles.settingDescription}>New orders and order updates</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.orderNotifications}
+                      onValueChange={(value) => handlePreferenceChange('orderNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.orderNotifications ? '#fff' : '#f4f3f4'}
+                      disabled={!preferences.pushNotifications}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="comments" size={18} color="#2ecc71" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>Chat Notifications</Text>
+                        <Text style={styles.settingDescription}>New messages and chat updates</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.chatNotifications}
+                      onValueChange={(value) => handlePreferenceChange('chatNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.chatNotifications ? '#fff' : '#f4f3f4'}
+                      disabled={!preferences.pushNotifications}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="calendar" size={18} color="#9b59b6" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>Appointment Notifications</Text>
+                        <Text style={styles.settingDescription}>Appointment requests and updates</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.appointmentNotifications}
+                      onValueChange={(value) => handlePreferenceChange('appointmentNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.appointmentNotifications ? '#fff' : '#f4f3f4'}
+                      disabled={!preferences.pushNotifications}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="cog" size={18} color="#95a5a6" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>System Notifications</Text>
+                        <Text style={styles.settingDescription}>System updates and important alerts</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.systemNotifications}
+                      onValueChange={(value) => handlePreferenceChange('systemNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.systemNotifications ? '#fff' : '#f4f3f4'}
+                      disabled={!preferences.pushNotifications}
+                    />
+                  </View>
+
+                  <View style={styles.settingRow}>
+                    <View style={styles.settingInfo}>
+                      <FontAwesome name="gift" size={18} color="#f39c12" />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingLabel}>Promotion Notifications</Text>
+                        <Text style={styles.settingDescription}>Promotional offers and updates</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={preferences.promotionNotifications}
+                      onValueChange={(value) => handlePreferenceChange('promotionNotifications', value)}
+                      trackColor={{ false: '#e0e0e0', true: '#9b59b6' }}
+                      thumbColor={preferences.promotionNotifications ? '#fff' : '#f4f3f4'}
+                      disabled={!preferences.pushNotifications}
+                    />
+                  </View>
+                </View>
+
+                {/* Save Button */}
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                  onPress={saveSettings}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <FontAwesome name="check" size={16} color="#fff" />
+                      <Text style={styles.saveButtonText}>Save Settings</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </ScrollView>
         );
       
       default:
@@ -511,15 +816,81 @@ const styles = StyleSheet.create({
   
   // Settings
   settingsContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
+    padding: 16,
   },
-  settingsText: {
+  settingsSection: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  settingsSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 16,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  settingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
+  },
+  settingTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  settingLabel: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 13,
     color: '#7f8c8d',
-    textAlign: 'center',
+    lineHeight: 18,
+  },
+  saveButton: {
+    backgroundColor: '#9b59b6',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+    shadowColor: '#9b59b6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+    gap: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  settingsScrollContent: {
+    paddingBottom: 100, // Extra padding to account for tab bar
   },
 });
 

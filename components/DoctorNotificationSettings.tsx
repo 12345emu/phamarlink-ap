@@ -105,6 +105,20 @@ export default function DoctorNotificationSettings() {
 
   const testNotification = async () => {
     try {
+      // Check permissions first
+      const permissions = await notificationService.getPermissionsStatus();
+      if (permissions.status !== 'granted') {
+        Alert.alert(
+          'Permissions Required',
+          'Please enable notification permissions to test notifications.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Enable', onPress: requestPermissions }
+          ]
+        );
+        return;
+      }
+
       const notificationData = {
         type: 'system' as const,
         title: 'Test Notification',
@@ -114,8 +128,14 @@ export default function DoctorNotificationSettings() {
         badge: 1
       };
 
-      await notificationService.scheduleLocalNotification(notificationData);
-      Alert.alert('Success', 'Test notification sent');
+      // Bypass preference check for test notifications
+      const notificationId = await notificationService.scheduleLocalNotification(notificationData, true);
+      
+      if (notificationId) {
+        Alert.alert('Success', 'Test notification sent!');
+      } else {
+        Alert.alert('Error', 'Failed to send test notification. Please check notification permissions.');
+      }
     } catch (error) {
       console.error('❌ Error sending test notification:', error);
       Alert.alert('Error', 'Failed to send test notification');
@@ -139,7 +159,7 @@ export default function DoctorNotificationSettings() {
     <View style={styles.settingItem}>
       <View style={styles.settingContent}>
         <View style={styles.settingHeader}>
-          <FontAwesome name={icon} size={20} color="#3498db" style={styles.settingIcon} />
+          <FontAwesome name={icon as any} size={20} color="#3498db" style={styles.settingIcon} />
           <View style={styles.settingText}>
             <Text style={styles.settingTitle}>{title}</Text>
             <Text style={styles.settingDescription}>{description}</Text>
@@ -175,7 +195,11 @@ export default function DoctorNotificationSettings() {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Notification Settings</Text>
         <Text style={styles.headerSubtitle}>Manage how you receive notifications</Text>
@@ -270,6 +294,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  scrollContent: {
+    paddingBottom: 100, // Extra padding to account for tab bar
   },
   
   // Permission Screen

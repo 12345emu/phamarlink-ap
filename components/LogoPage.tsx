@@ -90,8 +90,8 @@ export default function LogoPage() {
               router.replace('/(tabs)');
               break;
             case 'pharmacist':
-              console.log('LogoPage - Navigating pharmacist to patient tabs (temporary)');
-              router.replace('/(tabs)');
+              console.log('LogoPage - Navigating pharmacist to pharmacist tabs');
+              router.replace("/(pharmacist-tabs)" as any);
               break;
             case 'admin':
               console.log('LogoPage - Navigating admin to patient tabs (temporary)');

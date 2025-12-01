@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { notificationService } from '../services/notificationService';
+import { notificationsApiService } from '../services/notificationsApiService';
 
 interface NotificationIconProps {
   onPress?: () => void;
@@ -19,22 +20,43 @@ export default function NotificationIcon({
   const [unreadCount, setUnreadCount] = useState(0);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  useEffect(() => {
-    checkNotificationStatus();
-  }, []);
-
-  const checkNotificationStatus = async () => {
+  const loadUnreadCount = useCallback(async () => {
     try {
       const initialized = notificationService.isServiceInitialized();
       setIsInitialized(initialized);
       
-      // TODO: Get actual unread count from backend
-      // For now, we'll simulate some unread notifications
-      setUnreadCount(3);
+      // Get actual unread count from backend
+      const response = await notificationsApiService.getUnreadCount();
+      if (response.success && response.count !== undefined) {
+        setUnreadCount(response.count);
+      } else {
+        setUnreadCount(0);
+      }
     } catch (error) {
       console.error('❌ Error checking notification status:', error);
+      setUnreadCount(0);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Initial load
+    loadUnreadCount();
+    
+    // Refresh every 15 seconds to keep count updated
+    const interval = setInterval(loadUnreadCount, 15000);
+    
+    // Refresh when app comes to foreground
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        loadUnreadCount();
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [loadUnreadCount]);
 
   return (
     <TouchableOpacity 

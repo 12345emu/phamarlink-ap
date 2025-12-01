@@ -12,6 +12,7 @@ export interface Medicine {
   strength?: string;
   description?: string;
   manufacturer?: string;
+  image?: string;
   min_price?: number;
   max_price?: number;
   available_facilities?: number;

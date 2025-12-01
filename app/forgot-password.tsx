@@ -10,12 +10,14 @@ import {
   Dimensions, 
   Alert,
   TouchableWithoutFeedback,
-  Keyboard
+  Keyboard,
+  ActivityIndicator
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { authService } from '../services/authService';
 
 const { height } = Dimensions.get('window');
 
@@ -44,32 +46,52 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
+    // Validate email format
+    if (!authService.validateEmail(email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
+
     setIsLoading(true);
     
     try {
-      // Simulate API call - in real app, this would send a password reset email
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('🔍 ForgotPassword - Requesting password reset for:', email);
+      const response = await authService.forgotPassword(email);
       
-      // Show success message
-      setIsEmailSent(true);
+      if (response.success) {
+        // Navigate to OTP verification screen
+        router.replace({
+          pathname: '/verify-otp',
+          params: { email: email },
+        });
+      } else {
+        Alert.alert(
+          'Error',
+          response.message || 'Failed to send OTP. Please try again.'
+        );
+      }
+    } catch (error: any) {
+      console.error('❌ ForgotPassword - Error:', error);
+      console.error('❌ ForgotPassword - Error details:', {
+        message: error?.message,
+        response: error?.response,
+        code: error?.code,
+        request: error?.request,
+      });
       
-      Alert.alert(
-        'Reset Link Sent',
-        'If an account with that email exists, we have sent a password reset link to your email address.',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => {
-              // Navigate back to login after a short delay
-              setTimeout(() => {
-                router.back();
-              }, 500);
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      Alert.alert('Error', 'An error occurred. Please try again.');
+      // Check for network errors
+      if (error?.message?.includes('Network Error') || error?.code === 'NETWORK_ERROR' || !error?.response) {
+        Alert.alert(
+          'Network Error',
+          'Unable to connect to the server. Please check:\n\n• Your internet connection\n• The backend server is running\n• Your device can reach the server IP address',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          error?.response?.data?.message || error?.message || 'An error occurred. Please try again.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -152,7 +174,10 @@ export default function ForgotPasswordScreen() {
                     style={styles.buttonGradient}
                   >
                     {isLoading ? (
-                      <Text style={styles.resetButtonText}>Sending...</Text>
+                      <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="small" color="#fff" />
+                        <Text style={styles.resetButtonText}>Sending...</Text>
+                      </View>
                     ) : (
                       <Text style={styles.resetButtonText}>Send Reset Link</Text>
                     )}
@@ -327,6 +352,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
   },
   successSection: {
     alignItems: 'center',

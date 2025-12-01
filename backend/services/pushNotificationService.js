@@ -94,21 +94,37 @@ class PushNotificationService {
    */
   async sendNotificationToUser(userId, notificationData) {
     try {
+      console.log(`🔔 PushNotificationService - Sending notification to user ${userId}`);
+      console.log(`🔔 PushNotificationService - Notification data:`, {
+        title: notificationData.title,
+        body: notificationData.body?.substring(0, 50),
+        hasData: !!notificationData.data
+      });
+      
       const tokens = await this.getUserPushTokens(userId);
+      
+      console.log(`🔔 PushNotificationService - Found ${tokens.length} token(s) for user ${userId}`);
       
       if (tokens.length === 0) {
         console.log('⚠️ PushNotificationService - No tokens found for user:', userId);
+        console.log('⚠️ PushNotificationService - User needs to register their device token by logging in');
         return { success: false, message: 'No push tokens found for user' };
       }
 
       const results = [];
       for (const tokenData of tokens) {
+        console.log(`🔔 PushNotificationService - Sending to token: ${tokenData.token.substring(0, 20)}... (platform: ${tokenData.platform})`);
         const result = await this.sendPushNotification(tokenData.token, notificationData);
         results.push(result);
+        console.log(`🔔 PushNotificationService - Result for token:`, result);
       }
 
       const successCount = results.filter(r => r.success).length;
       console.log(`✅ PushNotificationService - Sent ${successCount}/${tokens.length} notifications to user ${userId}`);
+      
+      if (successCount === 0) {
+        console.error('❌ PushNotificationService - All notification sends failed. Results:', results);
+      }
       
       return { 
         success: successCount > 0, 
@@ -158,16 +174,29 @@ class PushNotificationService {
    */
   async sendPushNotification(token, notificationData) {
     try {
+      // Validate token format (Expo tokens start with ExponentPushToken or ExpoPushToken)
+      if (!token || (typeof token !== 'string')) {
+        console.error('❌ PushNotificationService - Invalid token format:', token);
+        return { success: false, message: 'Invalid token format', error: 'Token must be a non-empty string' };
+      }
+
       const message = {
         to: token,
+        sound: notificationData.sound !== false ? 'default' : null,
         title: notificationData.title,
         body: notificationData.body,
         data: notificationData.data || {},
-        sound: notificationData.sound !== false ? 'default' : null,
         badge: notificationData.badge || 1,
         priority: notificationData.priority || 'high',
         channelId: notificationData.channelId || 'default'
       };
+
+      console.log('🔔 PushNotificationService - Sending to Expo API:', {
+        tokenPrefix: token.substring(0, 20) + '...',
+        title: message.title,
+        bodyLength: message.body?.length || 0,
+        hasData: !!message.data
+      });
 
       const response = await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
@@ -179,17 +208,40 @@ class PushNotificationService {
         body: JSON.stringify(message),
       });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ PushNotificationService - Expo API error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        return { success: false, message: 'Expo API error', error: errorText };
+      }
+
       const result = await response.json();
       
+      console.log('🔔 PushNotificationService - Expo API response:', {
+        success: result.data?.[0]?.status === 'ok',
+        status: result.data?.[0]?.status,
+        error: result.data?.[0]?.error,
+        receiptId: result.data?.[0]?.id
+      });
+      
       if (result.data && result.data[0] && result.data[0].status === 'ok') {
-        console.log('✅ PushNotificationService - Notification sent successfully');
-        return { success: true, message: 'Notification sent successfully' };
+        console.log('✅ PushNotificationService - Notification sent successfully via Expo');
+        return { success: true, message: 'Notification sent successfully', receiptId: result.data[0].id };
       } else {
-        console.log('❌ PushNotificationService - Failed to send notification:', result);
-        return { success: false, message: 'Failed to send notification', error: result };
+        const errorMsg = result.data?.[0]?.message || result.data?.[0]?.error || 'Unknown error';
+        console.error('❌ PushNotificationService - Failed to send notification:', {
+          status: result.data?.[0]?.status,
+          error: errorMsg,
+          details: result.data?.[0]
+        });
+        return { success: false, message: 'Failed to send notification', error: errorMsg, details: result.data?.[0] };
       }
     } catch (error) {
       console.error('❌ PushNotificationService - Error sending push notification:', error);
+      console.error('❌ PushNotificationService - Error stack:', error.stack);
       return { success: false, message: 'Failed to send push notification', error: error.message };
     }
   }

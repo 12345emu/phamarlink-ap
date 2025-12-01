@@ -850,7 +850,7 @@ router.put('/change-password', authenticateToken, [
   }
 });
 
-// Forgot password
+// Forgot password - Generate and send OTP
 router.post('/forgot-password', [
   body('email').isEmail().normalizeEmail()
 ], async (req, res) => {
@@ -875,29 +875,75 @@ router.post('/forgot-password', [
       // Don't reveal if user exists or not for security
       return res.json({
         success: true,
-        message: 'If an account with that email exists, a password reset link has been sent'
+        message: 'If an account with that email exists, an OTP has been sent to your email'
       });
     }
 
     const user = userResult.data[0];
 
-    // Generate reset token (expires in 1 hour)
-    const resetToken = jwt.sign(
-      { userId: user.id, type: 'reset' },
-      process.env.JWT_SECRET || 'fallback-secret',
-      { expiresIn: '1h' }
-    );
+    // Generate 6-digit OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
-    // Store reset token in database (you can add a reset_token field to users table)
-    // For now, we'll just return success
+    // Invalidate any existing OTPs for this user
+    const invalidateQuery = `
+      UPDATE password_reset_otps 
+      SET is_verified = TRUE 
+      WHERE user_id = ? AND is_verified = FALSE AND expires_at > NOW()
+    `;
+    await executeQuery(invalidateQuery, [user.id]);
 
-    // TODO: Send email with reset link
-    // const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    // await sendEmail(user.email, 'Password Reset', `Click here to reset your password: ${resetLink}`);
+    // Store OTP in database
+    const insertOTPQuery = `
+      INSERT INTO password_reset_otps (user_id, email, otp_code, expires_at)
+      VALUES (?, ?, ?, ?)
+    `;
+    const insertResult = await executeQuery(insertOTPQuery, [
+      user.id,
+      user.email,
+      otpCode,
+      expiresAt
+    ]);
+
+    if (!insertResult.success) {
+      console.error('❌ Failed to store OTP in database');
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate OTP. Please try again.'
+      });
+    }
+
+    // Send OTP via email
+    console.log('📧 Forgot Password - Attempting to send OTP email...');
+    console.log('📧 Forgot Password - User email:', user.email);
+    console.log('📧 Forgot Password - User first name:', user.first_name);
+    console.log('📧 Forgot Password - OTP Code:', otpCode);
+    
+    try {
+      const { sendPasswordResetOTP } = require('../utils/emailService');
+      console.log('📧 Forgot Password - Email service function loaded');
+      
+      const emailSent = await sendPasswordResetOTP(user.email, user.first_name, otpCode);
+      
+      if (emailSent) {
+        console.log('✅ Password reset OTP sent successfully to:', user.email);
+        console.log('🔑 OTP Code (for testing):', otpCode);
+      } else {
+        console.error('❌ Failed to send password reset OTP to:', user.email);
+        console.error('❌ Email service returned false');
+        // Still return success to not reveal if user exists
+      }
+    } catch (emailError) {
+      console.error('❌ Error sending password reset OTP:', emailError);
+      console.error('❌ Error type:', emailError?.constructor?.name);
+      console.error('❌ Error message:', emailError?.message);
+      console.error('❌ Error stack:', emailError?.stack);
+      // Still return success to not reveal if user exists
+    }
 
     res.json({
       success: true,
-      message: 'If an account with that email exists, a password reset link has been sent'
+      message: 'If an account with that email exists, an OTP has been sent to your email'
     });
 
   } catch (error) {
@@ -909,9 +955,94 @@ router.post('/forgot-password', [
   }
 });
 
-// Reset password
+// Verify OTP
+router.post('/verify-otp', [
+  body('email').isEmail().normalizeEmail(),
+  body('otp').isLength({ min: 6, max: 6 }).isNumeric()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { email, otp } = req.body;
+
+    // Find valid OTP
+    const otpQuery = `
+      SELECT otp.id, otp.user_id, otp.otp_code, otp.expires_at, otp.attempts, otp.is_verified
+      FROM password_reset_otps otp
+      INNER JOIN users u ON otp.user_id = u.id
+      WHERE u.email = ? AND otp.otp_code = ? AND otp.expires_at > NOW() AND otp.is_verified = FALSE
+      ORDER BY otp.created_at DESC
+      LIMIT 1
+    `;
+    const otpResult = await executeQuery(otpQuery, [email, otp]);
+
+    if (!otpResult.success || otpResult.data.length === 0) {
+      // Increment attempts if OTP exists but is wrong
+      const wrongOTPQuery = `
+        UPDATE password_reset_otps 
+        SET attempts = attempts + 1
+        WHERE email = ? AND expires_at > NOW() AND is_verified = FALSE
+      `;
+      await executeQuery(wrongOTPQuery, [email]);
+
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP. Please request a new one.'
+      });
+    }
+
+    const otpRecord = otpResult.data[0];
+
+    // Check if too many attempts (max 5)
+    if (otpRecord.attempts >= 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Too many failed attempts. Please request a new OTP.'
+      });
+    }
+
+    // Mark OTP as verified
+    const verifyQuery = `
+      UPDATE password_reset_otps 
+      SET is_verified = TRUE, verified_at = NOW()
+      WHERE id = ?
+    `;
+    await executeQuery(verifyQuery, [otpRecord.id]);
+
+    // Generate verification token (valid for 15 minutes)
+    const verificationToken = jwt.sign(
+      { userId: otpRecord.user_id, email: email, type: 'password-reset', otpId: otpRecord.id },
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: '15m' }
+    );
+
+    res.json({
+      success: true,
+      message: 'OTP verified successfully',
+      data: {
+        verificationToken
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Verify OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Reset password - Requires verified OTP token
 router.post('/reset-password', [
-  body('token').notEmpty(),
+  body('verificationToken').notEmpty(),
   body('newPassword').isLength({ min: 6 })
 ], async (req, res) => {
   try {
@@ -925,15 +1056,42 @@ router.post('/reset-password', [
       });
     }
 
-    const { token, newPassword } = req.body;
+    const { verificationToken, newPassword } = req.body;
 
-    // Verify reset token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
-    
-    if (decoded.type !== 'reset') {
+    // Verify token
+    let decoded;
+    try {
+      decoded = jwt.verify(verificationToken, process.env.JWT_SECRET || 'fallback-secret');
+    } catch (tokenError) {
+      if (tokenError.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          success: false,
+          message: 'Verification token expired. Please verify OTP again.'
+        });
+      }
       return res.status(401).json({
         success: false,
-        message: 'Invalid reset token'
+        message: 'Invalid verification token'
+      });
+    }
+    
+    if (decoded.type !== 'password-reset') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid verification token'
+      });
+    }
+
+    // Verify that OTP was actually verified
+    const otpCheckQuery = `
+      SELECT is_verified FROM password_reset_otps WHERE id = ?
+    `;
+    const otpCheck = await executeQuery(otpCheckQuery, [decoded.otpId]);
+
+    if (!otpCheck.success || otpCheck.data.length === 0 || !otpCheck.data[0].is_verified) {
+      return res.status(401).json({
+        success: false,
+        message: 'OTP not verified. Please verify OTP first.'
       });
     }
 
@@ -952,6 +1110,14 @@ router.post('/reset-password', [
       });
     }
 
+    // Invalidate all OTPs for this user
+    const invalidateAllQuery = `
+      UPDATE password_reset_otps 
+      SET is_verified = TRUE 
+      WHERE user_id = ?
+    `;
+    await executeQuery(invalidateAllQuery, [decoded.userId]);
+
     res.json({
       success: true,
       message: 'Password reset successfully'
@@ -959,21 +1125,6 @@ router.post('/reset-password', [
 
   } catch (error) {
     console.error('❌ Reset password error:', error);
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid reset token'
-      });
-    }
-    
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Reset token expired'
-      });
-    }
-
     res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -1080,6 +1231,51 @@ router.post('/refresh-token', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Test OTP email endpoint (for debugging)
+router.post('/test-otp-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    console.log('🧪 Test OTP Email - Starting test...');
+    console.log('🧪 Test OTP Email - Email:', email);
+    
+    const { sendPasswordResetOTP } = require('../utils/emailService');
+    const testOTP = '123456';
+    const emailSent = await sendPasswordResetOTP(email, 'Test User', testOTP);
+
+    if (emailSent) {
+      console.log('✅ Test OTP Email - Email sent successfully');
+      res.json({
+        success: true,
+        message: 'Test OTP email sent successfully',
+        otp: testOTP,
+        recipient: email
+      });
+    } else {
+      console.error('❌ Test OTP Email - Email sending failed');
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send test OTP email. Check server logs for details.',
+        recipient: email
+      });
+    }
+  } catch (error) {
+    console.error('❌ Test OTP Email - Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending test OTP email',
+      error: error.message,
+      stack: error.stack
     });
   }
 });

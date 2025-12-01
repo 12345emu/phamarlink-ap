@@ -7,6 +7,8 @@ const { executeQuery } = require('../config/database');
 const { authenticateToken, optionalAuth, requireRole } = require('../middleware/auth');
 const { generateSecurePassword } = require('../utils/passwordGenerator');
 const { sendPharmacyCredentials } = require('../utils/emailService');
+const pushNotificationService = require('../services/pushNotificationService');
+const { createNotification, getFacilityOwnerId } = require('../utils/notificationHelper');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -378,7 +380,9 @@ router.get('/:id/medicines', async (req, res) => {
       });
     }
 
-    // Get medicines for this facility (only medicines actually available at this pharmacy)
+    // Get medicines for this facility
+    // Check both pharmacy_id and facility_id columns (some tables might use one or the other)
+    // Also check for medicines regardless of is_available status (we'll filter in frontend if needed)
     const medicinesQuery = `
       SELECT 
         m.id, m.name, m.generic_name, m.category, m.prescription_required,
@@ -387,14 +391,27 @@ router.get('/:id/medicines', async (req, res) => {
         pm.price,
         pm.discount_price,
         pm.is_available,
-        pm.id as pharmacy_medicine_id
+        pm.id as pharmacy_medicine_id,
+        pm.expiry_date,
+        pm.batch_number
       FROM medicines m
       INNER JOIN pharmacy_medicines pm ON m.id = pm.medicine_id
-      WHERE pm.pharmacy_id = ? AND pm.is_available = TRUE AND m.is_active = TRUE
+      WHERE (pm.pharmacy_id = ? OR pm.facility_id = ?) 
+        AND (m.is_active = TRUE OR m.is_active = 1)
       ORDER BY m.category, m.name
     `;
     
-    const medicinesResult = await executeQuery(medicinesQuery, [facilityId]);
+    console.log(`🔍 Fetching medicines for facility_id: ${facilityId}`);
+    const medicinesResult = await executeQuery(medicinesQuery, [facilityId, facilityId]);
+    
+    if (!medicinesResult.success) {
+      console.error('❌ Medicines query failed:', medicinesResult.error);
+    } else {
+      console.log(`✅ Medicines query result: ${medicinesResult.data?.length || 0} medicines found`);
+      if (medicinesResult.data && medicinesResult.data.length > 0) {
+        console.log('📋 Sample medicine:', JSON.stringify(medicinesResult.data[0], null, 2));
+      }
+    }
 
     if (!medicinesResult.success) {
       return res.status(500).json({
@@ -423,7 +440,9 @@ router.get('/:id/medicines', async (req, res) => {
         price: parseFloat(medicine.price),
         discount_price: medicine.discount_price ? parseFloat(medicine.discount_price) : null,
         is_available: medicine.is_available === 1,
-        pharmacy_medicine_id: medicine.pharmacy_medicine_id
+        pharmacy_medicine_id: medicine.pharmacy_medicine_id,
+        expiry_date: medicine.expiry_date || null,
+        batch_number: medicine.batch_number || null
       });
     });
 
@@ -1207,7 +1226,8 @@ router.get('/:id', async (req, res) => {
         id, name, facility_type, address, city, state, country,
         latitude, longitude, phone, email, website, operating_hours,
         services, description, rating, total_reviews, is_verified,
-        images, created_at
+        images, created_at, accepts_insurance, has_delivery, has_consultation,
+        emergency_contact, is_active, postal_code, updated_at
       FROM healthcare_facilities 
       WHERE id = ? AND is_active = TRUE
     `;
@@ -1260,7 +1280,13 @@ router.get('/:id', async (req, res) => {
       id: facility.id,
       name: facility.name,
       images: facility.images,
-      imagesType: typeof facility.images
+      imagesType: typeof facility.images,
+      accepts_insurance: facility.accepts_insurance,
+      accepts_insurance_type: typeof facility.accepts_insurance,
+      has_delivery: facility.has_delivery,
+      has_delivery_type: typeof facility.has_delivery,
+      has_consultation: facility.has_consultation,
+      has_consultation_type: typeof facility.has_consultation
     });
 
     // Get reviews for this facility
@@ -1480,6 +1506,7 @@ router.post('/:id/medicines', authenticateToken, requireRole(['facility-admin', 
 
     const facilityId = parseInt(req.params.id, 10);
     const userId = parseInt(req.user.id, 10);
+    const userRole = req.user.user_type;
     const { medicine_id, stock_quantity, price, discount_price, expiry_date, is_available } = req.body;
     
     console.log('🔍 Add medicine request data:', {
@@ -1487,6 +1514,7 @@ router.post('/:id/medicines', authenticateToken, requireRole(['facility-admin', 
       facilityIdType: typeof facilityId,
       userId,
       userIdType: typeof userId,
+      userRole,
       medicine_id,
       medicine_idType: typeof medicine_id,
       stock_quantity,
@@ -1506,18 +1534,96 @@ router.post('/:id/medicines', authenticateToken, requireRole(['facility-admin', 
       });
     }
 
-    // Check if facility exists and user owns it
-    const facilityQuery = 'SELECT id, facility_type FROM healthcare_facilities WHERE id = ? AND user_id = ?';
-    const facilityResult = await executeQuery(facilityQuery, [facilityId, userId]);
+    // Check if facility exists
+    const facilityQuery = 'SELECT id, facility_type FROM healthcare_facilities WHERE id = ?';
+    const facilityResult = await executeQuery(facilityQuery, [facilityId]);
 
     if (!facilityResult.success || facilityResult.data.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Facility not found or you do not have permission to manage it'
+        message: 'Facility not found'
       });
     }
 
     const facility = facilityResult.data[0];
+
+    // Check if user has permission to manage this facility
+    // User can manage if:
+    // 1. They own the facility (user_id in healthcare_facilities)
+    // 2. They are a pharmacist/doctor associated with the facility (facility_id in healthcare_professionals)
+    
+    console.log('🔍 Checking permissions for user:', {
+      userId,
+      userRole,
+      facilityId
+    });
+    
+    if (userRole === 'facility-admin' || userRole === 'admin') {
+      // Facility admins must own the facility
+      const ownershipQuery = 'SELECT id FROM healthcare_facilities WHERE id = ? AND user_id = ?';
+      const ownershipResult = await executeQuery(ownershipQuery, [facilityId, userId]);
+      
+      if (!ownershipResult.success || ownershipResult.data.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to manage this facility'
+        });
+      }
+    } else if (userRole === 'pharmacist' || userRole === 'doctor') {
+      // Pharmacists/doctors must be associated with the facility
+      console.log('🔍 Checking pharmacist/doctor association:', {
+        userId,
+        facilityId,
+        userRole
+      });
+      
+      // Check both integer and string comparisons to handle type mismatches
+      const professionalQuery = `
+        SELECT id, facility_id, user_id 
+        FROM healthcare_professionals 
+        WHERE user_id = ? AND (facility_id = ? OR CAST(facility_id AS CHAR) = ?)
+      `;
+      const professionalResult = await executeQuery(professionalQuery, [userId, facilityId, facilityId.toString()]);
+      
+      console.log('🔍 Professional association check result:', {
+        success: professionalResult.success,
+        found: professionalResult.data?.length || 0,
+        data: professionalResult.data,
+        queryParams: [userId, facilityId, facilityId.toString()]
+      });
+      
+      if (!professionalResult.success) {
+        console.error('❌ Error checking professional association:', professionalResult.error);
+        return res.status(500).json({
+          success: false,
+          message: 'Error checking facility association'
+        });
+      }
+      
+      if (professionalResult.data.length === 0) {
+        // Also check if they have any professional record at all
+        const anyProfessionalQuery = 'SELECT id, facility_id, user_id FROM healthcare_professionals WHERE user_id = ?';
+        const anyProfessionalResult = await executeQuery(anyProfessionalQuery, [userId]);
+        
+        console.log('🔍 Checking if user has any professional record:', {
+          found: anyProfessionalResult.data?.length || 0,
+          records: anyProfessionalResult.data
+        });
+        
+        const userFacilityId = anyProfessionalResult.data?.[0]?.facility_id;
+        return res.status(403).json({
+          success: false,
+          message: `You are not associated with facility ID ${facilityId}. ${userFacilityId ? `Your current facility_id is ${userFacilityId}.` : 'You do not have a facility assigned.'} Please contact your facility administrator.`
+        });
+      }
+      
+      console.log('✅ Pharmacist/doctor is associated with facility:', professionalResult.data[0]);
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to manage medicines'
+      });
+    }
 
     // Only allow adding medicines to pharmacies
     if (facility.facility_type !== 'pharmacy') {
@@ -1620,14 +1726,689 @@ router.post('/:id/medicines', authenticateToken, requireRole(['facility-admin', 
       });
     }
 
+    const pharmacyMedicineId = insertResult.data.insertId;
+
+    // Check for low stock and expiring medicines and send notifications
+    // Get medicine details
+    const addedMedicineQuery = `
+      SELECT 
+        pm.id, pm.stock_quantity, pm.expiry_date, pm.medicine_id,
+        m.name, m.generic_name
+      FROM pharmacy_medicines pm
+      JOIN medicines m ON pm.medicine_id = m.id
+      WHERE pm.id = ?
+    `;
+    const addedMedicineResult = await executeQuery(addedMedicineQuery, [pharmacyMedicineId]);
+    
+    if (addedMedicineResult.success && addedMedicineResult.data.length > 0) {
+      const medicine = addedMedicineResult.data[0];
+      const medicineName = medicine.name || medicine.generic_name || 'Medicine';
+      
+      // Get facility owner and all pharmacists/doctors associated with the facility
+      const facilityUsersQuery = `
+        SELECT DISTINCT u.id, u.user_type
+        FROM users u
+        LEFT JOIN healthcare_facilities hf ON hf.user_id = u.id
+        LEFT JOIN healthcare_professionals hp ON hp.user_id = u.id
+        WHERE (hf.id = ? OR hp.facility_id = ?)
+      `;
+      const facilityUsersResult = await executeQuery(facilityUsersQuery, [facilityId, facilityId]);
+      
+      const userIdsToNotify = [];
+      const currentUserId = parseInt(req.user.id, 10); // Exclude the user who made the change
+      if (facilityUsersResult.success && facilityUsersResult.data) {
+        facilityUsersResult.data.forEach(user => {
+          if (user.id && !userIdsToNotify.includes(user.id) && user.id !== currentUserId) {
+            userIdsToNotify.push(user.id);
+          }
+        });
+      }
+      
+      console.log('🔔 Notification check - Users to notify (excluding current user):', userIdsToNotify);
+      console.log('🔔 Notification check - Current user (excluded):', currentUserId);
+      
+      // Check for low stock (<= 10)
+      if (medicine.stock_quantity !== undefined && medicine.stock_quantity <= 10 && medicine.stock_quantity > 0) {
+        const lowStockMessage = `${medicineName} is running low on stock. Current quantity: ${medicine.stock_quantity}`;
+        
+        // Send notifications to all facility users
+        for (const userId of userIdsToNotify) {
+          // Create database notification
+          await createNotification({
+            userId: userId,
+            type: 'medicine',
+            title: '⚠️ Low Stock Alert',
+            message: lowStockMessage,
+            data: {
+              medicineId: medicine.medicine_id,
+              pharmacyMedicineId: medicine.id,
+              stockQuantity: medicine.stock_quantity,
+              type: 'low_stock',
+            },
+          }).catch(err => console.error('❌ Error creating low stock notification:', err));
+          
+          // Send push notification
+          const pushNotificationData = {
+            title: '⚠️ Low Stock Alert',
+            body: lowStockMessage,
+            data: {
+              type: 'medicine',
+              medicineId: medicine.medicine_id,
+              pharmacyMedicineId: medicine.id,
+              stockQuantity: medicine.stock_quantity,
+              alertType: 'low_stock',
+            },
+            sound: true,
+            badge: 1,
+            priority: 'high',
+          };
+          
+          pushNotificationService.sendNotificationToUser(userId, pushNotificationData)
+            .then(result => {
+              if (result.success) {
+                console.log(`✅ Low stock push notification sent to user ${userId}`);
+              } else {
+                console.log(`⚠️ Failed to send low stock push notification to user ${userId}:`, result.message);
+              }
+            })
+            .catch(error => {
+              console.error(`❌ Error sending low stock push notification to user ${userId}:`, error);
+            });
+        }
+      }
+      
+      // Check for out of stock (== 0)
+      if (medicine.stock_quantity !== undefined && medicine.stock_quantity === 0) {
+        const outOfStockMessage = `${medicineName} is out of stock. Please restock immediately.`;
+        
+        // Send notifications to all facility users
+        for (const userId of userIdsToNotify) {
+          // Create database notification
+          await createNotification({
+            userId: userId,
+            type: 'medicine',
+            title: '🚨 Out of Stock Alert',
+            message: outOfStockMessage,
+            data: {
+              medicineId: medicine.medicine_id,
+              pharmacyMedicineId: medicine.id,
+              stockQuantity: 0,
+              type: 'out_of_stock',
+            },
+          }).catch(err => console.error('❌ Error creating out of stock notification:', err));
+          
+          // Send push notification
+          const pushNotificationData = {
+            title: '🚨 Out of Stock Alert',
+            body: outOfStockMessage,
+            data: {
+              type: 'medicine',
+              medicineId: medicine.medicine_id,
+              pharmacyMedicineId: medicine.id,
+              stockQuantity: 0,
+              alertType: 'out_of_stock',
+            },
+            sound: true,
+            badge: 1,
+            priority: 'high',
+          };
+          
+          pushNotificationService.sendNotificationToUser(userId, pushNotificationData)
+            .then(result => {
+              if (result.success) {
+                console.log(`✅ Out of stock push notification sent to user ${userId}`);
+              } else {
+                console.log(`⚠️ Failed to send out of stock push notification to user ${userId}:`, result.message);
+              }
+            })
+            .catch(error => {
+              console.error(`❌ Error sending out of stock push notification to user ${userId}:`, error);
+            });
+        }
+      }
+      
+      // Check for expiring soon (within 30 days)
+      if (medicine.expiry_date) {
+        const expiryDate = new Date(medicine.expiry_date);
+        const today = new Date();
+        const thirtyDaysFromNow = new Date(today);
+        thirtyDaysFromNow.setDate(today.getDate() + 30);
+        
+        // Check if medicine is expiring within 30 days
+        if (expiryDate <= thirtyDaysFromNow && expiryDate >= today) {
+          const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+          const expiryMessage = `${medicineName} is expiring in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}. Expiry date: ${expiryDate.toLocaleDateString()}`;
+          
+          // Send notifications to all facility users
+          for (const userId of userIdsToNotify) {
+            // Create database notification
+            await createNotification({
+              userId: userId,
+              type: 'medicine',
+              title: '⏰ Medicine Expiring Soon',
+              message: expiryMessage,
+              data: {
+                medicineId: medicine.medicine_id,
+                pharmacyMedicineId: medicine.id,
+                expiryDate: medicine.expiry_date,
+                daysUntilExpiry: daysUntilExpiry,
+                type: 'expiring_soon',
+              },
+            }).catch(err => console.error('❌ Error creating expiry notification:', err));
+            
+            // Send push notification
+            const pushNotificationData = {
+              title: '⏰ Medicine Expiring Soon',
+              body: expiryMessage,
+              data: {
+                type: 'medicine',
+                medicineId: medicine.medicine_id,
+                pharmacyMedicineId: medicine.id,
+                expiryDate: medicine.expiry_date,
+                daysUntilExpiry: daysUntilExpiry,
+                alertType: 'expiring_soon',
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high',
+            };
+            
+            pushNotificationService.sendNotificationToUser(userId, pushNotificationData)
+              .then(result => {
+                if (result.success) {
+                  console.log(`✅ Expiry push notification sent to user ${userId}`);
+                } else {
+                  console.log(`⚠️ Failed to send expiry push notification to user ${userId}:`, result.message);
+                }
+              })
+              .catch(error => {
+                console.error(`❌ Error sending expiry push notification to user ${userId}:`, error);
+              });
+          }
+        }
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: 'Medicine added to pharmacy successfully',
-      data: { id: insertResult.data.insertId }
+      data: { id: pharmacyMedicineId }
     });
 
   } catch (error) {
     console.error('❌ Add medicine to pharmacy error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Update pharmacy medicine (facility-admin/pharmacist only)
+router.put('/:id/medicines/:pharmacyMedicineId', authenticateToken, requireRole(['facility-admin', 'pharmacist', 'admin']), [
+  body('stock_quantity').optional().isInt({ min: 0 }).withMessage('Stock quantity must be a non-negative integer').toInt(),
+  body('price').optional().isFloat({ min: 0 }).withMessage('Price must be a positive number').toFloat(),
+  body('discount_price').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('Discount price must be a positive number').toFloat(),
+  body('expiry_date').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Expiry date must be a valid date (YYYY-MM-DD)').toDate(),
+  body('batch_number').optional({ nullable: true, checkFalsy: true }).isLength({ max: 100 }).trim(),
+  body('is_available').optional().isBoolean().withMessage('is_available must be a boolean').toBoolean(),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors.array()
+      });
+    }
+
+    const facilityId = parseInt(req.params.id, 10);
+    const pharmacyMedicineId = parseInt(req.params.pharmacyMedicineId, 10);
+    const userId = parseInt(req.user.id, 10);
+    const userRole = req.user.user_type;
+    const { stock_quantity, price, discount_price, expiry_date, batch_number, is_available } = req.body;
+
+    console.log('🔍 Update pharmacy medicine request:', {
+      facilityId,
+      pharmacyMedicineId,
+      userId,
+      userRole,
+      updateData: req.body
+    });
+
+    // Check if facility exists
+    const facilityQuery = 'SELECT id, facility_type FROM healthcare_facilities WHERE id = ?';
+    const facilityResult = await executeQuery(facilityQuery, [facilityId]);
+
+    if (!facilityResult.success || facilityResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Facility not found'
+      });
+    }
+
+    const facility = facilityResult.data[0];
+
+    // Check if user has permission to manage this facility
+    console.log('🔍 Checking permissions for user:', {
+      userId,
+      userRole,
+      facilityId
+    });
+
+    if (userRole === 'facility-admin' || userRole === 'admin') {
+      // Facility admins must own the facility
+      const ownershipQuery = 'SELECT id FROM healthcare_facilities WHERE id = ? AND user_id = ?';
+      const ownershipResult = await executeQuery(ownershipQuery, [facilityId, userId]);
+      
+      if (!ownershipResult.success || ownershipResult.data.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to manage this facility'
+        });
+      }
+    } else if (userRole === 'pharmacist' || userRole === 'doctor') {
+      // Pharmacists/doctors must be associated with the facility
+      console.log('🔍 Checking pharmacist/doctor association:', {
+        userId,
+        facilityId,
+        userRole
+      });
+      
+      const professionalQuery = `
+        SELECT id, facility_id, user_id 
+        FROM healthcare_professionals 
+        WHERE user_id = ? AND (facility_id = ? OR CAST(facility_id AS CHAR) = ?)
+      `;
+      const professionalResult = await executeQuery(professionalQuery, [userId, facilityId, facilityId.toString()]);
+      
+      console.log('🔍 Professional association check result:', {
+        success: professionalResult.success,
+        found: professionalResult.data?.length || 0,
+        data: professionalResult.data
+      });
+      
+      if (!professionalResult.success) {
+        console.error('❌ Error checking professional association:', professionalResult.error);
+        return res.status(500).json({
+          success: false,
+          message: 'Error checking facility association'
+        });
+      }
+      
+      if (professionalResult.data.length === 0) {
+        const anyProfessionalQuery = 'SELECT id, facility_id, user_id FROM healthcare_professionals WHERE user_id = ?';
+        const anyProfessionalResult = await executeQuery(anyProfessionalQuery, [userId]);
+        
+        console.log('🔍 Checking if user has any professional record:', {
+          found: anyProfessionalResult.data?.length || 0,
+          records: anyProfessionalResult.data
+        });
+        
+        const userFacilityId = anyProfessionalResult.data?.[0]?.facility_id;
+        return res.status(403).json({
+          success: false,
+          message: `You are not associated with facility ID ${facilityId}. ${userFacilityId ? `Your current facility_id is ${userFacilityId}.` : 'You do not have a facility assigned.'} Please contact your facility administrator.`
+        });
+      }
+      
+      console.log('✅ Pharmacist/doctor is associated with facility:', professionalResult.data[0]);
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to manage medicines'
+      });
+    }
+
+    // Check if pharmacy medicine exists and belongs to this facility
+    const pharmacyMedicineQuery = `
+      SELECT id, pharmacy_id, facility_id, medicine_id 
+      FROM pharmacy_medicines 
+      WHERE id = ? AND (pharmacy_id = ? OR facility_id = ?)
+    `;
+    const pharmacyMedicineResult = await executeQuery(pharmacyMedicineQuery, [
+      pharmacyMedicineId,
+      facilityId,
+      facilityId
+    ]);
+
+    if (!pharmacyMedicineResult.success || pharmacyMedicineResult.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pharmacy medicine not found or does not belong to this facility'
+      });
+    }
+
+    // Build update query dynamically based on provided fields
+    const updateFields = [];
+    const updateValues = [];
+
+    if (stock_quantity !== undefined) {
+      updateFields.push('stock_quantity = ?');
+      updateValues.push(stock_quantity);
+    }
+    if (price !== undefined) {
+      updateFields.push('price = ?');
+      updateValues.push(price);
+    }
+    if (discount_price !== undefined) {
+      updateFields.push('discount_price = ?');
+      updateValues.push(discount_price);
+    }
+    if (expiry_date !== undefined) {
+      updateFields.push('expiry_date = ?');
+      updateValues.push(expiry_date);
+    }
+    if (batch_number !== undefined) {
+      updateFields.push('batch_number = ?');
+      updateValues.push(batch_number);
+    }
+    if (is_available !== undefined) {
+      updateFields.push('is_available = ?');
+      updateValues.push(is_available);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update'
+      });
+    }
+
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(pharmacyMedicineId);
+
+    const updateQuery = `
+      UPDATE pharmacy_medicines 
+      SET ${updateFields.join(', ')}
+      WHERE id = ?
+    `;
+
+    console.log('🔍 Update query:', updateQuery);
+    console.log('🔍 Update values:', updateValues);
+
+    const updateResult = await executeQuery(updateQuery, updateValues);
+
+    if (!updateResult.success) {
+      console.error('❌ Update failed:', updateResult.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update pharmacy medicine',
+        error: updateResult.error
+      });
+    }
+
+    console.log('✅ Pharmacy medicine updated successfully');
+
+    // Check for low stock and expiring medicines and send notifications
+    try {
+      // Get updated medicine details
+      const updatedMedicineQuery = `
+        SELECT 
+          pm.id, pm.stock_quantity, pm.expiry_date, pm.medicine_id,
+          m.name, m.generic_name
+        FROM pharmacy_medicines pm
+        JOIN medicines m ON pm.medicine_id = m.id
+        WHERE pm.id = ?
+      `;
+      const updatedMedicineResult = await executeQuery(updatedMedicineQuery, [pharmacyMedicineId]);
+      
+      console.log('🔔 Notification check - Medicine query result:', {
+        success: updatedMedicineResult.success,
+        hasData: updatedMedicineResult.data?.length > 0,
+        medicineId: pharmacyMedicineId
+      });
+      
+      if (updatedMedicineResult.success && updatedMedicineResult.data.length > 0) {
+        const medicine = updatedMedicineResult.data[0];
+        // Ensure stock_quantity is a number
+        const stockQuantity = parseInt(medicine.stock_quantity, 10) || 0;
+        const medicineName = medicine.name || medicine.generic_name || 'Medicine';
+        
+        console.log('🔔 Notification check - Medicine details:', {
+          name: medicineName,
+          stockQuantity: stockQuantity,
+          stockQuantityType: typeof stockQuantity,
+          expiryDate: medicine.expiry_date
+        });
+        
+        // Get facility owner and all pharmacists/doctors associated with the facility
+        const facilityUsersQuery = `
+          SELECT DISTINCT u.id, u.user_type
+          FROM users u
+          LEFT JOIN healthcare_facilities hf ON hf.user_id = u.id
+          LEFT JOIN healthcare_professionals hp ON hp.user_id = u.id
+          WHERE (hf.id = ? OR hp.facility_id = ?)
+        `;
+        const facilityUsersResult = await executeQuery(facilityUsersQuery, [facilityId, facilityId]);
+        
+        console.log('🔔 Notification check - Facility users query result:', {
+          success: facilityUsersResult.success,
+          userCount: facilityUsersResult.data?.length || 0,
+          facilityId: facilityId
+        });
+        
+        const userIdsToNotify = [];
+        const currentUserId = parseInt(req.user.id, 10); // Exclude the user who made the change
+        if (facilityUsersResult.success && facilityUsersResult.data) {
+          facilityUsersResult.data.forEach(user => {
+            if (user.id && !userIdsToNotify.includes(user.id) && user.id !== currentUserId) {
+              userIdsToNotify.push(user.id);
+            }
+          });
+        }
+        
+        console.log('🔔 Notification check - Users to notify (excluding current user):', userIdsToNotify);
+        console.log('🔔 Notification check - Current user (excluded):', currentUserId);
+        
+        if (userIdsToNotify.length === 0) {
+          console.warn('⚠️ No users found to notify for facility:', facilityId);
+        }
+        
+        // Check for out of stock (== 0) - Check this FIRST before low stock
+        if (stockQuantity === 0) {
+          console.log('🔔 Out of stock detected! Sending notifications...');
+          const outOfStockMessage = `${medicineName} is out of stock. Please restock immediately.`;
+          
+          // Send notifications to all facility users
+          for (const userId of userIdsToNotify) {
+            console.log(`🔔 Sending out of stock notification to user ${userId}`);
+            
+            // Create database notification
+            const notificationResult = await createNotification({
+              userId: userId,
+              type: 'medicine',
+              title: '🚨 Out of Stock Alert',
+              message: outOfStockMessage,
+              data: {
+                medicineId: medicine.medicine_id,
+                pharmacyMedicineId: medicine.id,
+                stockQuantity: 0,
+                type: 'out_of_stock',
+              },
+            });
+            
+            if (notificationResult.success) {
+              console.log(`✅ Out of stock database notification created for user ${userId}`);
+            } else {
+              console.error(`❌ Failed to create out of stock database notification for user ${userId}:`, notificationResult.message);
+            }
+            
+            // Send push notification
+            const pushNotificationData = {
+              title: '🚨 Out of Stock Alert',
+              body: outOfStockMessage,
+              data: {
+                type: 'medicine',
+                medicineId: medicine.medicine_id,
+                pharmacyMedicineId: medicine.id,
+                stockQuantity: 0,
+                alertType: 'out_of_stock',
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high',
+            };
+            
+            pushNotificationService.sendNotificationToUser(userId, pushNotificationData)
+              .then(result => {
+                if (result.success) {
+                  console.log(`✅ Out of stock push notification sent to user ${userId}`);
+                } else {
+                  console.log(`⚠️ Failed to send out of stock push notification to user ${userId}:`, result.message);
+                }
+              })
+              .catch(error => {
+                console.error(`❌ Error sending out of stock push notification to user ${userId}:`, error);
+              });
+          }
+        }
+        
+        // Check for low stock (<= 10 but > 0)
+        if (stockQuantity > 0 && stockQuantity <= 10) {
+          console.log('🔔 Low stock detected! Sending notifications...');
+          const lowStockMessage = `${medicineName} is running low on stock. Current quantity: ${stockQuantity}`;
+          
+          // Send notifications to all facility users
+          for (const userId of userIdsToNotify) {
+            console.log(`🔔 Sending low stock notification to user ${userId}`);
+            
+            // Create database notification
+            const notificationResult = await createNotification({
+              userId: userId,
+              type: 'medicine',
+              title: '⚠️ Low Stock Alert',
+              message: lowStockMessage,
+              data: {
+                medicineId: medicine.medicine_id,
+                pharmacyMedicineId: medicine.id,
+                stockQuantity: stockQuantity,
+                type: 'low_stock',
+              },
+            });
+            
+            if (notificationResult.success) {
+              console.log(`✅ Low stock database notification created for user ${userId}`);
+            } else {
+              console.error(`❌ Failed to create low stock database notification for user ${userId}:`, notificationResult.message);
+            }
+            
+            // Send push notification
+            const pushNotificationData = {
+              title: '⚠️ Low Stock Alert',
+              body: lowStockMessage,
+              data: {
+                type: 'medicine',
+                medicineId: medicine.medicine_id,
+                pharmacyMedicineId: medicine.id,
+                stockQuantity: stockQuantity,
+                alertType: 'low_stock',
+              },
+              sound: true,
+              badge: 1,
+              priority: 'high',
+            };
+            
+            pushNotificationService.sendNotificationToUser(userId, pushNotificationData)
+              .then(result => {
+                if (result.success) {
+                  console.log(`✅ Low stock push notification sent to user ${userId}`);
+                } else {
+                  console.log(`⚠️ Failed to send low stock push notification to user ${userId}:`, result.message);
+                }
+              })
+              .catch(error => {
+                console.error(`❌ Error sending low stock push notification to user ${userId}:`, error);
+              });
+          }
+        }
+        
+        // Check for expiring soon (within 30 days)
+        if (medicine.expiry_date) {
+          const expiryDate = new Date(medicine.expiry_date);
+          const today = new Date();
+          const thirtyDaysFromNow = new Date(today);
+          thirtyDaysFromNow.setDate(today.getDate() + 30);
+          
+          // Check if medicine is expiring within 30 days
+          if (expiryDate <= thirtyDaysFromNow && expiryDate >= today) {
+            console.log('🔔 Expiring soon detected! Sending notifications...');
+            const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+            const expiryMessage = `${medicineName} is expiring in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}. Expiry date: ${expiryDate.toLocaleDateString()}`;
+            
+            // Send notifications to all facility users
+            for (const userId of userIdsToNotify) {
+              console.log(`🔔 Sending expiry notification to user ${userId}`);
+              
+              // Create database notification
+              const notificationResult = await createNotification({
+                userId: userId,
+                type: 'medicine',
+                title: '⏰ Medicine Expiring Soon',
+                message: expiryMessage,
+                data: {
+                  medicineId: medicine.medicine_id,
+                  pharmacyMedicineId: medicine.id,
+                  expiryDate: medicine.expiry_date,
+                  daysUntilExpiry: daysUntilExpiry,
+                  type: 'expiring_soon',
+                },
+              });
+              
+              if (notificationResult.success) {
+                console.log(`✅ Expiry database notification created for user ${userId}`);
+              } else {
+                console.error(`❌ Failed to create expiry database notification for user ${userId}:`, notificationResult.message);
+              }
+              
+              // Send push notification
+              const pushNotificationData = {
+                title: '⏰ Medicine Expiring Soon',
+                body: expiryMessage,
+                data: {
+                  type: 'medicine',
+                  medicineId: medicine.medicine_id,
+                  pharmacyMedicineId: medicine.id,
+                  expiryDate: medicine.expiry_date,
+                  daysUntilExpiry: daysUntilExpiry,
+                  alertType: 'expiring_soon',
+                },
+                sound: true,
+                badge: 1,
+                priority: 'high',
+              };
+              
+              pushNotificationService.sendNotificationToUser(userId, pushNotificationData)
+                .then(result => {
+                  if (result.success) {
+                    console.log(`✅ Expiry push notification sent to user ${userId}`);
+                  } else {
+                    console.log(`⚠️ Failed to send expiry push notification to user ${userId}:`, result.message);
+                  }
+                })
+                .catch(error => {
+                  console.error(`❌ Error sending expiry push notification to user ${userId}:`, error);
+                });
+            }
+          }
+        }
+      } else {
+        console.warn('⚠️ Could not fetch medicine details for notification check');
+      }
+    } catch (notificationError) {
+      console.error('❌ Error checking for notifications:', notificationError);
+      // Don't fail the request if notification check fails
+    }
+
+    res.json({
+      success: true,
+      message: 'Pharmacy medicine updated successfully',
+      data: { id: pharmacyMedicineId }
+    });
+
+  } catch (error) {
+    console.error('❌ Update pharmacy medicine error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'

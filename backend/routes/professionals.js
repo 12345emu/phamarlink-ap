@@ -1218,6 +1218,77 @@ router.post('/register-doctor', upload.single('profileImage'), [
   }
 });
 
+// Get current user's professional record (for pharmacists/doctors)
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userType = req.user.user_type;
+    
+    // Only pharmacists and doctors can access this endpoint
+    if (userType !== 'pharmacist' && userType !== 'doctor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only pharmacists and doctors can access this endpoint.'
+      });
+    }
+    
+    const query = `
+      SELECT 
+        p.id, p.user_id, p.first_name, p.last_name, p.email, p.phone, p.specialty, p.qualification,
+        p.experience_years, p.rating, p.total_reviews, p.is_available, p.is_verified,
+        p.profile_image, p.bio, p.created_at, p.license_number, p.address, p.city,
+        p.facility_id, f.name as facility_name, f.facility_type
+      FROM healthcare_professionals p
+      LEFT JOIN healthcare_facilities f ON p.facility_id = f.id
+      WHERE p.user_id = ?
+    `;
+    
+    const professionalResult = await executeQuery(query, [userId]);
+    
+    if (!professionalResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database query failed',
+        error: professionalResult.error
+      });
+    }
+    
+    if (!professionalResult.data || professionalResult.data.length === 0) {
+      console.log('⚠️ No professional record found for user_id:', userId);
+      return res.status(404).json({
+        success: false,
+        message: 'Professional record not found for this user. Please register as a pharmacist or doctor first.',
+        error: 'Professional Not Found'
+      });
+    }
+    
+    const professional = professionalResult.data[0];
+    
+    if (!professional.facility_id) {
+      console.log('⚠️ Professional record found but no facility_id for user_id:', userId);
+      console.log('⚠️ Professional data:', professional);
+    }
+    
+    console.log('✅ Professional record found:', {
+      id: professional.id,
+      user_id: professional.user_id,
+      facility_id: professional.facility_id,
+      facility_name: professional.facility_name
+    });
+    
+    res.json({
+      success: true,
+      data: professional
+    });
+  } catch (error) {
+    console.error('Error fetching current user professional:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // Get professional by ID
 router.get('/:id', async (req, res) => {
   try {

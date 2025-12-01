@@ -535,6 +535,106 @@ class AuthService {
     const phoneRegex = /^\+?[\d\s\-\(\)]{10,}$/;
     return phoneRegex.test(phone);
   }
+
+  // Forgot password - request OTP
+  async forgotPassword(email: string): Promise<ApiResponse<{ message: string }>> {
+    try {
+      console.log('🔍 AuthService - Requesting password reset OTP for:', email);
+      console.log('🔍 AuthService - API Base URL:', API_CONFIG.BASE_URL);
+      console.log('🔍 AuthService - Full URL will be:', `${API_CONFIG.BASE_URL}/auth/forgot-password`);
+      
+      // Use longer timeout for email sending (30 seconds)
+      const response = await apiClient.post<{ message: string }>(
+        '/auth/forgot-password', 
+        { email },
+        { timeout: 30000 } // 30 seconds timeout
+      );
+      
+      console.log('🔍 AuthService - Forgot password response:', {
+        success: response.success,
+        message: response.message,
+        hasData: !!response.data
+      });
+      
+      return response;
+    } catch (error: any) {
+      console.error('❌ AuthService - Forgot password error:', error);
+      console.error('❌ AuthService - Error type:', error?.constructor?.name);
+      console.error('❌ AuthService - Error message:', error?.message);
+      console.error('❌ AuthService - Error code:', error?.code);
+      console.error('❌ AuthService - Error response:', error?.response?.data);
+      console.error('❌ AuthService - Error request:', error?.request ? 'Request made but no response' : 'No request made');
+      
+      // Check for network errors
+      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+        return {
+          success: false,
+          message: 'Request timeout. The server is taking too long to respond. Please try again.',
+          error: 'Timeout Error',
+        };
+      }
+      
+      if (!error?.response && error?.request) {
+        return {
+          success: false,
+          message: `Network error. Unable to connect to server at ${API_CONFIG.BASE_URL}. Please check:\n\n• Backend server is running\n• Your internet connection\n• Server IP address is correct`,
+          error: 'Network Error',
+        };
+      }
+      
+      return {
+        success: false,
+        message: error?.response?.data?.message || error?.message || 'Failed to send OTP. Please try again.',
+        error: 'Forgot Password Error',
+      };
+    }
+  }
+
+  // Verify OTP
+  async verifyOTP(email: string, otp: string): Promise<ApiResponse<{ verificationToken: string }>> {
+    try {
+      console.log('🔍 AuthService - Verifying OTP for:', email);
+      const response = await apiClient.post<{ verificationToken: string }>('/auth/verify-otp', {
+        email,
+        otp,
+      });
+      console.log('🔍 AuthService - Verify OTP response:', {
+        success: response.success,
+        hasToken: !!response.data?.verificationToken
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ AuthService - Verify OTP error:', error);
+      return {
+        success: false,
+        message: error?.response?.data?.message || 'Invalid or expired OTP. Please try again.',
+        error: 'Verify OTP Error',
+      };
+    }
+  }
+
+  // Reset password - set new password with verification token
+  async resetPassword(verificationToken: string, newPassword: string): Promise<ApiResponse<{ message: string }>> {
+    try {
+      console.log('🔍 AuthService - Resetting password with verification token');
+      const response = await apiClient.post<{ message: string }>('/auth/reset-password', {
+        verificationToken,
+        newPassword,
+      });
+      console.log('🔍 AuthService - Reset password response:', {
+        success: response.success,
+        message: response.message
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ AuthService - Reset password error:', error);
+      return {
+        success: false,
+        message: error?.response?.data?.message || 'Failed to reset password. Please try again.',
+        error: 'Reset Password Error',
+      };
+    }
+  }
 }
 
 // Export singleton instance

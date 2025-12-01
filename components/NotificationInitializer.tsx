@@ -24,23 +24,17 @@ export default function NotificationInitializer({
   const initializeNotifications = async () => {
     try {
       setIsInitializing(true);
-      console.log('🔔 NotificationInitializer - Starting initialization...');
+      console.log('🔔 NotificationInitializer - Starting initialization...', { userId, userType });
 
-      // Check if already initialized
-      const storedToken = await AsyncStorage.getItem('pushToken');
-      if (storedToken && isInitialized) {
-        console.log('🔔 NotificationInitializer - Already initialized');
-        onInitialized?.(true);
-        return;
-      }
-
-      // Initialize notification service
+      // Always initialize notification service (even if token exists, it might have changed)
       const initialized = await notificationService.initialize();
       if (!initialized) {
-        console.log('❌ NotificationInitializer - Failed to initialize');
+        console.log('❌ NotificationInitializer - Failed to initialize notification service');
         onInitialized?.(false);
         return;
       }
+
+      console.log('✅ NotificationInitializer - Notification service initialized');
 
       // Register device locally
       const deviceRegistered = await notificationService.registerDevice(userId, userType);
@@ -50,21 +44,29 @@ export default function NotificationInitializer({
         return;
       }
 
-      // Register with backend
+      console.log('✅ NotificationInitializer - Device registered locally');
+
+      // Always register with backend (even if we have a stored token, we need to ensure it's registered)
+      console.log('📤 NotificationInitializer - Registering device with backend...');
       const backendRegistered = await notificationService.registerWithBackend(userId, userType);
-      if (!backendRegistered) {
+      if (backendRegistered) {
+        console.log('✅ NotificationInitializer - Device registered with backend successfully');
+      } else {
         console.log('⚠️ NotificationInitializer - Failed to register with backend, but continuing...');
+        console.log('⚠️ NotificationInitializer - Push notifications may not work until device is registered');
       }
 
       // Set up notification listeners
       notificationService.setupNotificationListeners();
+      console.log('✅ NotificationInitializer - Notification listeners set up');
 
       setIsInitialized(true);
-      console.log('✅ NotificationInitializer - Initialization completed');
+      console.log('✅ NotificationInitializer - Initialization completed successfully');
       onInitialized?.(true);
 
     } catch (error) {
       console.error('❌ NotificationInitializer - Initialization error:', error);
+      console.error('❌ NotificationInitializer - Error stack:', error.stack);
       onInitialized?.(false);
     } finally {
       setIsInitializing(false);
@@ -96,23 +98,9 @@ export default function NotificationInitializer({
     }
   };
 
-  if (isInitializing) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Setting up notifications...</Text>
-      </View>
-    );
-  }
-
-  if (!isInitialized) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Notifications not initialized</Text>
-      </View>
-    );
-  }
-
-  return null; // Don't render anything when initialized
+  // Don't render anything - initialization happens in background
+  // This prevents blocking the UI if initialization fails
+  return null;
 }
 
 const styles = StyleSheet.create({

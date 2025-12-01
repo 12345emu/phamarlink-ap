@@ -38,7 +38,15 @@ export interface NotificationsResponse {
 /**
  * Convert backend notification type to frontend type
  */
-function mapNotificationType(backendType: string): NotificationItem['type'] {
+function mapNotificationType(backendType: string, data?: any): NotificationItem['type'] {
+  // Check if reminder is actually a medicine expiration notification
+  if (backendType === 'reminder' && data) {
+    const dataObj = typeof data === 'string' ? JSON.parse(data) : data;
+    if (dataObj?.medicineId || dataObj?.expiryDate || dataObj?.stockLow || dataObj?.type === 'medicine') {
+      return 'medicine';
+    }
+  }
+  
   switch (backendType) {
     case 'order':
       return 'order';
@@ -50,6 +58,12 @@ function mapNotificationType(backendType: string): NotificationItem['type'] {
       return 'system';
     case 'reminder':
       return 'reminder';
+    case 'medicine':
+      return 'medicine';
+    case 'staff':
+      return 'staff';
+    case 'emergency':
+      return 'emergency';
     default:
       return 'system';
   }
@@ -96,14 +110,15 @@ function formatTimeAgo(dateString: string): string {
  * Convert backend notification to frontend format
  */
 function backendToFrontend(backend: BackendNotification): NotificationItem {
+  const parsedData = backend.data ? (typeof backend.data === 'string' ? JSON.parse(backend.data) : backend.data) : undefined;
   return {
     id: backend.id.toString(),
-    type: mapNotificationType(backend.type),
+    type: mapNotificationType(backend.type, parsedData),
     title: backend.title,
     message: backend.message,
     timestamp: formatTimeAgo(backend.created_at),
     isRead: backend.is_read === 1,
-    data: backend.data ? (typeof backend.data === 'string' ? JSON.parse(backend.data) : backend.data) : undefined,
+    data: parsedData,
   };
 }
 
@@ -125,19 +140,37 @@ class NotificationsApiService {
       if (params?.read !== undefined) queryParams.append('read', params.read.toString());
 
       const url = `${API_ENDPOINTS.NOTIFICATIONS.LIST}${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+      console.log('🔔 Fetching notifications from:', url);
       const response = await apiClient.get<NotificationsResponse>(url);
+
+      console.log('🔔 Raw API response:', {
+        success: response.success,
+        data: response.data,
+        message: response.message,
+        error: response.error,
+      });
 
       // apiClient now wraps responses in { success, data } format
       // Backend returns { notifications: [...], pagination: {...} }
       // So response.data contains the backend response
       if (response.success) {
         const backendData = response.data;
+        console.log('🔔 Backend data structure:', {
+          hasNotifications: !!backendData?.notifications,
+          isArray: Array.isArray(backendData),
+          notificationsLength: backendData?.notifications?.length || 0,
+          backendDataKeys: backendData ? Object.keys(backendData) : [],
+        });
+        
         const notificationsArray = Array.isArray(backendData?.notifications)
           ? backendData.notifications
           : Array.isArray(backendData)
             ? backendData
             : [];
+        
+        console.log('🔔 Notifications array length:', notificationsArray.length);
         const notifications = notificationsArray.map(backendToFrontend);
+        console.log('🔔 Mapped notifications:', notifications.length);
 
         return {
           success: true,

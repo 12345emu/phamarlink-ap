@@ -273,10 +273,19 @@ class ApiClient {
         error: data?.error || 'API Error',
       };
     } else if (error.request) {
-      // Network error
+      // Network error - no response received
+      console.error('❌ API Client - Network error:', {
+        message: error.message,
+        code: error.code,
+        config: {
+          url: error.config?.url,
+          method: error.config?.method,
+          baseURL: error.config?.baseURL,
+        }
+      });
       return {
         success: false,
-        message: ERROR_MESSAGES.NETWORK_ERROR,
+        message: `Network error. Please check:\n\n• Your internet connection\n• The backend server is running at ${API_CONFIG.BASE_URL}\n• Your device can reach the server`,
         error: 'Network Error',
       };
     } else {
@@ -315,7 +324,12 @@ class ApiClient {
   }
 
   async post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    return this.request<T>({ ...(config || {}), method: 'POST', url, data });
+    // Merge timeout from config if provided, otherwise use default
+    const mergedConfig = {
+      ...(config || {}),
+      timeout: config?.timeout || API_CONFIG.TIMEOUT,
+    };
+    return this.request<T>({ ...mergedConfig, method: 'POST', url, data });
   }
 
   async put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {

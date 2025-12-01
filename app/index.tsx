@@ -43,8 +43,8 @@ export default function Index() {
         console.log('Index.tsx - Redirecting patient to patient tabs');
         return <Redirect href="/(tabs)" />;
       case 'pharmacist':
-        console.log('Index.tsx - Redirecting pharmacist to patient tabs (temporary)');
-        return <Redirect href="/(tabs)" />;
+        console.log('Index.tsx - Redirecting pharmacist to pharmacist tabs');
+        return <Redirect href={"/(pharmacist-tabs)" as any} />;
       case 'admin':
         console.log('Index.tsx - Redirecting admin to patient tabs (temporary)');
         return <Redirect href="/(tabs)" />;
